@@ -5,5 +5,10 @@
   "main": "",
   "repository": "https://github.com/ramank775/chat-server.git",
   "author": "Raman <raman.jay14@gmail.com>",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "commander": "^5.1.0",
+    "node-rdkafka": "^2.8.1",
+    "ws": "^7.3.0"
+  }
 }
