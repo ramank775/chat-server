@@ -8,7 +8,9 @@
   "license": "MIT",
   "dependencies": {
     "commander": "^5.1.0",
+    "moment": "^2.26.0",
     "node-rdkafka": "^2.8.1",
+    "winston": "^3.2.1",
     "ws": "^7.3.0"
   }
 }

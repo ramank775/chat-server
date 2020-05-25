@@ -1,4 +1,4 @@
-const kakfa = require('node-rdkafka'),
+const
     commander = require('commander'),
     { Worker } = require('worker_threads')
 /**
@@ -23,16 +23,7 @@ function addKafkaSSLOptions(cmd) {
         .option('--kafka-ssl-key-password <password>', 'Private key passphrase, if any (for use with --kafka-ssl-key)');
 }
 
-function parseOptions(options) {
-    let cmd = new commander.Command();
-    cmd = addStandardKafkaOptions(cmd);
-    cmd = addKafkaSSLOptions(cmd)
-    cmd.usage('help').on('help', () => {
-        cmd.help();
-        process.exit(0);
-    });
-    return cmd.parse(args).opts();
-}
+
 
 /**
  * Prepare SSL options for kafka client.
@@ -101,9 +92,20 @@ function createKafkaConsumer(topics, kafkaOptions) {
     return consumerWorker;
 }
 
+async function initEventProducer(context) {
+    context.publisher = kafka.createKakfaProducer(options)
+    return context;
+}
+
+async function initEventListener(context) {
+    const { listenerEvents } = context;
+    context.listener = kafka.createKafkaConsumer(listenerEvents, options)
+    return context;
+}
+
 module.exports = {
     addStandardKafkaOptions,
     addKafkaSSLOptions,
-    createKafkaConsumer,
-    createKakfaProducer
+    initEventProducer,
+    initEventListener
 }
