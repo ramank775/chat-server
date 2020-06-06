@@ -21,20 +21,23 @@ isDebugEnabled = function () {
 };
 
 winston.init = function (options) {
+    const formatter = winston.format((info) => {
+        let result = Object.assign({}, info);
+        result.pid = process.pid;
+        result.appName = options.appName;
+        result.timeMillis = Date.now();
 
+        return result;
+    })
     winston.configure({
         exitOnError: options.exitOnError || false,
-        rewriters: [(level, msg, meta, _) => {
-            let result = Object.assign({}, meta);
-            result.pid = process.pid;
-            result.appName = options.appName;
-            result.timeMillis = Date.now();
-            
-            return result;
-        }],
+        format: winston.format.combine(
+            formatter(),
+            winston.format.json()
+        ),
         transports: [
             new winston.transports.Console({
-                json: useJson,
+                json: true,
                 stringify: (obj) => JSON.stringify(obj),
                 timestamp: () => moment().format('YYYY-MM-DD HH:mm:ss.SSS'),
                 handleExceptions: true,
@@ -42,6 +45,7 @@ winston.init = function (options) {
             })
         ]
     });
+
     const LOG_LEVELS = ['debug', 'info', 'warn', 'error', 'fatal', 'none'];
     const level = (options.logLevel || '').trim().toLowerCase();
     const mappedLevel = LOG_LEVELS.find(l => l === level);

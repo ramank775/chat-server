@@ -5,7 +5,8 @@ const
         addStandardHttpOptions,
         initDefaultOptions,
         initHttpServer,
-        initDefaultResources } = require('../../libs/service-base'),
+        initDefaultResources,
+        resolveEnvVariables } = require('../../libs/service-base'),
     kafka = require('../../libs/kafka-utils'),
     asMain = (require.main === module)
 
@@ -51,13 +52,13 @@ function parseOptions(argv) {
     cmd = addStandardHttpOptions(cmd);
     cmd = kafka.addStandardKafkaOptions(cmd);
     cmd = kafka.addKafkaSSLOptions(cmd);
-    cmd.option('--gateway-name', 'Used as gateway server idenitifer for the user connected to this server, as well as the kafka topic for send message')
-        .option('--kafka-user-connected-topic', 'Used by producer to produce new message when a user connected to server')
-        .option('--kafka-user-disconnected-topic', 'Used by producer to produce new message when a user disconnected from the server')
-        .option('--kafka-message-sent-topic', 'Used by producer to produce new message for successfuly sent message')
-        .option('--kafka-error-message-send-topic', 'Used by producer to produce new message when there is error while sending a message')
-        .option('--kafka-new-message-topic', 'Used by producer to produce new message for each new incoming message');
-    return cmd.parse(argv).opts();
+    cmd.option('--gateway-name <app-name>', 'Used as gateway server idenitifer for the user connected to this server, as well as the kafka topic for send message')
+        .option('--kafka-user-connected-topic <new-user-topic>', 'Used by producer to produce new message when a user connected to server')
+        .option('--kafka-user-disconnected-topic <user-disconnected-topic>', 'Used by producer to produce new message when a user disconnected from the server')
+        .option('--kafka-message-sent-topic <message-sent-topic>', 'Used by producer to produce new message for successfuly sent message')
+        .option('--kafka-error-message-send-topic <message-sent-error-topic>', 'Used by producer to produce new message when there is error while sending a message')
+        .option('--kafka-new-message-topic <new-message-topic>', 'Used by producer to produce new message for each new incoming message');
+    return resolveEnvVariables(cmd.parse(argv).opts());
 }
 
 class Gateway extends ServiceBase {

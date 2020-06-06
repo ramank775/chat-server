@@ -3,20 +3,21 @@ const
     {
         ServiceBase,
         initDefaultOptions,
-        initDefaultResources
+        initDefaultResources,
+        resolveEnvVariables
     } = require('../../libs/service-base'),
     asMain = (require.main === module);
 
 
 async function initMemCache(context) {
     const memCahce = {};
-    memCahce.prototype.get = function (key) {
+    memCahce.get = function (key) {
         return memCahce[key]
     }
-    memCahce.prototype.set = function (key, value) {
+    memCahce.set = function (key, value) {
         memCahce[key] = value
     }
-    memCahce.prototype.remove = function (key) {
+    memCahce.remove = function (key) {
         delete memCahce[key]
     }
 
@@ -46,9 +47,9 @@ function parseOptions(argv) {
     let cmd = initDefaultOptions();
     cmd = kafka.addStandardKafkaOptions(cmd);
     cmd = kafka.addKafkaSSLOptions(cmd)
-        .option('--kafka-user-connected-topic', 'Used by consumer to consume new message when a user connected to server')
-        .option('--kafka-user-disconnected-topic', 'Used by consumer to consume new message when a user disconnected from the server')
-    return cmd.parse(argv).opts();
+        .option('--kafka-user-connected-topic <new-user-topic>', 'Used by consumer to consume new message when a user connected to server')
+        .option('--kafka-user-disconnected-topic <user-disconnected-topic>', 'Used by consumer to consume new message when a user disconnected from the server')
+    return resolveEnvVariables(cmd.parse(argv).opts());
 }
 
 class SessionMS extends ServiceBase {

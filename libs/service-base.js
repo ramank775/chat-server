@@ -7,19 +7,20 @@ async function initDefaultResources(options) {
     let ctx = {
         options: options || {}
     }
-    initLogger(ctx);
-    return context;
+    ctx = initLogger(ctx);
+    return ctx;
 }
 
 async function initLogger(context) {
     context.log = logger.init(context.options)
+    return context;
 }
 
 function initDefaultOptions() {
-    const cmd = new commander.Command()
-    cmd.option('--app-name', 'application name')
-        .option('--log-level', 'logging level debug/info/error', 'info')
-        .option('--debug', 'enable debug mode (set log level to debug', false);
+    const cmd = new commander.Command('my name').allowUnknownOption()
+    cmd.option('--app-name <app-name>', 'application name')
+        .option('--log-level <log-level>', 'logging level debug/info/error', 'info')
+        .option('--debug', 'enable debug mode (set log level to debug)', false);
     cmd.usage('help').on('help', () => {
         cmd.help();
         process.exit(0);
@@ -28,9 +29,9 @@ function initDefaultOptions() {
 }
 
 function addStandardHttpOptions(cmd) {
-    cmd.option('--port', 'Http port (default 8000)', 8000)
-        .option('--ssl-cert', 'SSL public certificate')
-        .option('--ssl-key', 'SSL private key');
+    cmd.option('--port <port>', 'Http port (default 8000)', parseInt, 8000)
+        .option('--ssl-cert <ssl-cert>', 'SSL public certificate')
+        .option('--ssl-key <ssl-key>', 'SSL private key');
     return cmd;
 }
 
@@ -69,6 +70,20 @@ async function initHttpServer(context) {
 }
 
 
+function resolveEnvVariables(options) {
+    options = { ...options }
+    for (const key in options) {
+        if (options.hasOwnProperty(key)) {
+            const element = options[key];
+            if (typeof element === "string") {
+                options[key] = element.replace(/\${([A-Z0-9_]*)}/ig, (_, n) => process.env[n]);
+            }
+        }
+    }
+    return options
+}
+
+
 class ServiceBase {
     constructor(context) {
         this.context = context;
@@ -90,14 +105,14 @@ class ServiceBase {
 
     handleError() {
         process.on('unhandledRejection', (reason, promise) => {
-            log.error(`unhandledRejection: Reason:`, reason, {});
+            this.log.error(`unhandledRejection: Reason:`, reason, {});
             if (reason.stack) {
-                log.error(`unhandledRejection: Stack:`, reason.stack, {});
+                this.log.error(`unhandledRejection: Stack:`, reason.stack, {});
             }
         });
 
         process.on('uncaughtException', err => {
-            log.error('[2] uncaughtException: ', err, {});
+            this.log.error('[2] uncaughtException: ', err, {});
         });
 
         process.on('SIGTERM', () => this._shutdown());
@@ -125,5 +140,6 @@ module.exports = {
     initDefaultResources,
     initHttpServer,
     initDefaultOptions,
-    addStandardHttpOptions
+    addStandardHttpOptions,
+    resolveEnvVariables
 }

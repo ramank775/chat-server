@@ -2,7 +2,8 @@ const kafka = require('../../libs/kafka-utils'),
     {
         ServiceBase,
         initDefaultOptions,
-        initDefaultResources
+        initDefaultResources,
+        resolveEnvVariables
     } = require('../../libs/service-base'),
     asMain = (require.main === module);
 
@@ -32,13 +33,13 @@ function parseOptions(argv) {
     let cmd = initDefaultOptions();
     cmd = kafka.addStandardKafkaOptions(cmd);
     cmd = kafka.addKafkaSSLOptions(cmd);
-    cmd.option('--kafka-error-message-send-topic', 'Used by consumer to consume new message when there is error while sending a message')
-        .option('--kafka-new-message-topic', 'Used by consumer to consume new message for each new incoming message')
-        .option('--kafka-message-sent-failed-topic', 'Used by producer to produce new message for message failed to sent')
-        .option('--kafka-persistence-message-topic', 'Used by producer to produce new message to saved into a persistence db')
-        .option('--message-max-retries', 'Max no of retries to deliver message (default value is 3)', (value) => parseInt(value), 3)
-        .option('--session-service-url', 'URL of session service')
-    return cmd.parse(argv).opts();
+    cmd.option('--kafka-error-message-send-topic <message-send-error>', 'Used by consumer to consume new message when there is error while sending a message')
+        .option('--kafka-new-message-topic <new-message-topic>', 'Used by consumer to consume new message for each new incoming message')
+        .option('--kafka-message-sent-failed-topic <message-sent-failed-topic>', 'Used by producer to produce new message for message failed to sent')
+        .option('--kafka-persistence-message-topic <persistence-message-topic>', 'Used by producer to produce new message to saved into a persistence db')
+        .option('--message-max-retries <message-max-retries>', 'Max no of retries to deliver message (default value is 3)', (value) => parseInt(value), 3)
+        .option('--session-service-url <session-service-url>', 'URL of session service')
+    return resolveEnvVariables(cmd.parse(argv).opts());
 }
 
 class MessageRouterMS extends ServiceBase {

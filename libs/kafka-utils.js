@@ -16,36 +16,35 @@ function addStandardKafkaOptions(cmd) {
         .option('--kafka-auto-commit-interval <auto-commit-interval>',
             'The frequency in milliseconds that the consumer offsets are committed (written) to offset storage.',
             c => parseInt(c), 5000)
-        .option('--kafka-heartbeat-interval', 'Group session keepalive heartbeat interval.',
+        .option('--kafka-heartbeat-interval <heartbeat-interval>', 'Group session keepalive heartbeat interval.',
             c => parseInt(c), 3000)
-        .option('--kafka-retry-backoff', 'The backoff time in milliseconds before retrying a protocol request.',
+        .option('--kafka-retry-backoff <retry-backoff>', 'The backoff time in milliseconds before retrying a protocol request.',
             c => parseInt(c), 100)
-        .option('--kafka-message-send-max-retries', 'How many times to retry sending a failing Message',
+        .option('--kafka-message-send-max-retries <message-send-max-retries>', 'How many times to retry sending a failing Message',
             c => parseInt(c), 2)
-        .option('--kafka-message-max-bytes', 'Maximum Kafka protocol request message size.',
+        .option('--kafka-message-max-bytes <message-max-bytes>', 'Maximum Kafka protocol request message size.',
             c => parseInt(c), 1000000)
-        .option('--kafka-fetch-min-bytes', 'Minimum number of bytes the broker responds with.',
+        .option('--kafka-fetch-min-bytes <fetch-min-bytes>', 'Minimum number of bytes the broker responds with.',
             c => parseInt(c), 1)
-        .option('--kafka-fetch-message-max-bytes',
+        .option('--kafka-fetch-message-max-bytes <fetch-message-max-bytes>',
             'Initial maximum number of bytes per topic+partition to request when fetching messages from the broker',
             c => parseInt(c), 1048576)
-        .option('--kafka-fetch-error-backoff',
+        .option('--kafka-fetch-error-backoff <fetch-error-backoff>',
             'How long to postpone the next fetch request for a topic+partition in case of a fetch error.',
             c => parseInt(c), 500)
-        .option('--kafka-queued-max-message-kbytes', 'Maximum number of kilobytes per topic+partition in the local consumer queue.',
+        .option('--kafka-queued-max-message-kbytes <queued-max-message-kbytes>', 'Maximum number of kilobytes per topic+partition in the local consumer queue.',
             c => parseInt(c), 1048576)
-        .option('--kafka-fetch-wait-max', 'Maximum time the broker may wait to fill the response with fetch.min.bytes.',
+        .option('--kafka-fetch-wait-max <fetch-wait-max>', 'Maximum time the broker may wait to fill the response with fetch.min.bytes.',
             c => parseInt(c), 100)
-        .option('--kakfa-queue-buffering-max',
+        .option('--kakfa-queue-buffering-max <queue-buffering-max>',
             'Delay in milliseconds to wait for messages in the producer queue to accumulate before constructing message batches (MessageSets) to transmit to brokers',
             c => parseFloat(c), 0.5)
-        .option('--kafka-queue-buffering-max-messages', 'Maximum number of messages allowed on the producer queue.',
+        .option('--kafka-queue-buffering-max-messages <queue-buffering-max-message>', 'Maximum number of messages allowed on the producer queue.',
             c => parseInt(c), 100000)
-        .option('--kafka-batch-num-messages', 'Maximum number of messages batched in one MessageSet. ',
+        .option('--kafka-batch-num-messages <batch-num-message>', 'Maximum number of messages batched in one MessageSet. ',
             c => parseInt(c), 10000)
-        .option('--kafka-scoket-timeout-ms', 'Default timeout for network requests.', c => parseInt(c), 60000)
-
-
+        .option('--kafka-socket-timeout-ms <kafka-socket-timeout>', 'Default timeout for network requests.', c => parseInt(c), 60000)
+    return cmd;
 }
 
 /**
@@ -58,10 +57,11 @@ function addKafkaSSLOptions(cmd) {
         .option('--kafka-ssl-certificate <path>', 'Path to client\'s public key (PEM) used for authentication')
         .option('--kafka-ssl-key <path>', 'Path to client\'s private key (PEM) used for authentication')
         .option('--kafka-ssl-key-password <password>', 'Private key passphrase, if any (for use with --kafka-ssl-key)');
+
 }
 
 function parseStandardKafkaOptions(options) {
-    const options = {
+    const kafkaOptions = {
         'bootstrap.servers': options.kafkaBrokerList,
         'client.id': options.kafkaClientId,
         'group.id': options.kafkaGroupId,
@@ -83,7 +83,7 @@ function parseStandardKafkaOptions(options) {
         'batch.num.messages': options.kafkaBatchNumMessages,
         'socket.timeout.ms': options.kafkaSocketTimeoutMs
     }
-    return options
+    return kafkaOptions
 }
 
 
@@ -120,7 +120,7 @@ function createKakfaProducer(kafkaOptions) {
             kafka_config: options
         }
     });
-    producerWorker.prototype.send = function (topic, message, key) {
+    producerWorker.send = function (topic, message, key) {
         this.postMessage({
             topic,
             message,
@@ -141,20 +141,21 @@ function createKafkaConsumer(topics, kafkaOptions) {
     consumerWorker.on('message', function (data) {
         this.onMessage(data.topic, JSON.parse(data.value))
     })
-    consumerWorker.prototype.onMessage = function () {
+    consumerWorker.onMessage = function () {
 
     }
     return consumerWorker;
 }
 
 async function initEventProducer(context) {
-    context.publisher = kafka.createKakfaProducer(options)
+    const {options} = context
+    context.publisher = createKakfaProducer(options)
     return context;
 }
 
 async function initEventListener(context) {
-    const { listenerEvents } = context;
-    context.listener = kafka.createKafkaConsumer(listenerEvents, options)
+    const { listenerEvents, options } = context;
+    context.listener = createKafkaConsumer(listenerEvents, options)
     return context;
 }
 

@@ -2,7 +2,8 @@ const kafka = require('../../libs/kafka-utils'),
     {
         ServiceBase,
         initDefaultOptions,
-        initDefaultResources
+        initDefaultResources,
+        resolveEnvVariables
     } = require('../../libs/service-base'),
     asMain = (require.main === module);
 
@@ -24,10 +25,10 @@ async function prepareEventListFromKafkaTopics(context) {
 async function initDatabase(context) {
     // TODO: add a real db
     const db = {}
-    db.prototype.save = function (message) {
+    db.save = function (message) {
         this[message.to] = this[message.to] || [message]
     }
-    db.prototype.getMessageByUser = function (user) {
+    db.getMessageByUser = function (user) {
         return this[user];
     }
     context.db = db;
@@ -55,7 +56,7 @@ function parseOptions(argv) {
     cmd.option('--kafka-user-connected-topic', 'Used by consumer to consume new message when a user connected to server')
         .option('--kafka-persistence-message-topic', 'Used by producer to produce new message to saved into a persistence db')
         .option('--kafka-new-message-topic', 'Used by producer to produce new message for saved incoming message');
-    return cmd.parse(argv).opts();
+    return resolveEnvVariables(cmd.parse(argv).opts());
 }
 
 class PersistenceMessageMS extends ServiceBase {
