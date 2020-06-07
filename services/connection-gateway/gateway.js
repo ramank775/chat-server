@@ -15,6 +15,7 @@ async function initWebsocket(context) {
 
     const wss = new webSocker.Server({ noServer: true });
     httpServer.on('upgrade', (request, socket, head) => {
+        console.log('upgrade request')
         wss.handleUpgrade(request, socket, head, (ws) => {
             wss.emit('connection', ws, request);
         });
@@ -104,22 +105,23 @@ class Gateway extends ServiceBase {
         const { wss, listener } = this.context;
         const { userEvents, messageEvents, userSockerMapping } = this;
         wss.on('connection', (ws, request) => {
-            const { user } = this.getUserInfoFromRequest(request);
+            const user = this.getUserInfoFromRequest(request);
             userSockerMapping[user] = ws;
             ws.user = user;
             userEvents.onConnect(user);
             ws.on('message', function (msg) {
-                msg.to = this.user;
+                const message = JSON.parse(msg);
+                message.from = this.user;
                 messageEvents.onNewMessage(message);
             });
             ws.on('close', function (code, reason) {
                 userEvents.onDisconnect(this.user);
-                delete this.userSockerMapping[this.user];
+                delete userSockerMapping[this.user];
             })
         });
         listener.onMessage = (topic, message) => {
-            const msg = new Message(message);
-            const ws = userSockerMapping[msg.to];
+            const msg = message;
+            const ws = userSockerMapping[msg.from];
             if (ws) {
                 ws.send(msg);
                 Message.onMessageSent(message);
@@ -134,7 +136,20 @@ class Gateway extends ServiceBase {
     }
 
     getUserInfoFromRequest(request) {
-        return request.headers['user'];
+        const rc = request.headers.cookie;
+        const cookies = {};
+        rc & rc.split(';').forEach((cookie) => {
+            var parts = cookie.split('=');
+            cookies[parts.shift().trim()] = decodeURI(parts.join('='));
+        })
+        return cookies['user-id'] || this.uuidv4();
+    }
+
+    uuidv4() {
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+            var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+        });
     }
 }
 

@@ -23,3 +23,8 @@ producer.on('ready', () => {
     });
 });
 
+producer.on('disconnected', (err) => {
+    console.log('producer is disconnected', err)
+});
+
+producer.setPollInterval(100);

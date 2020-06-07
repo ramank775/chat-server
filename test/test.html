@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+</head>
+<input type="text" id="msg">
+<button onclick="sendMessage()">Send Message</button>
+<body>
+    <script>
+        function uuidv4() {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+                var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+        var  v= {
+            ws: null
+        };
+        function sendMessage() {
+            let msg = document.getElementById('msg').value
+            let sMesgae = {
+                message: msg,
+                to: "abc"
+            }
+            v.ws.send(JSON.stringify(sMesgae));
+        }
+        
+        (function (v) {
+            if (window.WebSocket) {
+                document.cookie = `user-id=${uuidv4()}; path=/`;
+                console.log("WebSocket object is supported in your browser");
+                v.ws = new WebSocket("wss://8000-cc9c3357-f494-4184-88b3-2188fa8410dd.ws-us02.gitpod.io");
+                var ws = v.ws;
+                ws.onopen = function () {
+                    console.log("onopen");
+                };
+                ws.onmessage = function (e) {
+                    console.log("echo from server : " + e.data);
+                };
+
+                ws.onclose = function () {
+                    console.log("onclose");
+                };
+                ws.onerror = function () {
+                    console.log("onerror");
+                };
+
+            } else {
+                console.log("WebSocket object is not supported in your browser");
+            }
+        })(v);
+    </script>
+</body>
+
+</html>

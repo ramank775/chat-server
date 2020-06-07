@@ -1,6 +1,10 @@
 const
     commander = require('commander'),
-    { Worker } = require('worker_threads')
+    { Worker } = require('worker_threads'),
+    path = require('path'),
+    kafka = require('node-rdkafka'),
+    Promise = require('bluebird')
+
 /**
  * Add standard kafka options
  * @param {commander} cmd 
@@ -64,7 +68,7 @@ function parseStandardKafkaOptions(options) {
     const kafkaOptions = {
         'bootstrap.servers': options.kafkaBrokerList,
         'client.id': options.kafkaClientId,
-        'group.id': options.kafkaGroupId,
+        'group.id': options.kafkaConsumerGroup,
         'enable.auto.commit': options.kafkaAutoCommit,
         'auto.commit.interval.ms': options.kafkaAutoCommitInterval,
         "heartbeat.interval.ms": options.kafkaHeartbeatInterval,
@@ -76,9 +80,9 @@ function parseStandardKafkaOptions(options) {
         "fetch.message.max.bytes": options.kafkaFetchMessageMaxBytes,
         "queued.min.messages": 1,
         "fetch.error.backoff.ms": options.kafkaFetchErrorBackoff,
-        "queued.max.messages.kbytes": options.kafkaQueuedMaxMessagesKbytes,
+        "queued.max.messages.kbytes": options.kafkaQueuedMaxMessageKbytes,
         "fetch.wait.max.ms": options.kafkaFetchWaitMax,
-        "queue.buffering.max.ms": options.kafkaQueueBufferingMax,
+        "queue.buffering.max.ms": options.kakfaQueueBufferingMax,
         'queue.buffering.max.messages': options.kafkaQueueBufferingMaxMessages,
         'batch.num.messages': options.kafkaBatchNumMessages,
         'socket.timeout.ms': options.kafkaSocketTimeoutMs
@@ -113,49 +117,131 @@ function parseKafkaOptions(options) {
     }
 }
 
-function createKakfaProducer(kafkaOptions) {
-    const options = parseKafkaOptions(kafkaOptions)
-    const producerWorker = new Worker('./kafka-workers/producer.worker.js', {
-        workerData: {
-            kafka_config: options
+async function createKakfaProducer(context) {
+    const { log, options } = context
+    const kafkaOptions = parseKafkaOptions(options)
+    const producer = kafka.HighLevelProducer({ ...kafkaOptions, dr_cb: true });
+    Promise.promisifyAll(producer, {
+        filter: event => /^(connect|disconnect|flush)$/.test(event)
+    })
+    producer.setValueSerializer((value) => {
+        return Buffer.from(JSON.stringify(value));
+    });
+    producer.setPollInterval(100);
+
+    producer.on('error', (err) => {
+        log.error('Kafka producer: error: %s', JSON.stringify(err));
+    });
+
+    producer.on('event.error', (err) => {
+        log.error('Kafka producer: event.error: %s', JSON.stringify(err));
+    });
+
+    producer.on('delivery-report', (err, report) => {
+        if (err) {
+            log.error('Kafka producer: Delivery error: ', err, {});
+        } else {
+            let r = { ...report };
+            r.key = r.key.toString();
+            log.info('Kafka producer: Delivery report: %j', r);
         }
     });
-    producerWorker.send = function (topic, message, key) {
-        this.postMessage({
-            topic,
-            message,
-            key
+
+    const ready = new Promise((resolve, _) => {
+        producer.on('ready', () => {
+            resolve();
+        })
+    });
+
+    log.info('Connecting kafka producer');
+    await producer.connectAsync({});
+    log.info('kafka producer connected')
+
+    await ready;
+    log.info('kafka producer is ready')
+
+    producer.setPollInterval(100);
+
+    const kafkaProducer = {
+        _producer: producer
+    }
+
+    kafkaProducer.send = function (topic, message, key) {
+        this._producer.produce(topic, null, message, key, Date.now(), (err, offset) => {
+            if (err) {
+                log.error("Error while producing topic ", err);
+            }
+            log.info("offset", offset);
         });
     };
-    return producerWorker;
+    kafkaProducer.disconnect = async function () {
+        log.info("Disconnecting kafka producer");
+        try {
+            await this._producer.flushAsync(20000)
+            log.info("Producer flushed all queued message");
+        } catch (err) {
+            log.error("Error while flushing kafka message queue", err);
+        } finally {
+            await this._producer.disconnectAsync(10000, (err, data) => {
+                if (err) {
+                    log.error('Producer failed to disconnect', err);
+                    return;
+                }
+                log.info("Producer disconnected")
+            })
+        }
+    }
+    return kafkaProducer;
 }
 
-function createKafkaConsumer(topics, kafkaOptions) {
-    const options = parseKafkaOptions(kafkaOptions);
-    const consumerWorker = new Worker('./kafka-workers/consumer.worker.js', {
+async function createKafkaConsumer(context) {
+    const { listenerEvents, options, log } = context;
+    const kafkaOptions = parseKafkaOptions(options);
+    const consumer_worker_path = path.join(__dirname, 'kafka-workers/consumer.worker.js');
+    const consumerWorker = new Worker(consumer_worker_path, {
         workerData: {
-            kafka_config: options,
-            topics
+            kafka_config: kafkaOptions,
+            topics: listenerEvents
         }
     });
-    consumerWorker.on('message', function (data) {
-        this.onMessage(data.topic, JSON.parse(data.value))
-    })
-    consumerWorker.onMessage = function () {
 
+    const kafkaConsumer = {
+        _consumer: consumerWorker,
+        onMessage: () => { },
+        disconnect: async () => {
+            await this._consumer.terminate()
+        }
     }
-    return consumerWorker;
+
+    consumerWorker.on('message', function (data) {
+        kafkaConsumer.onMessage(data.topic, JSON.parse(data.value))
+    })
+    consumerWorker.on('error', (err) => {
+        log.error('consumer worker throws error ', err)
+    });
+    const ready = new Promise((resolve, _) => {
+        consumerWorker.on('online', () => {
+            resolve();
+            log.info('consumer worker is online');
+        })
+    })
+
+    consumerWorker.on('exit', (exitCode) => {
+        log.info('consumer worker exit with code', exitCode);
+    });
+
+    await ready
+
+    return kafkaConsumer;
 }
 
 async function initEventProducer(context) {
-    const {options} = context
-    context.publisher = createKakfaProducer(options)
+    context.publisher = await createKakfaProducer(context)
     return context;
 }
 
 async function initEventListener(context) {
-    const { listenerEvents, options } = context;
-    context.listener = createKafkaConsumer(listenerEvents, options)
+    context.listener = await createKafkaConsumer(context)
     return context;
 }
 

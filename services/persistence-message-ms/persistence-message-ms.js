@@ -15,7 +15,7 @@ async function prepareEventListFromKafkaTopics(context) {
         'new-message': options.kafkaNewMessageTopic
     }
     context.events = eventName;
-    constext.listenerEvents = [
+    context.listenerEvents = [
         options.kafkaUserConnectedTopic,
         options.kafkaPresistenceMessageTopic
     ]

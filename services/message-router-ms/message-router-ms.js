@@ -14,7 +14,7 @@ async function prepareEventListFromKafkaTopics(context) {
         'send-message-db': options.kafkaPresistenceMessageTopic
     }
     context.events = eventName;
-    constext.listenerEvents = [
+    context.listenerEvents = [
         options.kafkaNewMessageTopic,
         options.kafkaErrorMessageSendTopic
     ]
