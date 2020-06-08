@@ -4,6 +4,7 @@ const events = require('events')
 
 class JsonServer extends events.EventEmitter {
     constructor(port) {
+        super();
         this.socket = net.createServer(socket => {
             const _socket = new JsonSocket(socket);
             _socket.on('data', (data) => {
