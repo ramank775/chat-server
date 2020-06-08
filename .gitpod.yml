@@ -1,4 +1,13 @@
 image:
   file: .gitpod.Dockerfile
+  context: deployment/dev
 tasks:
   - init: yarn install
+  - name: Kafka 
+    command: > 
+      chmod +x deployment/dev/scripts/init-kafka.bash &&
+      cp .env.tmpl .env &&
+      KAFKA_HOME=/kafka &&
+      ./deployment/dev/scripts/init-kafka.bash $KAFKA_HOME .env
+  - name: Nginx
+    command: nginx

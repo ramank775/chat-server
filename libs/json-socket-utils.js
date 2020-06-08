@@ -9,8 +9,9 @@ function addJsonServerOptions(cmd) {
 
 function initJsonServer(context) {
     const { options } = context;
-    const server = JsonServer(options.jsonServerPort);
-    return context.jsonServer = server;
+    const server = new JsonServer(options.jsonServerPort);
+    context.jsonServer = server;
+    return context;
 }
 
 function initJsonClient(url) {
