@@ -32,7 +32,10 @@
             if (window.WebSocket) {
                 document.cookie = `user-id=${uuidv4()}; path=/`;
                 console.log("WebSocket object is supported in your browser");
-                v.ws = new WebSocket("wss://8000-cc9c3357-f494-4184-88b3-2188fa8410dd.ws-us02.gitpod.io");
+
+                const host = window.location.hostname;
+
+                v.ws = new WebSocket(`wss://${host}/wss/`);
                 var ws = v.ws;
                 ws.onopen = function () {
                     console.log("onopen");

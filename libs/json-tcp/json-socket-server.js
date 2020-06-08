@@ -22,3 +22,5 @@ class JsonServer extends events.EventEmitter {
         this.socket.listen(port);
     }
 }
+
+module.exports = JsonServer;

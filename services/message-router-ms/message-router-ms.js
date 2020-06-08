@@ -5,6 +5,9 @@ const kafka = require('../../libs/kafka-utils'),
         initDefaultResources,
         resolveEnvVariables
     } = require('../../libs/service-base'),
+    {
+        initJsonClient
+    } = require('../../libs/json-socket-utils'),
     asMain = (require.main === module);
 
 async function prepareEventListFromKafkaTopics(context) {
@@ -49,7 +52,7 @@ class MessageRouterMS extends ServiceBase {
     }
     init() {
         const { listener, listenerEvents, producers, events } = this.context;
-        listener.onMessage = (topic, message) => {
+        listener.onMessage = async (topic, message) => {
             if (topic === listenerEvents['error-message-sent']) {
                 message.retry = message.retry || 0;
                 message.retry += 1;
@@ -58,20 +61,36 @@ class MessageRouterMS extends ServiceBase {
                     return;
                 }
             }
-            redirectMessage(message.to, message);
+           await redirectMessage(message.to, message);
         }
 
     }
-    redirectMessage(user, message) {
+    async redirectMessage(user, message) {
         const { producers } = this.context;
-        const server = getServer(user);
+        const server = await getServer(user);
         producers.send(server, message)
     }
 
-    getServer(user) {
-        const { events } = this.context;
-        // TODO: call session service and get server user connected to
-        const server = ''
+    async getServer(user) {
+        const { events, options } = this.context;
+        const client = initJsonClient(options.sessionServiceUrl)
+        const request = new Promise((resolve, reject) => {
+            client.send({
+                func: 'get-server',
+                user
+            });
+            client.on('response', (data) => {
+                if(data.code != 200) {
+                    reject(data);
+                    return;
+                }
+                resolve(data.result)
+            });
+            client.on('error', (err) => {
+                reject(err);
+            })
+        })
+        const server = await request;
         return server || events['send-message-db']; // if user is not online save the message to the db
     }
 }
