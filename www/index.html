@@ -73,8 +73,8 @@
                 };
                 ws.onmessage = function (e) {
                     const msgSpace = document.getElementById('message');
-                    const newMsgItem =  msgSpace.crateElement('li');
-                    newMsgItem.appendChild(document.createTextNode(JSON.stringify(e.data)));
+                    const newMsgItem =  document.createElement('li');
+                    newMsgItem.appendChild(document.createTextNode(e.data));
                     msgSpace.appendChild(newMsgItem);
                     console.log("echo from server : " + e.data);
                 };

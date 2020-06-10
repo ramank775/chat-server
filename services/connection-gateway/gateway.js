@@ -121,14 +121,14 @@ class Gateway extends ServiceBase {
             })
         });
         listener.onMessage = (topic, message) => {
-            const msg = message;
-            const ws = userSocketMapping[msg.from];
+            const ws = userSocketMapping[message.to];
             if (ws) {
-                ws.send(msg);
-                Message.onMessageSent(message);
+                const payload = JSON.stringify(message);
+                ws.send(payload);
+                messageEvents.onMessageSent(message);
                 return;
             } else {
-                Message.onMessageSentFailed(message, {
+                messageEvents.onMessageSentFailed(message, {
                     code: -1,
                     reason: 'user socket not found'
                 });

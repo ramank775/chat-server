@@ -68,7 +68,7 @@ class MessageRouterMS extends ServiceBase {
     async redirectMessage(user, message) {
         const { publisher } = this.context;
         const server = await this.getServer(user);
-        publisher.send(server, message)
+        publisher.send(server, message, user);
     }
 
     async shutdown() {

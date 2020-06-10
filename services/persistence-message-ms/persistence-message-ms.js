@@ -10,14 +10,14 @@ const kafka = require('../../libs/kafka-utils'),
 async function prepareEventListFromKafkaTopics(context) {
     const { options } = context;
     const eventName = {
-        'send-message-db': options.kafkaPresistenceMessageTopic,
+        'send-message-db': options.kafkaPersistenceMessageTopic,
         'user-connected': options.kafkaUserConnectedTopic,
         'new-message': options.kafkaNewMessageTopic
     }
     context.events = eventName;
     context.listenerEvents = [
         options.kafkaUserConnectedTopic,
-        options.kafkaPresistenceMessageTopic
+        options.kafkaPersistenceMessageTopic
     ]
     return context;
 }
@@ -26,7 +26,7 @@ async function initDatabase(context) {
     // TODO: add a real db
     const db = {}
     db.save = function (message) {
-        this[message.to] = this[message.to] || [message]
+        this[message.to] = [...(this[message.to] || [message])]
     }
     db.getMessageByUser = function (user) {
         return this[user];
@@ -53,9 +53,9 @@ function parseOptions(argv) {
     let cmd = initDefaultOptions();
     cmd = kafka.addStandardKafkaOptions(cmd);
     cmd = kafka.addKafkaSSLOptions(cmd);
-    cmd.option('--kafka-user-connected-topic', 'Used by consumer to consume new message when a user connected to server')
-        .option('--kafka-persistence-message-topic', 'Used by producer to produce new message to saved into a persistence db')
-        .option('--kafka-new-message-topic', 'Used by producer to produce new message for saved incoming message');
+    cmd.option('--kafka-user-connected-topic <user-connect-topic>', 'Used by consumer to consume new message when a user connected to server')
+        .option('--kafka-persistence-message-topic <presistence-message-topic>', 'Used by producer to produce new message to saved into a persistence db')
+        .option('--kafka-new-message-topic <new-message-topic>', 'Used by producer to produce new message for saved incoming message');
     return resolveEnvVariables(cmd.parse(argv).opts());
 }
 
@@ -64,7 +64,7 @@ class PersistenceMessageMS extends ServiceBase {
         super(context);
     }
     init() {
-        const { listener, events, publisher } = this.context;
+        const { listener, events, publisher, db } = this.context;
         listener.onMessage = (event, message) => {
             switch (event) {
                 case events['send-message-db']:
@@ -72,7 +72,11 @@ class PersistenceMessageMS extends ServiceBase {
                     break;
                 case events['user-connected']:
                     const messages = db.getMessageByUser(message.user);
-                    publisher.send(events['new-message'], messages, message.user);
+                    const sendMessage = {
+                        to: message.user,
+                        messages
+                    }
+                    publisher.send(events['new-message'], sendMessage, message.user);
                     break;
             }
         }
