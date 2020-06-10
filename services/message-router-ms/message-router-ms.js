@@ -13,8 +13,8 @@ const kafka = require('../../libs/kafka-utils'),
 async function prepareEventListFromKafkaTopics(context) {
     const { options } = context;
     const eventName = {
-        'message-sent-failed': options.kafkaMessageSendFailedTopic,
-        'send-message-db': options.kafkaPresistenceMessageTopic
+        'message-sent-failed': options.kafkaMessageSentFailedTopic,
+        'send-message-db': options.kafkaPersistenceMessageTopic
     }
     context.events = eventName;
     context.listenerEvents = [
@@ -51,24 +51,30 @@ class MessageRouterMS extends ServiceBase {
         this.maxRetryCount = this.options.messageMaxRetries;
     }
     init() {
-        const { listener, listenerEvents, producers, events } = this.context;
+        const { listener, listenerEvents, publisher, events } = this.context;
         listener.onMessage = async (topic, message) => {
             if (topic === listenerEvents['error-message-sent']) {
                 message.retry = message.retry || 0;
                 message.retry += 1;
                 if (message.retry > this.maxRetryCount) {
-                    producers.send(events['message-sent-failed'], message);
+                    publisher.send(events['message-sent-failed'], message);
                     return;
                 }
             }
-           await redirectMessage(message.to, message);
+           await this.redirectMessage(message.to, message);
         }
 
     }
     async redirectMessage(user, message) {
-        const { producers } = this.context;
-        const server = await getServer(user);
-        producers.send(server, message)
+        const { publisher } = this.context;
+        const server = await this.getServer(user);
+        publisher.send(server, message)
+    }
+
+    async shutdown() {
+        const {publisher, listener} = this.context;
+        await publisher.disconnect();
+        await listener.disconnect();
     }
 
     async getServer(user) {

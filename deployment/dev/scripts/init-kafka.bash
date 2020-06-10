@@ -45,7 +45,7 @@ start_kafka_server;
 sleep 2s;
 
 for var in "${!TOPIC_@}"; do
-    create_topic $var;
+    create_topic ${!var};
     sleep 1s;
 done
 

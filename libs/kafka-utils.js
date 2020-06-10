@@ -1,6 +1,6 @@
 const
     commander = require('commander'),
-    { Worker } = require('worker_threads'),
+    { fork } = require('child_process'),
     path = require('path'),
     kafka = require('node-rdkafka'),
     Promise = require('bluebird')
@@ -198,36 +198,36 @@ async function createKafkaConsumer(context) {
     const { listenerEvents, options, log } = context;
     const kafkaOptions = parseKafkaOptions(options);
     const consumer_worker_path = path.join(__dirname, 'kafka-workers/consumer.worker.js');
-    const consumerWorker = new Worker(consumer_worker_path, {
-        workerData: {
-            kafka_config: kafkaOptions,
-            topics: listenerEvents
-        }
+    let consumerWorker = fork(consumer_worker_path, [], {
+        slient: true,
+        execArgv: ['--harmony']
     });
+    
 
     const kafkaConsumer = {
         _consumer: consumerWorker,
         onMessage: () => { },
-        disconnect: async () => {
-            await this._consumer.terminate()
+        disconnect: async function() {
+            this._consumer.send('kill')
         }
     }
-
-    consumerWorker.on('message', function (data) {
-        kafkaConsumer.onMessage(data.topic, JSON.parse(data.value))
+    let resolve;
+    const ready = new Promise((success, _) => { resolve = success });
+    consumerWorker.on('message', function (msg) {
+        if (msg === 'online') {
+            resolve();
+            consumerWorker.send({ type: 'option', topics: listenerEvents, kafka_config: kafkaOptions });
+            return;
+        }
+        console.log(msg.value.toString())
+        kafkaConsumer.onMessage(msg.topic, msg.value)
     })
     consumerWorker.on('error', (err) => {
-        log.error('consumer worker throws error ', err)
+        log.error(`consumer worker throws error ${err}`)
     });
-    const ready = new Promise((resolve, _) => {
-        consumerWorker.on('online', () => {
-            resolve();
-            log.info('consumer worker is online');
-        })
-    })
 
     consumerWorker.on('exit', (exitCode) => {
-        log.info('consumer worker exit with code', exitCode);
+        log.info(`consumer worker exit with code ${exitCode}`);
     });
 
     await ready

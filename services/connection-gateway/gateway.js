@@ -99,14 +99,15 @@ class Gateway extends ServiceBase {
                 });
             }
         }
-        this.userSockerMapping = {}
+        this.userSocketMapping = {}
+        this.pingTimer;
     }
     init() {
         const { wss, listener } = this.context;
-        const { userEvents, messageEvents, userSockerMapping } = this;
+        const { userEvents, messageEvents, userSocketMapping } = this;
         wss.on('connection', (ws, request) => {
             const user = this.getUserInfoFromRequest(request);
-            userSockerMapping[user] = ws;
+            userSocketMapping[user] = ws;
             ws.user = user;
             userEvents.onConnect(user);
             ws.on('message', function (msg) {
@@ -116,12 +117,12 @@ class Gateway extends ServiceBase {
             });
             ws.on('close', function (code, reason) {
                 userEvents.onDisconnect(this.user);
-                delete userSockerMapping[this.user];
+                delete userSocketMapping[this.user];
             })
         });
         listener.onMessage = (topic, message) => {
             const msg = message;
-            const ws = userSockerMapping[msg.from];
+            const ws = userSocketMapping[msg.from];
             if (ws) {
                 ws.send(msg);
                 Message.onMessageSent(message);
@@ -133,6 +134,28 @@ class Gateway extends ServiceBase {
                 });
             }
         };
+        this.enablePing();
+    }
+
+    enablePing() {
+        const { userSocketMapping } = this;
+        this.pingTimer = setInterval(() => {
+            Object.keys(userSocketMapping).forEach(user => {
+                userSocketMapping[user].ping();
+            });
+        }, (50 * 1000));
+    }
+
+    disablePing() {
+        clearInterval(this.pingTimer);
+    }
+
+    async shutdown() {
+        const { publisher, listener } = this.context;
+        publisher.disconnect();
+        listener.disconnect();
+        this.disablePing();
+
     }
 
     getUserInfoFromRequest(request) {

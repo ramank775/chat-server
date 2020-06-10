@@ -8,7 +8,7 @@ class JsonServer extends events.EventEmitter {
         this.socket = net.createServer(socket => {
             const _socket = new JsonSocket(socket);
             _socket.on('data', (data) => {
-                this.emit('request', data, jsonSocket);
+                this.emit('request', data, _socket);
             })
             _socket.on('close', hadError => this.emit('close', hadError));
             _socket.on('connect', () => this.emit('connect'));
@@ -18,9 +18,11 @@ class JsonServer extends events.EventEmitter {
             _socket.on('lookup', (err, address, family, host) => this.emit('lookup', err, address, family, host)); // prettier-ignore
             _socket.on('ready', () => this.emit('ready'));
             _socket.on('timeout', () => this.emit('timeout'));
-            _socket.on('readable', this._onReadable.bind(this));
         });
         this.socket.listen(port);
+    }
+    async disconnect() {
+        this.socket.close();
     }
 }
 

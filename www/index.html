@@ -2,50 +2,87 @@
 <html lang="en">
 
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Document</title>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Document</title>
 </head>
-<input type="text" id="msg">
-<button onclick="sendMessage()">Send Message</button>
+
+<div id="connection">
+	<input type="text" id="name" placeholder="your username">
+	<button onclick="connect()"> Connect </button>
+</div>
+<div>
+	<input type="text" id="msg" placeholder="Your msg to send..">
+    <input type="text" id="to" placeholder="to" >
+	<button onclick="sendMessage()">Send Message</button>
+</div>
+<div id="status"></div>
+<div>
+    Username: <span id="username"></span>
+</div>
+<div>
+	<ul id="message">
+
+	</ul>
+</div>
+
+
 <body>
-    <script>
+	<script>
+		var ws;
+		function connect() {
+            let name = document.getElementById('name').value;
+            if(!name) {
+                alert("Name can't be empty");
+                return;
+            };
+            document.getElementById('username').innerText = name;
+            document.cookie = `user-id=${name}; path=/`;
+            connect_socket();
+            document.getElementById('connection').style.display = "none";
+        }
         function uuidv4() {
             return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
                 var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
                 return v.toString(16);
             });
         }
-        var  v= {
-            ws: null
-        };
+
         function sendMessage() {
-            let msg = document.getElementById('msg').value
+            let msg = document.getElementById('msg').value;
+            let to = document.getElementById('to').value;
             let sMesgae = {
                 message: msg,
-                to: "abc"
+                to: to
             }
-            v.ws.send(JSON.stringify(sMesgae));
+            ws.send(JSON.stringify(sMesgae));
         }
         
-        (function (v) {
+        function connect_socket () {
             if (window.WebSocket) {
-                document.cookie = `user-id=${uuidv4()}; path=/`;
+                
                 console.log("WebSocket object is supported in your browser");
 
                 const host = window.location.hostname;
 
-                v.ws = new WebSocket(`wss://${host}/wss/`);
-                var ws = v.ws;
+                ws = new WebSocket(`wss://${host}/wss/`);
+                
                 ws.onopen = function () {
+                    document.getElementById('status').innerText = "Connected";
                     console.log("onopen");
                 };
                 ws.onmessage = function (e) {
+                    const msgSpace = document.getElementById('message');
+                    const newMsgItem =  msgSpace.crateElement('li');
+                    newMsgItem.appendChild(document.createTextNode(JSON.stringify(e.data)));
+                    msgSpace.appendChild(newMsgItem);
                     console.log("echo from server : " + e.data);
                 };
 
                 ws.onclose = function () {
                     console.log("onclose");
+                    document.getElementById('status').innerText = "Disconnected";
+                    document.getElementById('connection').style.display = "block";
                 };
                 ws.onerror = function () {
                     console.log("onerror");
@@ -54,8 +91,8 @@
             } else {
                 console.log("WebSocket object is not supported in your browser");
             }
-        })(v);
-    </script>
+        };
+	</script>
 </body>
 
 </html>

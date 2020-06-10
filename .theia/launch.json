@@ -9,7 +9,7 @@
             "name": "Launch Gateway MS",
             "program": "${workspaceFolder}/services/connection-gateway/gateway.js",
             "args": [
-                "--app-name=gateway-1",
+                "--app-name=${TOPIC_GATEWAY_MS_1}",
                 "--debug",
                 "--gateway-name=gateway-1",
                 "--kafka-client-id=gateway-1",
@@ -23,7 +23,8 @@
                 "--kakfa-queue-buffering-max=0.6",
                 "--kafka-socket-timeout-ms=2000"
             ],
-            "envFile": "${workspaceFolder}/.env"
+            "envFile": "${workspaceFolder}/.env",
+            "autoAttachChildProcesses": true
         }, {
             "type": "node",
             "request": "launch",
@@ -39,7 +40,8 @@
                 "--kafka-broker-list=${BROKER_LIST}",
                 "--json-server-port=${SESSION_MS_PORT}"
             ],
-            "envFile": "${workspaceFolder}/.env"
+            "envFile": "${workspaceFolder}/.env",
+            "autoAttachChildProcesses": true
         }, {
             "type": "node",
             "request": "launch",
@@ -50,21 +52,22 @@
                 "--debug",
                 "--kafka-client-id=message-router-1",
                 "--kafka-consumer-group=${CONSUMER_GROUP_MESSAGE_ROUTER}",
-                 "--kafka-message-sent-topic=${TOPIC_MESSAGE_SENT}",
+                "--kafka-message-sent-failed-topic=${TOPIC_MESSAGE_SENT_FAILED}",
                 "--kafka-error-message-send-topic=${TOPIC_MESSAGE_SENT_ERROR}",
                 "--kafka-new-message-topic=${TOPIC_NEW_MESSAGE}",
                 "--kafka-persistence-message-topic=${TOPIC_DB_MESSAGE}",
                 "--kafka-broker-list=${BROKER_LIST}",
-                "--session-service-url='${SESSION_MS_HOST}:${SESSION_MS_PORT}'"
+                "--session-service-url=${SESSION_MS_HOST}:${SESSION_MS_PORT}"
             ],
-            "envFile": "${workspaceFolder}/.env"
+            "envFile": "${workspaceFolder}/.env",
+            "autoAttachChildProcesses": true
         }, {
             "type": "node",
             "request": "launch",
             "name": "Launch persistence message MS",
             "program": "${workspaceFolder}/services/persistence-message-ms/persistence-message-ms.js",
             "args": [
-                "--app-name=persistence-message-1",
+                "--app-name=${TOPIC_PERSISTENCE_MESSAGE_MS_1}",
                 "--debug",
                 "--kafka-client-id=persistence-message-1",
                 "--kafka-consumer-group=${CONSUMER_GROUP_PERSISTENCE_MESSAGE}",
@@ -74,7 +77,8 @@
                 "--session-service-url=localhost:8001",
                 "--kafka-persistence-message-topic=${TOPIC_DB_MESSAGE}"
             ],
-            "envFile": "${workspaceFolder}/.env"
+            "envFile": "${workspaceFolder}/.env",
+            "autoAttachChildProcesses": true
         }
     ]
 }

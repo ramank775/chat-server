@@ -64,7 +64,7 @@ class PersistenceMessageMS extends ServiceBase {
         super(context);
     }
     init() {
-        const { listener, events } = this.context;
+        const { listener, events, publisher } = this.context;
         listener.onMessage = (event, message) => {
             switch (event) {
                 case events['send-message-db']:
@@ -76,6 +76,12 @@ class PersistenceMessageMS extends ServiceBase {
                     break;
             }
         }
+    }
+
+    async shutdown() {
+        const {listener, publisher} = this.context;
+        await publisher.disconnect();
+        await listener.disconnect();
     }
 }
 

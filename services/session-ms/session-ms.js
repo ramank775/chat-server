@@ -14,18 +14,18 @@ const
 
 
 async function initMemCache(context) {
-    const memCahce = {};
-    memCahce.get = function (key) {
-        return memCahce[key]
+    const memCache = {};
+    memCache.get = function (key) {
+        return memCache[key]
     }
-    memCahce.set = function (key, value) {
-        memCahce[key] = value
+    memCache.set = function (key, value) {
+        memCache[key] = value
     }
-    memCahce.remove = function (key) {
-        delete memCahce[key]
+    memCache.remove = function (key) {
+        delete memCache[key]
     }
 
-    context.memCahce = memCahce
+    context.memCache = memCache
     return context;
 }
 
@@ -62,50 +62,56 @@ class SessionMS extends ServiceBase {
     constructor(context) {
         super(context);
         this.jsonServer = context.jsonServer;
-        this.memCahce = context.memCahce;
+        this.memCache = context.memCache;
     }
     init() {
         const { listener, events } = this.context;
         listener.onMessage = (event, value) => {
             switch (event) {
                 case events['user-connected']:
-                    memCahce.set(value.user, value.server)
+                    this.memCache.set(value.user, value.server)
                     break;
                 case events['user-disconnected']:
-                    const server = memCahce.get(value.user)
+                    const server = this.memCache.get(value.user)
                     if (server == value.server) {
-                        memChahe.remove(value.user)
+                        this.memCache.remove(value.user)
                     }
                     break;
             }
         };
-        this.jsonServer.on('request', (message, socket) => {
+        this.jsonServer.on('request', async (message, socket) => {
             let method = message.func || 'get-server';
             const funcMapping = {
                 'get-server': (message) => {
-                    const {user} = message;
+                    const { user } = message;
                     return this.getServer(user);
                 }
             };
 
             const func = funcMapping[method]
-            if(!func) {
-                socket.send({
-                    error : 'bad request',
+            if (!func) {
+                socket.write({
+                    error: 'bad request',
                     code: 400
                 });
                 return;
             }
-            let result = func(message);
-            socket.send({
+            let result = await func(message);
+            socket.write({
                 code: 200,
                 result
             });
         });
     }
 
+    async shutdown() {
+        const { jsonServer, listener } = this.context;
+        await jsonServer.disconnect();
+        await listener.disconnect();
+    }
+
     async getServer(user) {
-        return this.memCahce.get(user) || null;
+        return this.memCache.get(user) || null;
     }
 }
 

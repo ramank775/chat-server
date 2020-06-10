@@ -1,6 +1,8 @@
 const winston = require('winston'),
     moment = require('moment');
 
+const LEVEL = Symbol.for('level');
+const MESSAGE = Symbol.for('message');
 // Setup winston by default to the console.
 winston.configure({
     exitOnError: false,
@@ -10,7 +12,26 @@ winston.configure({
             // enable color only when output supports TTY
             colorize: process.stdout.isTTY,
             handleExceptions: true,
-            humanReadableUnhandledException: true
+            humanReadableUnhandledException: true,
+            log: function (info, callback) {
+                setImmediate(() => this.emit('logged', info));
+
+                if (this.stderrLevels[info[LEVEL]]) {
+                    console.error(info[MESSAGE]);
+
+                    if (callback) {
+                        callback();
+                    }
+                    return;
+                }
+
+                console.log(info[MESSAGE]);
+
+                if (callback) {
+                    callback();
+                }
+
+            }
         })
     ]
 });
@@ -28,7 +49,32 @@ winston.init = function (options) {
         result.timeMillis = Date.now();
 
         return result;
-    })
+    });
+    const configure = {
+    }
+
+    if (options.debug) {
+        configure["log"] = function (info, callback) {
+            setImmediate(() => this.emit('logged', info));
+
+            if (this.stderrLevels[info[LEVEL]]) {
+                console.error(info[MESSAGE]);
+
+                if (callback) {
+                    callback();
+                }
+                return;
+            }
+
+            console.log(info[MESSAGE]);
+
+            if (callback) {
+                callback();
+            }
+
+        }
+    }
+
     winston.configure({
         exitOnError: options.exitOnError || false,
         format: winston.format.combine(
@@ -36,13 +82,7 @@ winston.init = function (options) {
             winston.format.json()
         ),
         transports: [
-            new winston.transports.Console({
-                json: true,
-                stringify: (obj) => JSON.stringify(obj),
-                timestamp: () => moment().format('YYYY-MM-DD HH:mm:ss.SSS'),
-                handleExceptions: true,
-                humanReadableUnhandledException: true
-            })
+            new winston.transports.Console(configure)
         ]
     });
 

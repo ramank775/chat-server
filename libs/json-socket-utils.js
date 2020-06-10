@@ -22,7 +22,7 @@ function initJsonClient(url) {
     } else {
         port = defaultPort
     }
-    return new JsonClient({host, port});
+    return new JsonClient(host, port);
 }
 
 module.exports = {
