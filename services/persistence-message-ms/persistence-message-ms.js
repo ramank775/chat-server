@@ -28,8 +28,14 @@ async function initDatabase(context) {
     db.save = function (message) {
         this[message.to] = [...(this[message.to] || [message])]
     }
-    db.getMessageByUser = function (user) {
+    db.getUndeliveredMessageByUser = function (user) {
         return this[user];
+    }
+    db.removeMessageByUser = function(user, messages) {
+        let msgs = this[user];
+        if (msgs && msgs.length > 0) {
+            msgs.splice(0, messages.length)
+        }
     }
     context.db = db;
     return context;
@@ -71,19 +77,21 @@ class PersistenceMessageMS extends ServiceBase {
                     db.save(message);
                     break;
                 case events['user-connected']:
-                    const messages = db.getMessageByUser(message.user);
+                    const messages = db.getUndeliveredMessageByUser(message.user);
+                    if (!(messages && messages.length)) break;
                     const sendMessage = {
                         to: message.user,
                         messages
                     }
                     publisher.send(events['new-message'], sendMessage, message.user);
+                    db.removeMessageByUser(message.user, messages);
                     break;
             }
         }
     }
 
     async shutdown() {
-        const {listener, publisher} = this.context;
+        const { listener, publisher } = this.context;
         await publisher.disconnect();
         await listener.disconnect();
     }

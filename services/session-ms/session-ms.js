@@ -85,6 +85,10 @@ class SessionMS extends ServiceBase {
                 'get-server': (message) => {
                     const { user } = message;
                     return this.getServer(user);
+                },
+                'get-user-status': (message) => {
+                    const { user } = message;
+                    return this.getUserStatus(user);
                 }
             };
 
@@ -112,6 +116,9 @@ class SessionMS extends ServiceBase {
 
     async getServer(user) {
         return this.memCache.get(user) || null;
+    }
+    async getUserStatus(user) {
+        return (user in this.memCache) ? 'online' : 'offline';
     }
 }
 
