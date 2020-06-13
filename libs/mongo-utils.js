@@ -26,7 +26,9 @@ async function initMongoClient(context) {
         url += (((url.indexOf('?') > -1) ? '&' : '?') + 'ssl=true');
     }
 
-    context.mongoClient = await mongodb.MongoClient(url, mongoConnectionOptions);
+    const mongoClient = await mongodb.MongoClient.connect(url, mongoConnectionOptions);
+    context.mongoClient = mongoClient;
+    context.mongodbClient = mongoClient.db();
     return context;
 }
 

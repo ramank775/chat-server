@@ -26,25 +26,27 @@ async function initResource(options) {
         .then(initMongoClient)
 }
 
-class ProfileMs extends HttpServiceBase {
+class AuthMs extends HttpServiceBase {
     constructor(context) {
         super(context);
         this.mongoClient = context.mongoClient;
-        this.dbCollection = context.mongodbClient.collection('profile');
+        this.dbCollection = context.mongodbClient.collection('auth');
     }
 
     async init() {
         super.init();
-        this.addRoute('/exits', 'POST', async (req, _) => {
-            const username = req.payload.username;
-            const exist = await this.isExists(username)
-            return {
-                status: exist
+        this.addRoute('/auth', 'POST', async (req, res) => {
+            const username = req.headers.user;
+            const accessKey = req.headers.accesskey;
+            const authProfile = await this.dbCollection.findOne({username: username, accessKey: accessKey})
+            if(!authProfile) {
+                return res({}).code(401);
             }
+            return res({}).code(200);
         });
 
         this.addRoute('/register', 'POST', async (req, _) => {
-            const { payload } = req;
+            const username = req.headers.username;
             const exist = await this.isExists(payload.username);
             if (exist) {
                 return {
@@ -52,19 +54,32 @@ class ProfileMs extends HttpServiceBase {
                     error: `username already taken`
                 }
             }
-            payload.addedOn = new Date().toUTCString();
-            payload.isActive = true;
+            const payload = {
+                username,
+                accessKey  :this.uuidv4(),
+                addedOn = new Date().toUTCString(),
+                isActive = true
+            }
+            
             await this.dbCollection.insertOne(payload);
             return {
                 status: true,
-                username: payload.username
+                username: payload.username,
+                accessKey: payload.accessKey
             }
         })
     }
 
     async isExists(username) {
         const count = await this.dbCollection.count({ username: username });
-        return count >0;
+        return count > 0;
+    }
+
+    uuidv4() {
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+            var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+        });
     }
 
     async shutdown() {
@@ -76,9 +91,9 @@ class ProfileMs extends HttpServiceBase {
 if (asMain) {
     const options = parseOptions(process.argv);
     initResource(options).then(async context => {
-        await new ProfileMs(context).run()
+        await new AuthMs(context).run()
     }).catch(async error => {
-        console.error('Failed to initialized Profile MS', error);
+        console.error('Failed to initialized Auth MS', error);
         process.exit(1);
     })
 }
