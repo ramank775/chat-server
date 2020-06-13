@@ -1,4 +1,4 @@
-FROM gitpod/workspace-full
+FROM gitpod/workspace-mongodb
 
 COPY config/nginx.conf /etc/nginx/nginx.conf
 
