@@ -7,92 +7,46 @@
 	<title>Document</title>
 </head>
 
-<div id="connection">
+<div id="div_reg">
+	<input type="text" name="reg_name" id="reg_name" placeholder="Name"> <br />
+	<input type="text" name="reg_username" id="reg_username" placeholder="Username">
+    <label for="reg_username" id="reg_username_status"></label>
+    <br />
+	<input type="password" name="reg_password" id="reg_password" placeholder="password">
+	<button id="reg_submit">Register</button>
+</div>
+
+<div id="div_login">
+	<input type="text" name="login_username" id="login_username"> <br />
+	<input type="password" name="login_password" id="login_password">
+	<button id="login_submit">Login</button>
+</div>
+
+<!-- <div id="connection">
 	<input type="text" id="name" placeholder="your username">
 	<button onclick="connect()"> Connect </button>
-</div>
-<div>
-	<input type="text" id="msg" placeholder="Your msg to send..">
-    <input type="text" id="to" placeholder="to" >
-	<button onclick="sendMessage()">Send Message</button>
-</div>
-<div id="status"></div>
-<div>
-    Username: <span id="username"></span>
-</div>
-<div>
-	<ul id="message">
+</div> -->
+<div id="div_loggedIn">
+	<div id="status"></div>
+	<div>
+		Username: <span id="username"></span>
+	</div>
+	<div id="div_msg">
+		<input type="text" id="msg" placeholder="Your msg to send..">
+		<input type="text" id="to" placeholder="to" >
+		<button id="msg_submit">Send Message</button>
+	</div>
+	<div>
+		<ul id="message">
 
-	</ul>
+		</ul>
+	</div>
+
 </div>
 
 
 <body>
-	<script>
-		var ws;
-		function connect() {
-            let name = document.getElementById('name').value;
-            if(!name) {
-                alert("Name can't be empty");
-                return;
-            };
-            document.getElementById('username').innerText = name;
-            document.cookie = `user-id=${name}; path=/`;
-            connect_socket();
-            document.getElementById('connection').style.display = "none";
-        }
-        function uuidv4() {
-            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
-                var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
-                return v.toString(16);
-            });
-        }
-
-        function sendMessage() {
-            let msg = document.getElementById('msg').value;
-            let to = document.getElementById('to').value;
-            let sMesgae = {
-                message: msg,
-                to: to
-            }
-            ws.send(JSON.stringify(sMesgae));
-        }
-        
-        function connect_socket () {
-            if (window.WebSocket) {
-                
-                console.log("WebSocket object is supported in your browser");
-
-                const host = window.location.hostname;
-
-                ws = new WebSocket(`wss://${host}/wss/`);
-                
-                ws.onopen = function () {
-                    document.getElementById('status').innerText = "Connected";
-                    console.log("onopen");
-                };
-                ws.onmessage = function (e) {
-                    const msgSpace = document.getElementById('message');
-                    const newMsgItem =  document.createElement('li');
-                    newMsgItem.appendChild(document.createTextNode(e.data));
-                    msgSpace.appendChild(newMsgItem);
-                    console.log("echo from server : " + e.data);
-                };
-
-                ws.onclose = function () {
-                    console.log("onclose");
-                    document.getElementById('status').innerText = "Disconnected";
-                    document.getElementById('connection').style.display = "block";
-                };
-                ws.onerror = function () {
-                    console.log("onerror");
-                };
-
-            } else {
-                console.log("WebSocket object is not supported in your browser");
-            }
-        };
-	</script>
+	<script src="main.js"></script>
 </body>
 
 </html>

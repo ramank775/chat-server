@@ -30,12 +30,13 @@ class ProfileMs extends HttpServiceBase {
     constructor(context) {
         super(context);
         this.mongoClient = context.mongoClient;
-        this.dbCollection = context.mongodbClient.collection('profile');
+        this.profileCollection = context.mongodbClient.collection('profile');
+        this.authCollection = context.mongodbClient.collection('auth');
     }
 
     async init() {
         super.init();
-        this.addRoute('/exits', 'POST', async (req, _) => {
+        this.addRoute('/exit', 'POST', async (req, _) => {
             const username = req.payload.username;
             const exist = await this.isExists(username)
             return {
@@ -44,27 +45,88 @@ class ProfileMs extends HttpServiceBase {
         });
 
         this.addRoute('/register', 'POST', async (req, _) => {
-            const { payload } = req;
-            const exist = await this.isExists(payload.username);
+            const { payload: { username, secretPhase } } = req;
+            const exist = await this.isExists(username);
             if (exist) {
                 return {
                     status: false,
                     error: `username already taken`
                 }
             }
-            payload.addedOn = new Date().toUTCString();
-            payload.isActive = true;
-            await this.dbCollection.insertOne(payload);
+            const profile = {
+                username,
+                secretPhase,
+                addedOn: new Date().toUTCString(),
+                isActive: true
+            }
+            await this.profileCollection.insertOne(profile);
+            const accesskey = await this.getAccessKey(username)
             return {
                 status: true,
-                username: payload.username
+                username,
+                accesskey
             }
+        });
+
+        this.addRoute('/auth', ['GET', 'POST'], async (req, res) => {
+            const username = req.headers.user || req.state.user;
+            const accesskey = req.headers.accesskey || req.state.accesskey;
+            const authProfile = await this.authCollection.findOne({ username, accesskey })
+            if (!authProfile) {
+                return res({}).code(401);
+            }
+            return res({}).code(200);
+        });
+
+        this.addRoute('/login', 'POST', async (req, res) => {
+            const { payload: { username, secretPhase } } = req;
+            const profile = await this.profileCollection.findOne({ username, secretPhase });
+            if (!profile) {
+                return res.send({}).status(401);
+            }
+            const accesskey = await this.getAccessKey(username);
+            return {
+                status: true,
+                username,
+                accesskey
+            };
         })
+
     }
 
     async isExists(username) {
-        const count = await this.dbCollection.count({ username: username });
-        return count >0;
+        const count = await this.profileCollection.count({ username });
+        return count > 0;
+    }
+
+    async auth(username, accesskey) {
+        const resp = await this.authCollection.findOne({ username, accesskey });
+        return !!resp;
+    }
+
+    async getAccessKey(username) {
+        const newAccessKey = this.uuidv4();
+        const newAuthDoc = {
+            username,
+            accesskey: newAccessKey,
+            updatedOn: new Date().toUTCString()
+        }
+        await this.authCollection.update({ username }, {
+            $set: newAuthDoc,
+            $setOnInsert: {
+                addedOn: new Date().toUTCString()
+            }
+        }, {
+            upsert: true
+        });
+        return newAccessKey;
+    }
+
+    uuidv4() {
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+            var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+        });
     }
 
     async shutdown() {

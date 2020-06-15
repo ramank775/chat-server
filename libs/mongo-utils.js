@@ -4,10 +4,10 @@ const mongodb = require('mongodb'),
 
 function addMongodbOptions(cmd) {
     return cmd.option('--mongo-url <mongo-url>', 'Mongodb connection string mongodb://host:port/db')
-        .option('--mongo-auth', 'Enable authentication for mongodb')
+        .option('--mongo-auth', 'Enable authentication for mongodb', false)
         .option('--mongo-user <mongo-url>', 'Mongodb username for auth')
         .option('--mongo-password <mongo-password>', 'Mongodb password for auth')
-        .option('--mongo-ssl-enable', 'Enable SSL for connection')
+        .option('--mongo-ssl-enable', 'Enable SSL for connection', false)
         .option('--mongo-cert <cert-path>', 'Mongod client certificate path');
 }
 

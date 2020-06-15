@@ -32,7 +32,7 @@ class HttpServiceBase extends ServiceBase {
     }
 
     async run() {
-        super();
+        super.run();
         await this.hapiServer.start();
         this.log.info(`Hapi Http server start at ${this.hapiServer.info.uri}`)
     }

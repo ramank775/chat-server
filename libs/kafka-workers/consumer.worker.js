@@ -99,10 +99,11 @@ async function createKafakConsumer(options) {
 
 async function startKafkaConsumer() {
     log.info("running kafka consumer");
-    do {
-        consumer.consume();
-        await sleep(100);
-    } while (!exit)
+    // do {
+    //     consumer.consume();
+    //     await sleep(100);
+    // } while (!exit)
+    consumer.consume();
 }
 
 process.send('online');
