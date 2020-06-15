@@ -35,8 +35,9 @@ class ProfileMs extends HttpServiceBase {
     }
 
     async init() {
-        super.init();
-        this.addRoute('/exit', 'POST', async (req, _) => {
+        await super.init();
+        this.addRoute('/exist', 'POST', async (req, _) => {
+            this.log.info(`new request for exist with username ${req.payload}`)
             const username = req.payload.username;
             const exist = await this.isExists(username)
             return {
@@ -45,7 +46,7 @@ class ProfileMs extends HttpServiceBase {
         });
 
         this.addRoute('/register', 'POST', async (req, _) => {
-            const { payload: { username, secretPhase } } = req;
+            const { payload: { username, secretPhase, name } } = req;
             const exist = await this.isExists(username);
             if (exist) {
                 return {
@@ -54,6 +55,7 @@ class ProfileMs extends HttpServiceBase {
                 }
             }
             const profile = {
+                name,
                 username,
                 secretPhase,
                 addedOn: new Date().toUTCString(),

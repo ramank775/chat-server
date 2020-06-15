@@ -13,7 +13,7 @@ class HttpServiceBase extends ServiceBase {
 
     async init() {
         const { options } = this.context;
-        this.hapiServer = Hapi.Server({
+        this.hapiServer = Hapi.server({
             port: options.port,
             host: '127.0.0.1'
         });
@@ -26,13 +26,13 @@ class HttpServiceBase extends ServiceBase {
     addRoute(uri, method, handler) {
         this.hapiServer.route({
             method: method,
-            route: uri,
+            path: uri,
             handler: handler
         })
     }
 
     async run() {
-        super.run();
+        await super.run();
         await this.hapiServer.start();
         this.log.info(`Hapi Http server start at ${this.hapiServer.info.uri}`)
     }

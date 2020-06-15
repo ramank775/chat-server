@@ -120,13 +120,13 @@ async function encrypt(text, password, mode, length, ivLength) {
 
 function setupUI() {
     if (!isLogin()) {
-        document.getElementById('div_reg').style.visibility = true;
-        document.getElementById('div_login').style.visibility = true;
-        document.getElementById('div_loggedIn').style.visibility = false;
+        document.getElementById('div_reg').style.visibility = 'block';
+        document.getElementById('div_login').style.visibility = 'block';
+        document.getElementById('div_loggedIn').style.visibility = 'hidden';
         let isAvailable = false;
         document.getElementById('reg_username').onchange = (event) => {
             if (event.target.value && event.target.value.length > 4) {
-                post('/exit', {
+                fetch('/exist', {
                     method: 'post',
                     headers: new Headers({
                         'Content-Type': 'application/json'
@@ -135,7 +135,7 @@ function setupUI() {
                 }).then(response => response.json())
                     .then(({ status }) => {
                         isAvailable = status;
-                        document.getElementById('reg_submit').style.visibility = status;
+                        document.getElementById('reg_submit').style.visibility = status?'block':'hidden';
                     });
             }
         }
@@ -164,7 +164,7 @@ function setupUI() {
                 })
         }
 
-        document.getElementById('login_submit').onclick = (event) => {
+        document.getElementById('login_submit').onclick = async (event) => {
             const username = document.getElementById('login_username').value;
             const password = document.getElementById('login_password').value;
             if (!(username && password)) {
@@ -191,9 +191,9 @@ function setupUI() {
         }
     }
     else {
-        document.getElementById('div_reg').style.visibility = false;
-        document.getElementById('div_login').style.visibility = false;
-        document.getElementById('div_loggedIn').style.visibility = true;
+        document.getElementById('div_reg').style.visibility = 'hidden';
+        document.getElementById('div_login').style.visibility = 'hidden';
+        document.getElementById('div_loggedIn').style.visibility = 'block';
 
         document.getElementById('msg_submit').onclick = sendMessage;
     }
