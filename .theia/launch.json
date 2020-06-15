@@ -79,6 +79,19 @@
             ],
             "envFile": "${workspaceFolder}/.env",
             "autoAttachChildProcesses": true
+        }, {
+            "type": "node",
+            "request": "launch",
+            "name": "Launch profile MS",
+            "program": "${workspaceFolder}/services/profile-ms/profile-ms.js",
+            "args": [
+                "--app-name=profile-ms-1",
+                "--debug",
+                "--port=4000",
+                "--mongo-url=mongodb://localhost:27017/chat"
+            ],
+            "envFile": "${workspaceFolder}/.env",
+            "autoAttachChildProcesses": true
         }
     ]
 }

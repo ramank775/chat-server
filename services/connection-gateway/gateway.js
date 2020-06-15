@@ -165,7 +165,7 @@ class Gateway extends ServiceBase {
             var parts = cookie.split('=');
             cookies[parts.shift().trim()] = decodeURI(parts.join('='));
         })
-        return cookies['user-id'] || this.uuidv4();
+        return cookies['user'] || this.uuidv4();
     }
 
     uuidv4() {
