@@ -29,16 +29,14 @@ function isLogin() {
 }
 
 function connect(username, accesskey) {
-    let name = document.getElementById('name').value;
-    if (!name) {
+    if (!username) {
         alert("Name can't be empty");
         return;
     };
-    document.getElementById('username').innerText = name;
+    document.getElementById('username').innerText = username;
     document.cookie = `user=${username}; path=/`;
     document.cookie = `accesskey=${accesskey}; path=/`
     connect_socket();
-    document.getElementById('connection').style.display = "none";
 }
 
 function sendMessage() {
@@ -75,7 +73,6 @@ function connect_socket() {
         ws.onclose = function () {
             console.log("onclose");
             document.getElementById('status').innerText = "Disconnected";
-            document.getElementById('connection').style.display = "block";
         };
         ws.onerror = function () {
             console.log("onerror");
@@ -101,11 +98,11 @@ async function genEncryptionKey(password, mode, length) {
 }
 
 // Encrypt function
-async function encrypt(text, password, mode, length, ivLength) {
+async function encrypt(text, password, mode, length, iv) {
     var algo = {
         name: mode,
         length: length,
-        iv: crypto.getRandomValues(new Uint8Array(ivLength))
+        iv: iv
     };
     var key = await genEncryptionKey(password, mode, length);
     var encoded = new TextEncoder().encode(text);
@@ -117,7 +114,7 @@ async function encrypt(text, password, mode, length, ivLength) {
 }
 
 
-
+var iv = new Uint32Array([134, 234, 3, 43, 102, 50, 188, 176, 98, 100, 5, 143]);
 function setupUI() {
     if (!isLogin()) {
         document.getElementById('div_reg').style.visibility = 'block';
@@ -134,8 +131,8 @@ function setupUI() {
                     body: JSON.stringify({ username: event.target.value })
                 }).then(response => response.json())
                     .then(({ status }) => {
-                        isAvailable = status;
-                        document.getElementById('reg_submit').style.visibility = status?'block':'hidden';
+                        isAvailable = !status;
+                        document.getElementById('reg_submit').style.visibility = !status?'block':'hidden';
                     });
             }
         }
@@ -147,9 +144,9 @@ function setupUI() {
                 name: document.getElementById('reg_name').value,
                 username: document.getElementById('reg_username').value
             }
-            let password = document.getElementById('reg_password');
-            const { cipherText } = await encrypt(values.username, password, 'AES-GCM', 256, 12);
-            const decoder = TextDecoder();
+            let password = document.getElementById('reg_password').value;
+            const { cipherText } = await encrypt(values.username, password, 'AES-GCM', 256, iv);
+            const decoder = new TextDecoder();
             values.secretPhase = decoder.decode(cipherText);
             fetch('/register', {
                 method: 'post',
@@ -170,12 +167,15 @@ function setupUI() {
             if (!(username && password)) {
                 return;
             }
-            const { cipherText } = await encrypt(values.username, password, 'AES-GCM', 256, 12);
-            const decoder = TextDecoder();
+            const { cipherText } = await encrypt(username, password, 'AES-GCM', 256, iv);
+            const decoder = new TextDecoder();
             const secretPhase = decoder.decode(cipherText);
             fetch('/login', {
                 method: 'post',
-                body: JSON.stringify(values),
+                body: JSON.stringify({
+                    username,
+                    secretPhase
+                }),
                 headers: new Headers({
                     'Content-Type': 'application/json'
                 })

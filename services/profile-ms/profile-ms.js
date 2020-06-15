@@ -31,7 +31,7 @@ class ProfileMs extends HttpServiceBase {
         super(context);
         this.mongoClient = context.mongoClient;
         this.profileCollection = context.mongodbClient.collection('profile');
-        this.authCollection = context.mongodbClient.collection('auth');
+        this.authCollection = context.mongodbClient.collection('session_auth');
     }
 
     async init() {
@@ -75,9 +75,9 @@ class ProfileMs extends HttpServiceBase {
             const accesskey = req.headers.accesskey || req.state.accesskey;
             const authProfile = await this.authCollection.findOne({ username, accesskey })
             if (!authProfile) {
-                return res({}).code(401);
+                return res.response({}).code(401);
             }
-            return res({}).code(200);
+            return res.response({}).code(200);
         });
 
         this.addRoute('/login', 'POST', async (req, res) => {
