@@ -9,6 +9,7 @@ const kafka = require('../../libs/kafka-utils'),
         addMongodbOptions,
         initMongoClient
     } = require('../../libs/mongo-utils'),
+    mongo = require('mongodb'),
     asMain = (require.main === module);
 
 async function prepareEventListFromKafkaTopics(context) {
@@ -31,11 +32,10 @@ async function initDatabase(context) {
     const messageCollection = mongodbClient.collection("ps_message")
     const db = {}
     db.save = async function (message) {
-        const user = message.to;
-        delete message.to;
+        const user = message.META.to;
         await messageCollection.update({ user }, {
             $push: {
-                messages: { ...message }
+                messages: { _id: new mongo.ObjectID(), payload: message.payload }
             },
             $setOnInsert: {
                 user
@@ -46,13 +46,12 @@ async function initDatabase(context) {
     }
     db.getUndeliveredMessageByUser = async function (user) {
         const user_records = await messageCollection.findOne({ user });
-        return user_records?user_records.messages: [];
+        return user_records ? user_records.messages : [];
     }
     db.removeMessageByUser = async function (user, messages) {
-        const messages_ids = messages.map(x => x._id);
         await messageCollection.update({ user }, {
             $pull: {
-                "messages._id": { $in: messages_ids }
+                messages: { _id: { $in: messages } }
             }
         });
     }
@@ -87,7 +86,7 @@ class PersistenceMessageMS extends ServiceBase {
         super(context);
     }
     init() {
-        const { listener, events, publisher, db } = this.context;
+        const { listener, events, publisher, db, options: { appName } } = this.context;
         listener.onMessage = async (event, message) => {
             switch (event) {
                 case events['send-message-db']:
@@ -96,17 +95,14 @@ class PersistenceMessageMS extends ServiceBase {
                 case events['user-connected']:
                     const messages = await db.getUndeliveredMessageByUser(message.user);
                     if (!(messages && messages.length)) break;
-                    // remove the unncessary keys which are not intented to be shared with user
-                    const messagesToSend = messages.map(x => {
-                        const { _id, to, ...y } = x;
-                        return y;
-                    });
+                    const payload = messages.map(x => x.payload);
                     const sendMessage = {
-                        to: message.user,
-                        messages: messagesToSend
+                        META: { to: message.user, parsed: true, retry: 0, from: appName },
+                        payload
                     }
                     publisher.send(events['new-message'], sendMessage, message.user);
-                    await db.removeMessageByUser(message.user, messages);
+                    const messages_ids = messages.map(x => x._id);
+                    await db.removeMessageByUser(message.user, messages_ids);
                     break;
             }
         }

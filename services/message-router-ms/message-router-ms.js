@@ -54,25 +54,41 @@ class MessageRouterMS extends ServiceBase {
         const { listener, listenerEvents, publisher, events } = this.context;
         listener.onMessage = async (topic, message) => {
             if (topic === listenerEvents['error-message-sent']) {
-                message.retry = message.retry || 0;
-                message.retry += 1;
-                if (message.retry > this.maxRetryCount) {
+                message.META.retry = message.META.retry || 0;
+                message.META.retry += 1;
+                if (message.META.retry > this.maxRetryCount) {
                     publisher.send(events['message-sent-failed'], message);
                     return;
                 }
             }
-           await this.redirectMessage(message.to, message);
+            await this.redirectMessage(message);
         }
 
     }
-    async redirectMessage(user, message) {
+    async redirectMessage(message) {
         const { publisher } = this.context;
+        if (!message.META.parsed) {
+            message = await this.formatMessage(message);
+        }
+        const user = message.META.to;
         const server = await this.getServer(user);
         publisher.send(server, message, user);
     }
 
+    async formatMessage(message) {
+        const { META: meta, payload } = message;
+        const parsedPayload = JSON.parse(payload);
+        const { to, type, ...msg } = parsedPayload;
+        msg.from = meta.from;
+        const formattedMessage = {
+            META: { to, type, ...meta, parsed: true },
+            payload: JSON.stringify(msg)
+        }
+        return formattedMessage;
+    }
+
     async shutdown() {
-        const {publisher, listener} = this.context;
+        const { publisher, listener } = this.context;
         await publisher.disconnect();
         await listener.disconnect();
     }
@@ -86,7 +102,7 @@ class MessageRouterMS extends ServiceBase {
                 user
             });
             client.on('response', (data) => {
-                if(data.code != 200) {
+                if (data.code != 200) {
                     reject(data);
                     return;
                 }
