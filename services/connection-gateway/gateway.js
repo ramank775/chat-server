@@ -87,13 +87,13 @@ class Gateway extends ServiceBase {
         }
         this.messageEvents = {
             onNewMessage: function (message) {
-                publishEvent(events['new-message'], message.from, message)
+                publishEvent(events['new-message'], message.META.from, message)
             },
             onMessageSent: function (message) {
-                publishEvent(events['message-sent'], message.from, message)
+                publishEvent(events['message-sent'], message.META.from, message)
             },
             onMessageSentFailed: function (message, err) {
-                publishEvent(events['error-message-sent'], message.from, {
+                publishEvent(events['error-message-sent'], message.META.from, {
                     message: message,
                     error: err
                 });
@@ -111,8 +111,12 @@ class Gateway extends ServiceBase {
             ws.user = user;
             userEvents.onConnect(user);
             ws.on('message', function (msg) {
-                const message = JSON.parse(msg);
-                message.from = this.user;
+                const message = {
+                    payload: msg,
+                    META: {
+                        from: this.user
+                    }
+                };
                 messageEvents.onNewMessage(message);
             });
             ws.on('close', function (code, reason) {
@@ -121,9 +125,9 @@ class Gateway extends ServiceBase {
             })
         });
         listener.onMessage = (topic, message) => {
-            const ws = userSocketMapping[message.to];
+            const ws = userSocketMapping[message.META.to];
             if (ws) {
-                const payload = JSON.stringify(message);
+                const payload = message.payload;
                 ws.send(payload);
                 messageEvents.onMessageSent(message);
                 return;
