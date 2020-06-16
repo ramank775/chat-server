@@ -95,7 +95,7 @@ class PersistenceMessageMS extends ServiceBase {
                 case events['user-connected']:
                     const messages = await db.getUndeliveredMessageByUser(message.user);
                     if (!(messages && messages.length)) break;
-                    const payload = messages.map(x => x.payload);
+                    const payload = JSON.stringify( messages.map(x => x.payload));
                     const sendMessage = {
                         META: { to: message.user, parsed: true, retry: 0, from: appName },
                         payload

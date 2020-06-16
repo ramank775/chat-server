@@ -17,10 +17,22 @@ function getCookie(cname) {
     return "";
 }
 
+function setCookie(cname, cvalue, exdays) {
+  var d = new Date();
+  d.setTime(d.getTime() + (exdays*24*60*60*1000));
+  var expires = "expires="+ d.toUTCString();
+  document.cookie = cname + "=" + cvalue + ";" + expires + ";path=/";
+}
+
 function getUserInfo() {
     const username = getCookie('user');
     const accesskey = getCookie('accesskey');
     return [username, accesskey];
+}
+
+function login(username, accesskey) {
+    setCookie('user', username, 1000);
+    setCookie('accesskey', accesskey, 1000);
 }
 
 function isLogin() {
@@ -28,14 +40,9 @@ function isLogin() {
     return !!(username && accesskey)
 }
 
-function connect(username, accesskey) {
-    if (!username) {
-        alert("Name can't be empty");
-        return;
-    };
+function connect() {
+    const [username] = getUserInfo();
     document.getElementById('username').innerText = username;
-    document.cookie = `user=${username}; path=/`;
-    document.cookie = `accesskey=${accesskey}; path=/`
     connect_socket();
 }
 
@@ -65,6 +72,7 @@ function connect_socket() {
         ws.onmessage = function (e) {
             const msgSpace = document.getElementById('message');
             const newMsgItem = document.createElement('li');
+            console.log(e.data);
             newMsgItem.appendChild(document.createTextNode(e.data));
             msgSpace.appendChild(newMsgItem);
             console.log("echo from server : " + e.data);
@@ -83,43 +91,11 @@ function connect_socket() {
     }
 };
 
-async function genEncryptionKey(password, mode, length) {
-    var algo = {
-        name: 'PBKDF2',
-        hash: 'SHA-256',
-        salt: new TextEncoder().encode('a-unique-salt'),
-        iterations: 1000
-    };
-    var derived = { name: mode, length: length };
-    var encoded = new TextEncoder().encode(password);
-    var key = await crypto.subtle.importKey('raw', encoded, { name: 'PBKDF2' }, false, ['deriveKey']);
-
-    return crypto.subtle.deriveKey(algo, key, derived, false, ['encrypt', 'decrypt']);
-}
-
-// Encrypt function
-async function encrypt(text, password, mode, length, iv) {
-    var algo = {
-        name: mode,
-        length: length,
-        iv: iv
-    };
-    var key = await genEncryptionKey(password, mode, length);
-    var encoded = new TextEncoder().encode(text);
-
-    return {
-        cipherText: await crypto.subtle.encrypt(algo, key, encoded),
-        iv: algo.iv
-    };
-}
-
-
-var iv = new Uint32Array([134, 234, 3, 43, 102, 50, 188, 176, 98, 100, 5, 143]);
 function setupUI() {
     if (!isLogin()) {
-        document.getElementById('div_reg').style.visibility = 'block';
-        document.getElementById('div_login').style.visibility = 'block';
-        document.getElementById('div_loggedIn').style.visibility = 'hidden';
+        document.getElementById('div_reg').style.display = 'block';
+        document.getElementById('div_login').style.display = 'block';
+        document.getElementById('div_loggedIn').style.display = 'none';
         let isAvailable = false;
         document.getElementById('reg_username').onchange = (event) => {
             if (event.target.value && event.target.value.length > 4) {
@@ -132,7 +108,7 @@ function setupUI() {
                 }).then(response => response.json())
                     .then(({ status }) => {
                         isAvailable = !status;
-                        document.getElementById('reg_submit').style.visibility = !status?'block':'hidden';
+                        document.getElementById('reg_submit').style.display = !status?'block':'none';
                     });
             }
         }
@@ -142,12 +118,9 @@ function setupUI() {
                 return;
             let values = {
                 name: document.getElementById('reg_name').value,
-                username: document.getElementById('reg_username').value
+                username: document.getElementById('reg_username').value,
+                secretPhase: document.getElementById('reg_password').value
             }
-            let password = document.getElementById('reg_password').value;
-            const { cipherText } = await encrypt(values.username, password, 'AES-GCM', 256, iv);
-            const decoder = new TextDecoder();
-            values.secretPhase = decoder.decode(cipherText);
             fetch('/register', {
                 method: 'post',
                 body: JSON.stringify(values),
@@ -156,20 +129,18 @@ function setupUI() {
                 })
             }).then(res => res.json())
                 .then(res => {
-                    connect(res.username, res.accesskey);
+                    login(res.username, res.accesskey);
                     setupUI();
+                    
                 })
         }
 
         document.getElementById('login_submit').onclick = async (event) => {
             const username = document.getElementById('login_username').value;
-            const password = document.getElementById('login_password').value;
-            if (!(username && password)) {
+            const secretPhase = document.getElementById('login_password').value;
+            if (!(username && secretPhase)) {
                 return;
             }
-            const { cipherText } = await encrypt(username, password, 'AES-GCM', 256, iv);
-            const decoder = new TextDecoder();
-            const secretPhase = decoder.decode(cipherText);
             fetch('/login', {
                 method: 'post',
                 body: JSON.stringify({
@@ -185,26 +156,23 @@ function setupUI() {
                         alert('Loggin failed');
                         return;
                     }
-                    connect(res.username, res.accesskey);
+                    login(res.username, res.accesskey);
                     setupUI();
                 })
         }
     }
     else {
-        document.getElementById('div_reg').style.visibility = 'hidden';
-        document.getElementById('div_login').style.visibility = 'hidden';
-        document.getElementById('div_loggedIn').style.visibility = 'block';
+        document.getElementById('div_reg').style.display = 'none';
+        document.getElementById('div_login').style.display = 'none';
+        document.getElementById('div_loggedIn').style.display = 'block';
 
         document.getElementById('msg_submit').onclick = sendMessage;
+        connect();
     }
 }
 
 
 window.onload = () => {
     setupUI();
-    if (isLogin()) {
-        const [username, accesskey] = getUserInfo();
-        connect(username, accesskey);
-    }
 }
 
