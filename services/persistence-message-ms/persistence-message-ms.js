@@ -5,6 +5,10 @@ const kafka = require('../../libs/kafka-utils'),
         initDefaultResources,
         resolveEnvVariables
     } = require('../../libs/service-base'),
+    {
+        addMongodbOptions,
+        initMongoClient
+    } = require('../../libs/mongo-utils'),
     asMain = (require.main === module);
 
 async function prepareEventListFromKafkaTopics(context) {
@@ -23,34 +27,46 @@ async function prepareEventListFromKafkaTopics(context) {
 }
 //#region DB 
 async function initDatabase(context) {
-    // TODO: add a real db
+    const { mongodbClient } = context;
+    const messageCollection = mongodbClient.collection("ps_message")
     const db = {}
-    db.save = function (message) {
-        this[message.to] = [...(this[message.to] || [message])]
+    db.save = async function (message) {
+        const user = message.to;
+        delete message.to;
+        await messageCollection.update({ user }, {
+            $push: {
+                messages: { ...message }
+            },
+            $setOnInsert: {
+                user
+            }
+        }, {
+            upsert: true
+        });
     }
-    db.getUndeliveredMessageByUser = function (user) {
-        return this[user];
+    db.getUndeliveredMessageByUser = async function (user) {
+        const user_records = await messageCollection.findOne({ user });
+        return user_records?user_records.messages: [];
     }
-    db.removeMessageByUser = function(user, messages) {
-        let msgs = this[user];
-        if (msgs && msgs.length > 0) {
-            msgs.splice(0, messages.length)
-        }
+    db.removeMessageByUser = async function (user, messages) {
+        const messages_ids = messages.map(x => x._id);
+        await messageCollection.update({ user }, {
+            $pull: {
+                "messages._id": { $in: messages_ids }
+            }
+        });
     }
     context.db = db;
     return context;
 }
 
-function addStandardDbOptions(cmd) {
-    // TODO: add db configuration options
-    return cmd;
-}
 //#endregion
 async function initResources(options) {
     const context = await initDefaultResources(options)
         .then(prepareEventListFromKafkaTopics)
         .then(kafka.initEventProducer)
         .then(kafka.initEventListener)
+        .then(initMongoClient)
         .then(initDatabase);
     return context;
 }
@@ -59,6 +75,7 @@ function parseOptions(argv) {
     let cmd = initDefaultOptions();
     cmd = kafka.addStandardKafkaOptions(cmd);
     cmd = kafka.addKafkaSSLOptions(cmd);
+    cmd = addMongodbOptions(cmd);
     cmd.option('--kafka-user-connected-topic <user-connect-topic>', 'Used by consumer to consume new message when a user connected to server')
         .option('--kafka-persistence-message-topic <presistence-message-topic>', 'Used by producer to produce new message to saved into a persistence db')
         .option('--kafka-new-message-topic <new-message-topic>', 'Used by producer to produce new message for saved incoming message');
@@ -71,20 +88,25 @@ class PersistenceMessageMS extends ServiceBase {
     }
     init() {
         const { listener, events, publisher, db } = this.context;
-        listener.onMessage = (event, message) => {
+        listener.onMessage = async (event, message) => {
             switch (event) {
                 case events['send-message-db']:
-                    db.save(message);
+                    await db.save(message);
                     break;
                 case events['user-connected']:
-                    const messages = db.getUndeliveredMessageByUser(message.user);
+                    const messages = await db.getUndeliveredMessageByUser(message.user);
                     if (!(messages && messages.length)) break;
+                    // remove the unncessary keys which are not intented to be shared with user
+                    const messagesToSend = messages.map(x => {
+                        const { _id, to, ...y } = x;
+                        return y;
+                    });
                     const sendMessage = {
                         to: message.user,
-                        messages
+                        messages: messagesToSend
                     }
                     publisher.send(events['new-message'], sendMessage, message.user);
-                    db.removeMessageByUser(message.user, messages);
+                    await db.removeMessageByUser(message.user, messages);
                     break;
             }
         }
