@@ -75,7 +75,8 @@
                 "--kafka-new-message-topic=${TOPIC_NEW_MESSAGE}",
                 "--kafka-broker-list=${BROKER_LIST}",
                 "--session-service-url=localhost:8001",
-                "--kafka-persistence-message-topic=${TOPIC_DB_MESSAGE}"
+                "--kafka-persistence-message-topic=${TOPIC_DB_MESSAGE}",
+                "--mongo-url=mongodb://localhost:27017/chat"
             ],
             "envFile": "${workspaceFolder}/.env",
             "autoAttachChildProcesses": true
