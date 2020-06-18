@@ -11,6 +11,9 @@ const {
         addMongodbOptions,
         initMongoClient
     } = require('../../libs/mongo-utils'),
+    {
+        getContentTypeByExt
+    } = require('../../libs/context-type-utils')
     fs = require('fs'),
     path = require('path'),
     { Promise } = require('bluebird'),
@@ -20,6 +23,7 @@ function parseOptions(argv) {
     let cmd = initDefaultOptions();
     cmd = addStandardHttpOptions(cmd);
     cmd = addMongodbOptions(cmd);
+    cmd = addFileServiceOptions(cmd);
     return resolveEnvVariables(cmd.parse(argv).opts())
 }
 
@@ -29,13 +33,13 @@ async function initResource(options) {
         .then(initFileService)
 }
 
-async function addFileServiceOptions(cmd) {
-    cmd.options('--basedir', 'base directory for upload', 'uploads')
+function addFileServiceOptions(cmd) {
+    cmd.option('--base-upload-dir <upload-dir>', 'base directory for upload', 'uploads')
     return cmd;
 }
 
 async function initFileService(context) {
-    const { options: { basedir } } = context;
+    const { options: { baseUploadDir: basedir } } = context;
     if (!fs.existsSync(basedir)) {
         fs.mkdirSync(basedir);
     }
@@ -43,17 +47,31 @@ async function initFileService(context) {
         return path.join(basedir, filename);
     };
     const fileService = {}
-    fileService.save = async (filestream, options) => {
+    fileService.save = async (file, options) => {
         const { filename } = options;
         const filepath = getfilePath(filename)
-        const writeFile = Promise.promisify(fs.writeFile)
-        await writeFile(filepath, filestream);
-        return { filename }
+        const fileStream = fs.createWriteStream(filepath);
+
+        const filePromise = new Promise((resolve, reject) => {
+            file.on('error', function (err) {
+                reject(err);
+            });
+
+            file.pipe(fileStream);
+
+            file.on('end', function (err) {
+
+                resolve({ filename });
+            })
+        })
+        const fileDetails = await filePromise;
+        return fileDetails
     };
     fileService.get = async (filename) => {
-        const filepath = getfilePath(filename)
-        const readfile = Promise.promisify(fs.readFile);
-        return readfile(filepath);
+        const exists = Promise.promisify(fs.exists);
+        const filepath = getfilePath(filename);
+        if (!fs.existsSync(filepath)) return null;
+        return fs.createReadStream(filepath);
     }
 
     fileService.delete = async (filename) => {
@@ -70,20 +88,55 @@ class ImageMS extends HttpServiceBase {
         super(context);
         this.mongoClient = this.context.mongoClient;
         this.filePermission = this.context.mongodbClient.collection('file_permission');
+        this.fileService = this.context.fileService;
     }
 
     async init() {
         await super.init();
-        this.addRoute('/upload', 'POST', (res, h) => {
 
+        this.addRoute('/upload', 'POST', async (req, h) => {
+            const { file, accesslist =[]} = req.payload;
+            const user = req.headers.user || req.state.user;
+            const filename = this.getFilename(file);
+            accesslist.push(user)
+            const finalAccesslist = new Set(accesslist)
+            const fileObject = { user, filename, accesslist: [...finalAccesslist], addedon: new Date().toUTCString() };
+            await this.filePermission.insert(fileObject);
+            await this.fileService.save(file, { filename });
+            return { filename }
+        }, {
+            payload: {
+                output: 'stream',
+                parse: true,
+                allow: 'multipart/form-data',
+                multipart: true
+            }
         });
 
-        this.addRoute('/share', 'POST', (res, h) => {
-
+        this.addRoute('/{filename}', 'GET', async (req, h) => {
+            const { filename } = req.params;
+            const user = req.headers.user || req.state.user;
+            const file_permission = await this.filePermission.findOne({ filename, $or: [{ accesslist: '*' }, { accesslist: user }] });
+            if (!file_permission) {
+                return h.send({ error: 'file not found' }).status(404);
+            }
+            const file = await this.fileService.get(filename);
+            if (!file) return;
+            const fileExt = path.extname(filename);
+            const response = h.response(file).type(getContentTypeByExt(fileExt))
+            return response;
         });
+    }
 
-        this.addRoute('/{filename}', 'GET', (res, h) => {
-
+    getFilename(file) {
+        const ext = path.extname(file.hapi.filename);
+        const filename = path.basename(file.hapi.filename, ext);
+        return `${filename}.${this.uuidv4()}${ext}`;
+    }
+    uuidv4() {
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+            var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
         });
     }
 

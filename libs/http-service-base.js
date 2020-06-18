@@ -12,23 +12,29 @@ class HttpServiceBase extends ServiceBase {
     }
 
     async init() {
-        const { options } = this.context;
+        const { options, log } = this.context;
         this.hapiServer = Hapi.server({
             port: options.port,
             host: '127.0.0.1'
         });
 
+        this.hapiServer.ext('onRequest', (req, h) => {
+            log.info(`new request : ${req.url}`)
+            return h.continue;
+        })
+
         this.addRoute('/alive', 'GET', () => {
             return "OK";
-        })
+        });
     }
 
-    addRoute(uri, method, handler) {
+    addRoute(uri, method, handler, options={}) {
         this.hapiServer.route({
             method: method,
             path: uri,
-            handler: handler
-        })
+            handler: handler,
+            options: options
+        });
     }
 
     async run() {
