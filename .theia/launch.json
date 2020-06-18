@@ -93,6 +93,20 @@
             ],
             "envFile": "${workspaceFolder}/.env",
             "autoAttachChildProcesses": true
+        }, {
+            "type": "node",
+            "request": "launch",
+            "name": "Launch file MS",
+            "program": "${workspaceFolder}/services/file-ms/file-ms.js",
+            "args": [
+                "--app-name=file-ms-1",
+                "--debug",
+                "--port=4001",
+                "--mongo-url=mongodb://localhost:27017/chat",
+                "--base-upload-dir=/workspace/upload"
+            ],
+            "envFile": "${workspaceFolder}/.env",
+            "autoAttachChildProcesses": true
         }
     ]
 }
