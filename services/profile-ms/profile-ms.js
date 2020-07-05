@@ -11,7 +11,8 @@ const {
         addMongodbOptions,
         initMongoClient
     } = require('../../libs/mongo-utils'),
-    asMain = (require.main === module);
+    { uuidv4, extractInfoFromRequest } = require('../../helper')
+asMain = (require.main === module);
 
 
 function parseOptions(argv) {
@@ -66,13 +67,14 @@ class ProfileMs extends HttpServiceBase {
             return {
                 status: true,
                 username,
-                accesskey
+                accesskey,
+                name
             }
         });
 
         this.addRoute('/auth', ['GET', 'POST'], async (req, res) => {
-            const username = req.headers.user || req.state.user;
-            const accesskey = req.headers.accesskey || req.state.accesskey;
+            const username = extractInfoFromRequest(req, 'user');
+            const accesskey = extractInfoFromRequest(req, 'accesskey');
             const authProfile = await this.authCollection.findOne({ username, accesskey })
             if (!authProfile) {
                 return res.response({}).code(401);
@@ -90,8 +92,59 @@ class ProfileMs extends HttpServiceBase {
             return {
                 status: true,
                 username,
-                accesskey
+                accesskey,
+                name: profile.name
             };
+        });
+
+        this.addRoute('/search', 'GET', async (req) => {
+            const searchText = req.query.q;
+            const username = extractInfoFromRequest(req, 'user');
+            if (searchText.length < 4) {
+                return [];
+            }
+            try {
+                let users = await this.profileCollection.find({
+                    $and: [
+                        { isActive: true },
+                        {
+                            username: {
+                                $ne: username
+                            }
+                        },
+                        {
+                            $or: [
+                                {
+                                    name: {
+                                        $regex: searchText,
+                                        $options: 'i'
+                                    }
+                                },
+                                {
+                                    username: {
+                                        $regex: searchText,
+                                        $options: 'i'
+                                    }
+                                }
+                            ]
+
+                        }
+                    ]
+                }, { projection: { _id: 0, name: 1, username: 1 } }).toArray();
+                return users;
+            } catch (error) {
+                console.log(error)
+            }
+            return [];
+        })
+
+        this.addRoute('/get', 'GET', async (req) => {
+            const username = req.query.username;
+            if (!username) {
+                return {};
+            }
+            let user = await this.profileCollection.findOne({ username });
+            return user || {};
         })
 
     }
@@ -107,7 +160,7 @@ class ProfileMs extends HttpServiceBase {
     }
 
     async getAccessKey(username) {
-        const newAccessKey = this.uuidv4();
+        const newAccessKey = uuidv4();
         const newAuthDoc = {
             username,
             accesskey: newAccessKey,
@@ -122,13 +175,6 @@ class ProfileMs extends HttpServiceBase {
             upsert: true
         });
         return newAccessKey;
-    }
-
-    uuidv4() {
-        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
-            var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
-            return v.toString(16);
-        });
     }
 
     async shutdown() {

@@ -17,6 +17,7 @@ const {
     fs = require('fs'),
     path = require('path'),
     { Promise } = require('bluebird'),
+    { uuidv4, extractInfoFromRequest } = require('../../helper'),
     asMain = (require.main === module);
 
 function parseOptions(argv) {
@@ -94,9 +95,9 @@ class ImageMS extends HttpServiceBase {
     async init() {
         await super.init();
 
-        this.addRoute('/upload', 'POST', async (req, h) => {
+        this.addRoute('/upload', 'POST', async (req, _) => {
             const { file, accesslist =[]} = req.payload;
-            const user = req.headers.user || req.state.user;
+            const user = extractInfoFromRequest(req, 'user');
             const filename = this.getFilename(file);
             accesslist.push(user)
             const finalAccesslist = new Set(accesslist)
@@ -115,7 +116,7 @@ class ImageMS extends HttpServiceBase {
 
         this.addRoute('/{filename}', 'GET', async (req, h) => {
             const { filename } = req.params;
-            const user = req.headers.user || req.state.user;
+            const user = extractInfoFromRequest(req, user);
             const file_permission = await this.filePermission.findOne({ filename, $or: [{ accesslist: '*' }, { accesslist: user }] });
             if (!file_permission) {
                 return h.send({ error: 'file not found' }).status(404);
@@ -131,15 +132,9 @@ class ImageMS extends HttpServiceBase {
     getFilename(file) {
         const ext = path.extname(file.hapi.filename);
         const filename = path.basename(file.hapi.filename, ext);
-        return `${filename}.${this.uuidv4()}${ext}`;
+        return `${filename}.${uuidv4()}${ext}`;
     }
-    uuidv4() {
-        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
-            var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
-            return v.toString(16);
-        });
-    }
-
+   
     async shutdown() {
         await super.shutdown();
         await this.mongoClient.close();

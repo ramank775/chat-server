@@ -8,6 +8,7 @@ const
         initDefaultResources,
         resolveEnvVariables } = require('../../libs/service-base'),
     kafka = require('../../libs/kafka-utils'),
+    { uuidv4 } = require('../../helper'),
     asMain = (require.main === module)
 
 async function initWebsocket(context) {
@@ -169,14 +170,7 @@ class Gateway extends ServiceBase {
             var parts = cookie.split('=');
             cookies[parts.shift().trim()] = decodeURI(parts.join('='));
         })
-        return cookies['user'] || this.uuidv4();
-    }
-
-    uuidv4() {
-        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
-            var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
-            return v.toString(16);
-        });
+        return cookies['user'] || uuidv4();
     }
 }
 
