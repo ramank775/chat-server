@@ -143,7 +143,7 @@ class ProfileMs extends HttpServiceBase {
             if (!username) {
                 return {};
             }
-            let user = await this.profileCollection.findOne({ username });
+            let user = await this.profileCollection.findOne({ username, isActive:true },{projection: { _id: 0, name: 1, username: 1 }});
             return user || {};
         })
 
