@@ -16,6 +16,7 @@ const {
         addJsonServerOptions,
         initJsonServer 
     } = require('../../libs/json-socket-utils'),
+    kafka = require('../../libs/kafka-utils'),
     asMain = (require.main === module);
 
 
@@ -24,6 +25,9 @@ function parseOptions(argv) {
     cmd = addStandardHttpOptions(cmd);
     cmd = addMongodbOptions(cmd);
     cmd = addJsonServerOptions(cmd);
+    cmd = kafka.addStandardKafkaOptions(cmd);
+    cmd = kafka.addKafkaSSLOptions(cmd);
+    cmd = cmd.option('--kafka-new-group-message-topic <new-group-message-topic>', 'Used by consumer to consume new group message for each new incoming message');
     return resolveEnvVariables(cmd.parse(argv).opts())
 }
 
@@ -31,6 +35,7 @@ async function initResource(options) {
     return await initDefaultResources(options)
         .then(initMongoClient)
         .then(initJsonServer)
+        .then(kafka.initEventProducer)
 }
 
 
@@ -39,6 +44,7 @@ class GroupMs extends HttpServiceBase {
         super(context);
         this.mongoClient = context.mongoClient;
         this.groupCollection = context.mongodbClient.collection('group');
+        this.publisher = this.context.publisher;
     }
 
     async init() {
@@ -60,6 +66,13 @@ class GroupMs extends HttpServiceBase {
                 payload.members.push({ username: member, role: (member === user) ? 'admin' : 'user' });
             });
             await this.groupCollection.insertOne(payload);
+            this.sendNotification({
+                sender: user,
+                receivers: members,
+                groupId: payload.groupId,
+                module: 'group',
+                action: 'add'
+            });
             return {
                 groupId: payload.groupId
             }
@@ -80,6 +93,13 @@ class GroupMs extends HttpServiceBase {
             }
             const newMembers = members.map(member => ({ username: member, role: 'user' }));
             await this.groupCollection.updateOne({ _id: group._id }, { $addToSet: { members: { $each: newMembers } } });
+            this.sendNotification({
+                sender: user,
+                receivers: members,
+                groupId: groupId,
+                module: 'group',
+                action: 'add'
+            });
             return { status: true }
         });
 
@@ -112,7 +132,13 @@ class GroupMs extends HttpServiceBase {
                     await this.groupCollection.updateOne({ _id: group._id, 'members.username': nextAdmin.username }, { 'members.$.role': 'admin' });
                 }
             }
-
+            this.sendNotification({
+                sender: user,
+                receivers: group.members,
+                groupId: groupId,
+                module: 'group',
+                action: 'remove'
+            });
             return {
                 status: true
             }
@@ -169,9 +195,29 @@ class GroupMs extends HttpServiceBase {
         });
     }
 
+    sendNotification(notification) {
+        const { kafkaNewGroupMessageTopic } = this.options;
+        const {sender, receivers, groupId, ...body} = notification;
+        const type = 'group';
+        body.from = sender;
+        body.to = groupId;
+        body.category = 'notification';
+        const message = {
+            META: {
+                to: groupId
+                users: receivers,
+                from: sender,
+                category: 'notification'
+                type
+            },
+            payload : JSON.stringify(body)
+        };
+        this.publisher.send(kafkaNewGroupMessageTopic, message, sender);
+    }
     async shutdown() {
         await super.shutdown();
-        await this.context.mongoClient.close()
+        await this.context.mongoClient.close();
+        await this.publisher.disconnect();
     }
 }
 
