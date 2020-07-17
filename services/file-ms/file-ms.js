@@ -13,7 +13,7 @@ const {
     } = require('../../libs/mongo-utils'),
     {
         getContentTypeByExt
-    } = require('../../libs/context-type-utils')
+    } = require('../../libs/content-type-utils')
     fs = require('fs'),
     path = require('path'),
     { Promise } = require('bluebird'),

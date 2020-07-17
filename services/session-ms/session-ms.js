@@ -89,6 +89,14 @@ class SessionMS extends ServiceBase {
                 'get-user-status': (message) => {
                     const { user } = message;
                     return this.getUserStatus(user);
+                },
+                'get-servers': (message) => {
+                    const { users } = message;
+                    const serverMapping = {};
+                    for (const user of users) {
+                        serverMapping[user] = this.getServer(user);
+                    }
+                    return serverMapping;
                 }
             };
 
