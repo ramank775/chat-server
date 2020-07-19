@@ -38,7 +38,7 @@ function parseOptions(argv) {
         .option('--kafka-persistence-message-topic <persistence-message-topic>', 'Used by producer to produce new message to saved into a persistence db')
         .option('--session-service-url <session-service-url>', 'URL of session service')
         .option('--group-service-url <group-service-url>', 'URL of group service')
-    return resolveEnvVariables(cmd.parse(argv).opts());
+    return cmd.parse(argv).opts();
 }
 
 class GroupMessageRouterMS extends ServiceBase {
@@ -147,7 +147,8 @@ class GroupMessageRouterMS extends ServiceBase {
 
 
 if (asMain) {
-    const options = parseOptions(process.argv);
+    const argv = resolveEnvVariables(process.argv);
+    const options = parseOptions(argv);
     initResources(options)
         .then(async context => {
             await new GroupMessageRouterMS(context).run()

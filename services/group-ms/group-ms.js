@@ -12,9 +12,9 @@ const {
         initMongoClient
     } = require('../../libs/mongo-utils'),
     { uuidv4, extractInfoFromRequest } = require('../../helper'),
-    { 
+    {
         addJsonServerOptions,
-        initJsonServer 
+        initJsonServer
     } = require('../../libs/json-socket-utils'),
     kafka = require('../../libs/kafka-utils'),
     asMain = (require.main === module);
@@ -28,7 +28,7 @@ function parseOptions(argv) {
     cmd = kafka.addStandardKafkaOptions(cmd);
     cmd = kafka.addKafkaSSLOptions(cmd);
     cmd = cmd.option('--kafka-new-group-message-topic <new-group-message-topic>', 'Used by consumer to consume new group message for each new incoming message');
-    return resolveEnvVariables(cmd.parse(argv).opts())
+    return cmd.parse(argv).opts();
 }
 
 async function initResource(options) {
@@ -43,7 +43,7 @@ class GroupMs extends HttpServiceBase {
     constructor(context) {
         super(context);
         this.mongoClient = context.mongoClient;
-        this.groupCollection = context.mongodbClient.collection('group');
+        this.groupCollection = context.mongodbClient.collection('groups');
         this.publisher = this.context.publisher;
         this.jsonServer = this.context.jsonServer;
     }
@@ -79,10 +79,10 @@ class GroupMs extends HttpServiceBase {
             }
         });
 
-        this.addRoute('/{groupId}/add', 'POST', async (req, h) => {
+        this.addRoute('/{groupId}/add', 'POST', async (req, res) => {
             const user = extractInfoFromRequest(req, 'user');
             const { groupId } = req.params;
-            const group = await this.groupCollection.findOne({ groupId, 'members.username': user, 'members.role': 'admin' });
+            const group = await this.groupCollection.findOne({ groupId, members: { username: user, role: 'admin' } });
             if (!group) {
                 return res.response({ status: false }).code(404);
             }
@@ -104,7 +104,7 @@ class GroupMs extends HttpServiceBase {
             return { status: true }
         });
 
-        this.addRoute('/{groupId}/remove', 'POST', async (req, h) => {
+        this.addRoute('/{groupId}/remove', 'POST', async (req, res) => {
             const user = extractInfoFromRequest(req, 'user');
             const { member } = req.payload;
             const { groupId } = req.params;
@@ -120,11 +120,11 @@ class GroupMs extends HttpServiceBase {
                 }
             }
             const query = {
-                $pull: { 'members.username': member }
+                $pull: { members : {username: member} }
             }
 
-            await this.groupCollection.updateOne({ _id: group._id }, query);
-
+            await this.groupCollection.updateOne({ _id: group._id }, query);    
+            
             if (isSelf && self.role === 'admin') {
                 const admin = group.members.find(x => x.username !== user && x.role === 'admin');
                 if (!admin) {
@@ -145,7 +145,7 @@ class GroupMs extends HttpServiceBase {
             }
         });
 
-        this.addRoute('/{groupId}', 'GET', async (req, h) => {
+        this.addRoute('/{groupId}', 'GET', async (req, res) => {
             const user = extractInfoFromRequest(req, 'user');
             const { groupId } = req.params;
             const group = await this.groupCollection.findOne({
@@ -155,7 +155,7 @@ class GroupMs extends HttpServiceBase {
                 projection: { _id: 0, groupId: 1, name: 1, members: 1, profilePic: 1 }
             });
             if (!group) {
-                return h.response({ status: false }).status(404);
+                return res.response({ status: false }).status(404);
             }
             return group;
         })
@@ -175,8 +175,8 @@ class GroupMs extends HttpServiceBase {
             const funcMapping = {
                 'get-users': async (message) => {
                     const { groupId, user } = message;
-                    const group = await this.groupCollection.findOne({groupId, 'members.username': user});
-                    return group.members.map(x=>x.username);
+                    const group = await this.groupCollection.findOne({ groupId, 'members.username': user });
+                    return group.members.map(x => x.username);
                 }
             };
 
@@ -198,7 +198,7 @@ class GroupMs extends HttpServiceBase {
 
     sendNotification(notification) {
         const { kafkaNewGroupMessageTopic } = this.options;
-        const {sender, receivers, groupId, ...body} = notification;
+        const { sender, receivers, groupId, ...body } = notification;
         const type = 'group';
         body.from = sender;
         body.to = groupId;
@@ -212,7 +212,7 @@ class GroupMs extends HttpServiceBase {
                 type,
                 parsed: true
             },
-            payload : JSON.stringify(body)
+            payload: JSON.stringify(body)
         };
         this.publisher.send(kafkaNewGroupMessageTopic, message, sender);
     }
@@ -224,7 +224,8 @@ class GroupMs extends HttpServiceBase {
 }
 
 if (asMain) {
-    const options = parseOptions(process.argv);
+    const argv = resolveEnvVariables(process.argv);
+    const options = parseOptions(argv);
     initResource(options).then(async context => {
         await new GroupMs(context).run()
     }).catch(async error => {

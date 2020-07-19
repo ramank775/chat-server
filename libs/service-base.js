@@ -71,15 +71,20 @@ async function initHttpServer(context) {
 
 
 function resolveEnvVariables(options) {
-    options = { ...options }
-    for (const key in options) {
-        if (options.hasOwnProperty(key)) {
-            const element = options[key];
-            if (typeof element === "string") {
-                options[key] = element.replace(/\${([A-Z0-9_]*)}/ig, (_, n) => process.env[n]);
-            }
-        }
+    for (let index = 0; index < options.length; index++) {
+        if(typeof options[index] === "string") {
+            options[index] = options[index].replace(/\${([A-Z0-9_]*)}/ig, (_, n) => process.env[n])
+        }        
     }
+    // options = { ...options }
+    // for (const key in options) {
+    //     if (options.hasOwnProperty(key)) {
+    //         const element = options[key];
+    //         if (typeof element === "string") {
+    //             options[key] = element.replace(/\${([A-Z0-9_]*)}/ig, (_, n) => process.env[n]);
+    //         }
+    //     }
+    // }
     return options
 }
 
@@ -95,7 +100,7 @@ class ServiceBase {
     }
 
     async run() {
-        this.log.info('Starting service with options', JSON.stringify(this.options, (key, value) =>
+        this.log.info('Starting service with options'+ JSON.stringify(this.options, (key, value) =>
             (/(Password|Secret|Key|Cert|Token)$/i.test(key) ? '*****' : value)
         ));
         this.init();

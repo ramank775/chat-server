@@ -44,7 +44,7 @@ function parseOptions(argv) {
         .option('--kafka-group-message-topic <group-message-topic>', 'Used by producer to produce new message to handle by message router')
         .option('--message-max-retries <message-max-retries>', 'Max no of retries to deliver message (default value is 3)', (value) => parseInt(value), 3)
         .option('--session-service-url <session-service-url>', 'URL of session service')
-    return resolveEnvVariables(cmd.parse(argv).opts());
+    return cmd.parse(argv).opts();
 }
 
 class MessageRouterMS extends ServiceBase {
@@ -127,7 +127,8 @@ class MessageRouterMS extends ServiceBase {
 
 
 if (asMain) {
-    const options = parseOptions(process.argv);
+    const argv = resolveEnvVariables(process.argv);
+    const options = parseOptions(argv);
     initResources(options)
         .then(async context => {
             await new MessageRouterMS(context).run()

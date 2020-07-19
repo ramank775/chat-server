@@ -19,7 +19,7 @@ function parseOptions(argv) {
     let cmd = initDefaultOptions();
     cmd = addStandardHttpOptions(cmd);
     cmd = addMongodbOptions(cmd);
-    return resolveEnvVariables(cmd.parse(argv).opts())
+    return cmd.parse(argv).opts();
 }
 
 async function initResource(options) {
@@ -184,7 +184,8 @@ class ProfileMs extends HttpServiceBase {
 }
 
 if (asMain) {
-    const options = parseOptions(process.argv);
+    const argv = resolveEnvVariables(process.argv);
+    const options = parseOptions(argv);
     initResource(options).then(async context => {
         await new ProfileMs(context).run()
     }).catch(async error => {
