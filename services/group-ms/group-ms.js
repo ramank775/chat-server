@@ -45,6 +45,7 @@ class GroupMs extends HttpServiceBase {
         this.mongoClient = context.mongoClient;
         this.groupCollection = context.mongodbClient.collection('group');
         this.publisher = this.context.publisher;
+        this.jsonServer = this.context.jsonServer;
     }
 
     async init() {
@@ -204,11 +205,12 @@ class GroupMs extends HttpServiceBase {
         body.category = 'notification';
         const message = {
             META: {
-                to: groupId
+                to: groupId,
                 users: receivers,
                 from: sender,
-                category: 'notification'
-                type
+                category: 'notification',
+                type,
+                parsed: true
             },
             payload : JSON.stringify(body)
         };

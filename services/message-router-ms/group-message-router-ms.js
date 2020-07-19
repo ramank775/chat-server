@@ -58,12 +58,12 @@ class GroupMessageRouterMS extends ServiceBase {
         }
         let users = message.META.users;
         if (!users) {
-            users = await this.getGroupUsers(messge.META.to)
+            users = await this.getGroupUsers(message.META.to, message.META.from);
         }
         users = users.filter(x => x!== message.META.from);
         const servers = await this.getServers(users);
         for (const user of users) {
-            server = servers[user];
+            const server = servers[user];
             message.META = {...message.META, to: user, type: 'single', users: undefined}; // Set message META property type as single so failed message to be handled by mesasge router
             publisher.send(server, message, user);    
         }
@@ -75,6 +75,7 @@ class GroupMessageRouterMS extends ServiceBase {
         const parsedPayload = JSON.parse(payload);
         const { to, type, ...msg } = parsedPayload;
         msg.from = meta.from;
+        msg.to = to;
         const formattedMessage = {
             META: { to, type, ...meta, parsed: true },
             payload: JSON.stringify(msg)
@@ -149,7 +150,7 @@ if (asMain) {
     const options = parseOptions(process.argv);
     initResources(options)
         .then(async context => {
-            await new MessageRouterMS(context).run()
+            await new GroupMessageRouterMS(context).run()
         }).catch(async error => {
             console.error('Failed to initialized Group Message Router MS', error);
             process.exit(1);

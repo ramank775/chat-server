@@ -1,5 +1,5 @@
 var ws;
-
+var groups;
 
 function getCookie(cname) {
     var name = cname + "=";
@@ -18,10 +18,10 @@ function getCookie(cname) {
 }
 
 function setCookie(cname, cvalue, exdays) {
-  var d = new Date();
-  d.setTime(d.getTime() + (exdays*24*60*60*1000));
-  var expires = "expires="+ d.toUTCString();
-  document.cookie = cname + "=" + cvalue + ";" + expires + ";path=/";
+    var d = new Date();
+    d.setTime(d.getTime() + (exdays * 24 * 60 * 60 * 1000));
+    var expires = "expires=" + d.toUTCString();
+    document.cookie = cname + "=" + cvalue + ";" + expires + ";path=/";
 }
 
 function getUserInfo() {
@@ -51,9 +51,49 @@ function sendMessage() {
     let to = document.getElementById('to').value;
     let sMesgae = {
         message: msg,
-        to: to
+        to: to,
+        type: groups.filter(x=>x.groupId == to).length > 0?'group': 'single'
     }
     ws.send(JSON.stringify(sMesgae));
+}
+
+function getGroups() {
+    fetch('/group/get')
+        .then(res => res.json())
+        .then(res => {
+            console.log(res);
+            const group_space = document.getElementById('groups');
+            group_space.innerHTML = '';
+            res.forEach(group => {
+                const newGroup = document.createElement('li');
+                newGroup.appendChild(document.createTextNode(JSON.stringify(group)));
+                group_space.appendChild(newGroup);
+            });
+            groups = res; 
+
+        })
+}
+
+function createGroup() {
+    let groupName = document.getElementById('group_name').value;
+    let groupMembers = document.getElementById('group_member').value.split(',');
+    let payload = {
+        name: groupName,
+        members: groupMembers,
+        profilePic: null,
+    };
+    fetch('/group/create', {
+        method: 'post',
+        body: JSON.stringify(payload),
+        headers: new Headers({
+            'Content-Type': 'application/json'
+        })
+    }).then(res => res.json())
+        .then(res => {
+            console.log(res);
+            getGroups();
+        })
+
 }
 
 function connect_socket() {
@@ -108,7 +148,7 @@ function setupUI() {
                 }).then(response => response.json())
                     .then(({ status }) => {
                         isAvailable = !status;
-                        document.getElementById('reg_submit').style.display = !status?'block':'none';
+                        document.getElementById('reg_submit').style.display = !status ? 'block' : 'none';
                     });
             }
         }
@@ -131,7 +171,7 @@ function setupUI() {
                 .then(res => {
                     login(res.username, res.accesskey);
                     setupUI();
-                    
+
                 })
         }
 
@@ -160,6 +200,8 @@ function setupUI() {
                     setupUI();
                 })
         }
+
+
     }
     else {
         document.getElementById('div_reg').style.display = 'none';
@@ -168,6 +210,8 @@ function setupUI() {
 
         document.getElementById('msg_submit').onclick = sendMessage;
         connect();
+        document.getElementById('create_group').onclick = createGroup;
+        getGroups();
     }
 }
 

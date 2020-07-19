@@ -79,7 +79,7 @@ class MessageRouterMS extends ServiceBase {
         } else {
             receiver = await this.getServer(user);
         }
-        publisher.send(server, message, user);
+        publisher.send(receiver, message, user);
     }
 
     async formatMessage(message) {
@@ -87,6 +87,7 @@ class MessageRouterMS extends ServiceBase {
         const parsedPayload = JSON.parse(payload);
         const { to, type, ...msg } = parsedPayload;
         msg.from = meta.from;
+        msg.to = to;
         const formattedMessage = {
             META: { to, type, ...meta, parsed: true },
             payload: JSON.stringify(msg)
