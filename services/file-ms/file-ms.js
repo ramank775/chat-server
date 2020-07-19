@@ -13,7 +13,7 @@ const {
     } = require('../../libs/mongo-utils'),
     {
         getContentTypeByExt
-    } = require('../../libs/context-type-utils')
+    } = require('../../libs/content-type-utils')
     fs = require('fs'),
     path = require('path'),
     { Promise } = require('bluebird'),
@@ -25,7 +25,7 @@ function parseOptions(argv) {
     cmd = addStandardHttpOptions(cmd);
     cmd = addMongodbOptions(cmd);
     cmd = addFileServiceOptions(cmd);
-    return resolveEnvVariables(cmd.parse(argv).opts())
+    return cmd.parse(argv).opts();
 }
 
 async function initResource(options) {
@@ -143,7 +143,8 @@ class ImageMS extends HttpServiceBase {
 
 
 if (asMain) {
-    const options = parseOptions(process.argv);
+    const argv = resolveEnvVariables(process.argv);
+    const options = parseOptions(argv);
     initResource(options).then(async context => {
         await new ImageMS(context).run()
     }).catch(async error => {

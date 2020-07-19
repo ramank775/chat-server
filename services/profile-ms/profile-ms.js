@@ -11,15 +11,15 @@ const {
         addMongodbOptions,
         initMongoClient
     } = require('../../libs/mongo-utils'),
-    { uuidv4, extractInfoFromRequest } = require('../../helper')
-asMain = (require.main === module);
+    { uuidv4, extractInfoFromRequest } = require('../../helper'),
+    asMain = (require.main === module);
 
 
 function parseOptions(argv) {
     let cmd = initDefaultOptions();
     cmd = addStandardHttpOptions(cmd);
     cmd = addMongodbOptions(cmd);
-    return resolveEnvVariables(cmd.parse(argv).opts())
+    return cmd.parse(argv).opts();
 }
 
 async function initResource(options) {
@@ -143,7 +143,7 @@ class ProfileMs extends HttpServiceBase {
             if (!username) {
                 return {};
             }
-            let user = await this.profileCollection.findOne({ username, isActive:true },{projection: { _id: 0, name: 1, username: 1 }});
+            let user = await this.profileCollection.findOne({ username, isActive: true }, { projection: { _id: 0, name: 1, username: 1 } });
             return user || {};
         })
 
@@ -184,7 +184,8 @@ class ProfileMs extends HttpServiceBase {
 }
 
 if (asMain) {
-    const options = parseOptions(process.argv);
+    const argv = resolveEnvVariables(process.argv);
+    const options = parseOptions(argv);
     initResource(options).then(async context => {
         await new ProfileMs(context).run()
     }).catch(async error => {

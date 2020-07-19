@@ -57,7 +57,8 @@
                 "--kafka-new-message-topic=${TOPIC_NEW_MESSAGE}",
                 "--kafka-persistence-message-topic=${TOPIC_DB_MESSAGE}",
                 "--kafka-broker-list=${BROKER_LIST}",
-                "--session-service-url=${SESSION_MS_HOST}:${SESSION_MS_PORT}"
+                "--session-service-url=${SESSION_MS_HOST}:${SESSION_MS_PORT}",
+                "--kafka-group-message-topic=${TOPIC_NEW_GROUP_MS}"
             ],
             "envFile": "${workspaceFolder}/.env",
             "autoAttachChildProcesses": true
@@ -104,6 +105,41 @@
                 "--port=4001",
                 "--mongo-url=mongodb://localhost:27017/chat",
                 "--base-upload-dir=/workspace/upload"
+            ],
+            "envFile": "${workspaceFolder}/.env",
+            "autoAttachChildProcesses": true
+        }, {
+            "type": "node",
+            "request": "launch",
+            "name": "Launch group MS",
+            "program": "${workspaceFolder}/services/group-ms/group-ms.js",
+            "args": [
+                "--app-name=group-ms-1",
+                "--debug",
+                "--port=4002",
+                "--mongo-url=mongodb://localhost:27017/chat",
+                "--json-server-port=${GROUP_MS_JSON_PORT}",
+                "--kafka-client-id=group-1",
+                "--kafka-broker-list=${BROKER_LIST}",
+                "--kafka-new-group-message-topic=${TOPIC_NEW_GROUP_MS}"
+            ],
+            "envFile": "${workspaceFolder}/.env",
+            "autoAttachChildProcesses": true
+        }, {
+            "type": "node",
+            "request": "launch",
+            "name": "Launch Group Message Router MS",
+            "program": "${workspaceFolder}/services/message-router-ms/group-message-router-ms.js",
+            "args": [
+                "--app-name=group-message-router-1",
+                "--debug",
+                "--kafka-client-id=group-message-router-1",
+                "--kafka-consumer-group=${CONSUMER_GROUP_GROUP_MESSAGE_ROUTER}",
+                "--kafka-new-group-message-topic=${TOPIC_NEW_GROUP_MS}",
+                "--kafka-broker-list=${BROKER_LIST}",
+                "--session-service-url=${SESSION_MS_HOST}:${SESSION_MS_PORT}",
+                "--group-service-url=${GROUP_MS_JSON_HOST}:${GROUP_MS_JSON_PORT}",
+                "--kafka-persistence-message-topic=${TOPIC_DB_MESSAGE}"
             ],
             "envFile": "${workspaceFolder}/.env",
             "autoAttachChildProcesses": true

@@ -60,7 +60,7 @@ function parseOptions(argv) {
         .option('--kafka-message-sent-topic <message-sent-topic>', 'Used by producer to produce new message for successfuly sent message')
         .option('--kafka-error-message-send-topic <message-sent-error-topic>', 'Used by producer to produce new message when there is error while sending a message')
         .option('--kafka-new-message-topic <new-message-topic>', 'Used by producer to produce new message for each new incoming message');
-    return resolveEnvVariables(cmd.parse(argv).opts());
+    return cmd.parse(argv).opts();
 }
 
 class Gateway extends ServiceBase {
@@ -175,7 +175,8 @@ class Gateway extends ServiceBase {
 }
 
 if (asMain) {
-    const options = parseOptions(process.argv);
+    const argv = resolveEnvVariables(process.argv);
+    const options = parseOptions(argv);
     initResources(options)
         .then(async context => {
             await new Gateway(context).run()

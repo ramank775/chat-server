@@ -78,7 +78,7 @@ function parseOptions(argv) {
     cmd.option('--kafka-user-connected-topic <user-connect-topic>', 'Used by consumer to consume new message when a user connected to server')
         .option('--kafka-persistence-message-topic <presistence-message-topic>', 'Used by producer to produce new message to saved into a persistence db')
         .option('--kafka-new-message-topic <new-message-topic>', 'Used by producer to produce new message for saved incoming message');
-    return resolveEnvVariables(cmd.parse(argv).opts());
+    return cmd.parse(argv).opts();
 }
 
 class PersistenceMessageMS extends ServiceBase {
@@ -117,7 +117,8 @@ class PersistenceMessageMS extends ServiceBase {
 
 
 if (asMain) {
-    const options = parseOptions(process.argv);
+    const argv = resolveEnvVariables(process.argv);
+    const options = parseOptions(argv);
     initResources(options)
         .then(async context => {
             await new PersistenceMessageMS(context).run()

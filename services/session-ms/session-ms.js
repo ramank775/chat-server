@@ -55,7 +55,7 @@ function parseOptions(argv) {
         .option('--kafka-user-connected-topic <new-user-topic>', 'Used by consumer to consume new message when a user connected to server')
         .option('--kafka-user-disconnected-topic <user-disconnected-topic>', 'Used by consumer to consume new message when a user disconnected from the server');
     cmd = addJsonServerOptions(cmd);
-    return resolveEnvVariables(cmd.parse(argv).opts());
+    return cmd.parse(argv).opts();
 }
 
 class SessionMS extends ServiceBase {
@@ -89,6 +89,14 @@ class SessionMS extends ServiceBase {
                 'get-user-status': (message) => {
                     const { user } = message;
                     return this.getUserStatus(user);
+                },
+                'get-servers': async (message) => {
+                    const { users } = message;
+                    const serverMapping = {};
+                    for (const user of users) {
+                        serverMapping[user] = await this.getServer(user);
+                    }
+                    return serverMapping;
                 }
             };
 
@@ -123,7 +131,8 @@ class SessionMS extends ServiceBase {
 }
 
 if (asMain) {
-    const options = parseOptions(process.argv);
+    const argv = resolveEnvVariables(process.argv);
+    const options = parseOptions(argv);
     initResources(options)
         .then(async context => {
             await new SessionMS(context).run()
