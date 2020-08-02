@@ -16,7 +16,6 @@ async function initWebsocket(context) {
 
     const wss = new webSocker.Server({ noServer: true });
     httpServer.on('upgrade', (request, socket, head) => {
-        console.log('upgrade request')
         wss.handleUpgrade(request, socket, head, (ws) => {
             wss.emit('connection', ws, request);
         });

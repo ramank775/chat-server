@@ -130,20 +130,20 @@ async function createKakfaProducer(context) {
     producer.setPollInterval(100);
 
     producer.on('error', (err) => {
-        log.error('Kafka producer: error: %s', JSON.stringify(err));
+        log.error(`Kafka producer: error: ${JSON.stringify(err)}`);
     });
 
     producer.on('event.error', (err) => {
-        log.error('Kafka producer: event.error: %s', JSON.stringify(err));
+        log.error(`Kafka producer: event.error: ${JSON.stringify(err)}`);
     });
 
     producer.on('delivery-report', (err, report) => {
         if (err) {
-            log.error('Kafka producer: Delivery error: ', err, {});
+            log.error(`Kafka producer: Delivery error: ${err}`);
         } else {
-            let r = { ...report };
+            const r = { ...report };
             r.key = r.key.toString();
-            log.info('Kafka producer: Delivery report: %j', r);
+            log.info(`Kafka producer: Delivery report: ${r}`);
         }
     });
 
@@ -169,9 +169,9 @@ async function createKakfaProducer(context) {
     kafkaProducer.send = function (topic, message, key) {
         this._producer.produce(topic, null, message, key, Date.now(), (err, offset) => {
             if (err) {
-                log.error("Error while producing topic ", err);
+                log.error(`Error while producing topic ${err}`);
             }
-            log.info("offset", offset);
+            log.info(`offset: ${offset}`);
         });
     };
     kafkaProducer.disconnect = async function () {
@@ -180,11 +180,11 @@ async function createKakfaProducer(context) {
             await this._producer.flushAsync(20000)
             log.info("Producer flushed all queued message");
         } catch (err) {
-            log.error("Error while flushing kafka message queue", err);
+            log.error(`Error while flushing kafka message queue: ${err}`);
         } finally {
             await this._producer.disconnectAsync(10000, (err, data) => {
                 if (err) {
-                    log.error('Producer failed to disconnect', err);
+                    log.error(`Producer failed to disconnect ${err}`);
                     return;
                 }
                 log.info("Producer disconnected")
@@ -219,7 +219,6 @@ async function createKafkaConsumer(context) {
             consumerWorker.send({ type: 'option', topics: listenerEvents, kafka_config: kafkaOptions });
             return;
         }
-        console.log(msg.value.toString())
         kafkaConsumer.onMessage(msg.topic, msg.value)
     })
     consumerWorker.on('error', (err) => {

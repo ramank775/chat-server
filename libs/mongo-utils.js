@@ -19,7 +19,8 @@ async function initMongoClient(context) {
         useNewUrlParser: true,
         auth,
         sslCert: clientCertificate,
-        sslKey: clientCertificate
+        sslKey: clientCertificate,
+        useUnifiedTopology: true
     }
     const url = options.mongoUrl;
     if (options.mongoSslEnable) {

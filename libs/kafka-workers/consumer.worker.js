@@ -1,16 +1,14 @@
 const
- kafka = require('node-rdkafka'),
- Promise = require('bluebird'),
- log = require('../logger');
+    kafka = require('node-rdkafka'),
+    Promise = require('bluebird'),
+    log = require('../logger');
 
-process.on('message', async(msg, options) => {
-    console.log(`new message received ${JSON.stringify(msg)}`)
-    if(msg == 'kill') {
+process.on('message', async (msg, options) => {
+    if (msg == 'kill') {
         shutdown('KILL');
         return;
     }
     if (msg.type == 'option') {
-        console.log('new messages')
         await createKafakConsumer(msg);
         await startKafkaConsumer();
     }
@@ -18,7 +16,7 @@ process.on('message', async(msg, options) => {
 
 
 let shutdown = async (eventName) => {
-    log.info("Recieved shutdown event %s", eventName);
+    log.info(`Recieved shutdown event: ${eventName}`);
     exit = true;
     log.info("Shutting down customer");
     if (consumer) {
@@ -41,7 +39,8 @@ let consumer;
 let exit = false;
 async function createKafakConsumer(options) {
     const { topics, kafka_config } = options;
-    log.info(`starting kafka consumer with options  topics: ${topics}, config ${kafka_config}`)
+    log.info(`starting kafka consumer with options  topics: ${topics}, config ${JSON.stringify(kafka_config, (key, value) =>
+        (/(Password|Secret|Key|Cert|Token)$/i.test(key) ? '*****' : value))}`)
     consumer = kafka.KafkaConsumer({
         ...kafka_config
     });
@@ -49,7 +48,7 @@ async function createKafakConsumer(options) {
     consumer.connect();
     log.info(`kafka consumer connected`)
     consumer.on('error', (err) => {
-        log.error('Kafka consumer error', err);
+        log.error(`Kafka consumer error: ${err}`);
     })
 
     const events = ['event', 'event.log', 'event.stats', 'event.throttle'];
@@ -57,24 +56,24 @@ async function createKafakConsumer(options) {
     events.forEach(event => {
         consumer.on(event, (data) => {
             if (/error/.test(event)) {
-                log.error('Kafka consumer %s: %s', event, JSON.stringify(data || {}));
+                log.error(`Kafka consumer ${event}: ${JSON.stringify(data || {})}`);
             } else {
-                log.info('Kafka consumer %s: %s', event, JSON.stringify(data || {}));
+                log.info(`Kafka consumer ${event}: ${JSON.stringify(data || {})}`);
             }
         });
     });
 
-    
+
     consumer.on('disconnected', data => {
         if (!exit) {
             log.info('Disconnected, reconnecting...');
             consumer.connect();
         } else {
-            log.info('Kafka %s: %s', 'disconnected', JSON.stringify(data || {}));
+            log.info(`Kafka disconnected:${JSON.stringify(data || {})}`);
         }
     });
     consumer.on('event.error', data => {
-        log.info('Kafka %s: %s, disconnecting...', 'event.error', JSON.stringify(data || {}));
+        log.info(`Kafka event.error: ${JSON.stringify(data || {})}, disconnecting...`);
         consumer.disconnect();
     });
 
@@ -90,8 +89,8 @@ async function createKafakConsumer(options) {
     consumer.on('data', (data) => {
         data.key = data.key.toString();
         data.value = JSON.parse(data.value.toString());
-        log.info(`data.value.toString(): ${data.value.toString()}`);
-        log.info(`new data received ${JSON.stringify(data)}`)
+        const logInfo = { ...data, value: { META: data.value.META } };
+        log.info(`new data received ${JSON.stringify(logInfo)}`);
         process.send(data);
     });
 
@@ -108,4 +107,4 @@ async function startKafkaConsumer() {
 
 process.send('online');
 
-( async() => await sleep(200))();
+(async () => await sleep(200))();
