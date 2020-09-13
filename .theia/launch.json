@@ -90,7 +90,8 @@
                 "--app-name=profile-ms-1",
                 "--debug",
                 "--port=4000",
-                "--mongo-url=mongodb://localhost:27017/chat"
+                "--mongo-url=mongodb://localhost:27017/chat",
+                "--firebase-project-id=${FIREBASE_PROJECT_ID}"
             ],
             "envFile": "${workspaceFolder}/.env",
             "autoAttachChildProcesses": true

@@ -12,19 +12,35 @@ const {
         initMongoClient
     } = require('../../libs/mongo-utils'),
     { uuidv4, extractInfoFromRequest } = require('../../helper'),
+    admin = require('firebase-admin'),
     asMain = (require.main === module);
 
+function firebaseProjectOptions(cmd) {
+    return cmd.option('--firebase-project-id <firebaseProjectId>', 'Firebase Project Id')
+}
+
+async function initFirebaseAdmin(context) {
+    const { options } = context;
+    const app = admin.initializeApp({
+        projectId: options.firebaseProjectId
+    });
+    context.firebaseApp = app;
+    context.firebaseAuth = app.auth();
+    return context;
+}
 
 function parseOptions(argv) {
     let cmd = initDefaultOptions();
     cmd = addStandardHttpOptions(cmd);
     cmd = addMongodbOptions(cmd);
+    cmd = firebaseProjectOptions(cmd);
     return cmd.parse(argv).opts();
 }
 
 async function initResource(options) {
     return await initDefaultResources(options)
         .then(initMongoClient)
+        .then(initFirebaseAdmin)
 }
 
 class ProfileMs extends HttpServiceBase {
@@ -33,120 +49,71 @@ class ProfileMs extends HttpServiceBase {
         this.mongoClient = context.mongoClient;
         this.profileCollection = context.mongodbClient.collection('profile');
         this.authCollection = context.mongodbClient.collection('session_auth');
+        this.firebaseAuth = context.firebaseAuth;
     }
 
     async init() {
         await super.init();
-        this.addRoute('/exist', 'POST', async (req, _) => {
-            this.log.info(`new request for exist with username ${req.payload}`)
-            const username = req.payload.username;
-            const exist = await this.isExists(username)
-            return {
-                status: exist
-            }
-        });
-
-        this.addRoute('/register', 'POST', async (req, _) => {
-            const { payload: { username, secretPhase, name } } = req;
-            const exist = await this.isExists(username);
-            if (exist) {
-                return {
-                    status: false,
-                    error: `username already taken`
-                }
-            }
-            const profile = {
-                name,
-                username,
-                secretPhase,
-                addedOn: new Date().toUTCString(),
-                isActive: true
-            }
-            await this.profileCollection.insertOne(profile);
-            const accesskey = await this.getAccessKey(username)
-            return {
-                status: true,
-                username,
-                accesskey,
-                name
-            }
-        });
 
         this.addRoute('/auth', ['GET', 'POST'], async (req, res) => {
             const username = extractInfoFromRequest(req, 'user');
             const accesskey = extractInfoFromRequest(req, 'accesskey');
-            const authProfile = await this.authCollection.findOne({ username, accesskey })
-            if (!authProfile) {
+            const token = extractInfoFromRequest(req, 'token');
+            try {
+                await this.verify(token);
+
+            } catch (error) {
+                this.log.error(`Error while authentication : ${error}`);
                 return res.response({}).code(401);
             }
-            return res.response({}).code(200);
+
+            const authProfile = await this.authCollection.findOne({ username, accesskey })
+            if (authProfile) {
+                return res.response({}).code(200);
+            }
+            return res.response({}).code(401);
         });
 
         this.addRoute('/login', 'POST', async (req, res) => {
-            const { payload: { username, secretPhase } } = req;
-            const profile = await this.profileCollection.findOne({ username, secretPhase });
-            if (!profile) {
-                return res.send({}).status(401);
+            const { payload: { username } } = req;
+            const token = extractInfoFromRequest(req, 'token');
+            let isNew = false;
+            let result;
+            try {
+                result = await this.verify(token);
+            } catch (error) {
+                this.log.error(`Error while authentication : ${error}`);
+                return res.response({}).code(401);
             }
+            const isExist = await this.isExists(username);
+            if (!isExist) {
+                isNew = true;
+                const profile = {
+                    username,
+                    uid: result.uid,
+                    addedOn: new Date().toUTCString(),
+                    isActive: true
+                }
+                await this.profileCollection.insertOne(profile);
+            }
+
             const accesskey = await this.getAccessKey(username);
             return {
                 status: true,
                 username,
                 accesskey,
-                name: profile.name
+                isNew
             };
         });
 
-        this.addRoute('/search', 'GET', async (req) => {
-            const searchText = req.query.q;
-            const username = extractInfoFromRequest(req, 'user');
-            if (searchText.length < 4) {
-                return [];
-            }
-            try {
-                let users = await this.profileCollection.find({
-                    $and: [
-                        { isActive: true },
-                        {
-                            username: {
-                                $ne: username
-                            }
-                        },
-                        {
-                            $or: [
-                                {
-                                    name: {
-                                        $regex: searchText,
-                                        $options: 'i'
-                                    }
-                                },
-                                {
-                                    username: {
-                                        $regex: searchText,
-                                        $options: 'i'
-                                    }
-                                }
-                            ]
-
-                        }
-                    ]
-                }, { projection: { _id: 0, name: 1, username: 1 } }).toArray();
-                return users;
-            } catch (error) {
-                console.log(error)
-            }
-            return [];
-        })
-
         this.addRoute('/get', 'GET', async (req) => {
-            const username = req.query.username;
+            const username = extractInfoFromRequest(req);
             if (!username) {
                 return {};
             }
             let user = await this.profileCollection.findOne({ username, isActive: true }, { projection: { _id: 0, name: 1, username: 1 } });
             return user || {};
         })
-
     }
 
     async isExists(username) {
@@ -154,9 +121,9 @@ class ProfileMs extends HttpServiceBase {
         return count > 0;
     }
 
-    async auth(username, accesskey) {
-        const resp = await this.authCollection.findOne({ username, accesskey });
-        return !!resp;
+    async verify(accesskey) {
+        const decodedToken = await this.firebaseAuth.verifyIdToken(accesskey);
+        return decodedToken;
     }
 
     async getAccessKey(username) {
