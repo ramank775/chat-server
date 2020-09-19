@@ -163,6 +163,8 @@ class Gateway extends ServiceBase {
     }
 
     getUserInfoFromRequest(request) {
+        let user = request.headers.user;
+        if(user) return user;
         const rc = request.headers.cookie;
         const cookies = {};
         rc & rc.split(';').forEach((cookie) => {

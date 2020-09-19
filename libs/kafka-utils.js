@@ -139,11 +139,11 @@ async function createKakfaProducer(context) {
 
     producer.on('delivery-report', (err, report) => {
         if (err) {
-            log.error(`Kafka producer: Delivery error: ${err}`);
+            log.error(`Kafka producer: Delivery error: ${JSON.stringify(err)}`);
         } else {
             const r = { ...report };
             r.key = r.key.toString();
-            log.info(`Kafka producer: Delivery report: ${r}`);
+            log.info(`Kafka producer: Delivery report: ${JSON.stringify(r)}`);
         }
     });
 
