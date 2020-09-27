@@ -56,11 +56,14 @@ function addStandardKafkaOptions(cmd) {
  * @param {commander} cmd 
  */
 function addKafkaSSLOptions(cmd) {
-    return cmd.option('--kafka-security-protocol <protocol>', 'Protocol used to communicate with brokers [plaintext|ssl] (default plaintext)', 'plaintext')
-        .option('--kafka-ssl-ca <path>', 'File or directory path to CA certificate(s) (PEM) for verifying the broker\'s key')
-        .option('--kafka-ssl-certificate <path>', 'Path to client\'s public key (PEM) used for authentication')
-        .option('--kafka-ssl-key <path>', 'Path to client\'s private key (PEM) used for authentication')
-        .option('--kafka-ssl-key-password <password>', 'Private key passphrase, if any (for use with --kafka-ssl-key)');
+    return cmd.option('--kafka-security-protocol <protocol>', 'Protocol used to communicate with brokers [plaintext|ssl|sasl_ssl] (default plaintext)', 'plaintext')
+        .option('--kafka-ssl-ca <ssl-ca-path>', 'File or directory path to CA certificate(s) (PEM) for verifying the broker\'s key')
+        .option('--kafka-ssl-certificate <ssl-path>', 'Path to client\'s public key (PEM) used for authentication')
+        .option('--kafka-ssl-key <ssl-path>', 'Path to client\'s private key (PEM) used for authentication')
+        .option('--kafka-ssl-key-password <ssl-password>', 'Private key passphrase, if any (for use with --kafka-ssl-key)')
+        .option('--kafka-sasl-mechanisms <sasl-mechanisms>', 'SASL Mechanisms (default plan)', 'PLAIN')
+        .option('--kafka-sasl-username <sasl-username>', 'Username to be used for SASL_SSL auth')
+        .option('--kafka-sasl-password <sasl-password>', 'Password to be used for SASL_SSL auth');
 
 }
 
@@ -97,7 +100,14 @@ function parseStandardKafkaOptions(options) {
  * @returns {Object}
  */
 function parseKafkaSSLOptions(options) {
-    if (options.kafkaSecurityProtocol === 'ssl') {
+    if(options.kafkaSecurityProtocol === 'sasl_ssl') {
+        return {
+            'security.protocol': options.kafkaSecurityProtocol,
+            'sasl.mechanisms': options.kafkaSaslMechanisms,
+            'sasl.username': options.kafkaSaslUsername,
+            'sasl.password': options.kafkaSaslPassword,
+        }
+    } else if (options.kafkaSecurityProtocol === 'ssl') {
         return {
             'security.protocol': options.kafkaSecurityProtocol,
             'ssl.ca.location': options.kafkaSslCa,
