@@ -22,7 +22,7 @@ async function initMongoClient(context) {
         sslKey: clientCertificate,
         useUnifiedTopology: true
     }
-    const url = options.mongoUrl;
+    let url = options.mongoUrl;
     if (options.mongoSslEnable) {
         url += (((url.indexOf('?') > -1) ? '&' : '?') + 'ssl=true');
     }
