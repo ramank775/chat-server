@@ -88,6 +88,7 @@ class MessageRouterMS extends ServiceBase {
         const { to, type, ...msg } = parsedPayload;
         msg.from = meta.from;
         msg.to = to;
+        msg.type = type;
         const formattedMessage = {
             META: { to, type, ...meta, parsed: true },
             payload: JSON.stringify(msg)
