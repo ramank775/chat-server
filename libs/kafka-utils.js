@@ -106,6 +106,7 @@ function parseKafkaSSLOptions(options) {
             'sasl.mechanisms': options.kafkaSaslMechanisms,
             'sasl.username': options.kafkaSaslUsername,
             'sasl.password': options.kafkaSaslPassword,
+            'enable.ssl.certificate.verification': options.kafkaSslCertificate != undefined?'true': 'false'
         }
     } else if (options.kafkaSecurityProtocol === 'ssl') {
         return {

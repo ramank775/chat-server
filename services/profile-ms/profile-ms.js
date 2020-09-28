@@ -127,7 +127,7 @@ class ProfileMs extends HttpServiceBase {
     }
 
     async isExists(username) {
-        const count = await this.profileCollection.count({ username });
+        const count = await this.profileCollection.countDocuments({ username });
         return count > 0;
     }
 

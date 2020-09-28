@@ -21,7 +21,13 @@ class HttpServiceBase extends ServiceBase {
         this.hapiServer.ext('onRequest', (req, h) => {
             log.info(`new request : ${req.url}`)
             return h.continue;
-        })
+        });
+
+        this.hapiServer.events.on('log', (event, tags) => {
+            if(tags.error) {
+                log.error(`Server error : ${event.error? event.error.message: 'unknown'}. ${event.error}`);
+            } 
+        });
 
         this.addRoute('/alive', 'GET', () => {
             return "OK";
