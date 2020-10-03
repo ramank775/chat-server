@@ -1,9 +1,6 @@
 const
-    commander = require('commander'),
-    { fork } = require('child_process'),
-    path = require('path'),
-    kafka = require('node-rdkafka'),
-    Promise = require('bluebird')
+    fs = require('fs'),
+    { Kafka, logLevel } = require('kafkajs');
 
 /**
  * Add standard kafka options
@@ -13,41 +10,21 @@ function addStandardKafkaOptions(cmd) {
     cmd.option('--kafka-broker-list <broker-list>', 'List of kafka brokers endpoints')
         .option('--kafka-client-id <client-id>')
         .option('--kafka-consumer-group <consumer-group-id>')
-        .option('--kafka-auto-commit <auto-commit>',
-            'Automatically and periodically commit offsets in the background',
-            c => c.toLowerCase() == 'true',
-            true)
-        .option('--kafka-auto-commit-interval <auto-commit-interval>',
-            'The frequency in milliseconds that the consumer offsets are committed (written) to offset storage.',
-            c => parseInt(c), 5000)
-        .option('--kafka-heartbeat-interval <heartbeat-interval>', 'Group session keepalive heartbeat interval.',
-            c => parseInt(c), 3000)
-        .option('--kafka-retry-backoff <retry-backoff>', 'The backoff time in milliseconds before retrying a protocol request.',
-            c => parseInt(c), 100)
-        .option('--kafka-message-send-max-retries <message-send-max-retries>', 'How many times to retry sending a failing Message',
-            c => parseInt(c), 2)
-        .option('--kafka-message-max-bytes <message-max-bytes>', 'Maximum Kafka protocol request message size.',
-            c => parseInt(c), 1000000)
-        .option('--kafka-fetch-min-bytes <fetch-min-bytes>', 'Minimum number of bytes the broker responds with.',
-            c => parseInt(c), 1)
-        .option('--kafka-fetch-message-max-bytes <fetch-message-max-bytes>',
-            'Initial maximum number of bytes per topic+partition to request when fetching messages from the broker',
-            c => parseInt(c), 1048576)
-        .option('--kafka-fetch-error-backoff <fetch-error-backoff>',
-            'How long to postpone the next fetch request for a topic+partition in case of a fetch error.',
-            c => parseInt(c), 500)
-        .option('--kafka-queued-max-message-kbytes <queued-max-message-kbytes>', 'Maximum number of kilobytes per topic+partition in the local consumer queue.',
-            c => parseInt(c), 1048576)
-        .option('--kafka-fetch-wait-max <fetch-wait-max>', 'Maximum time the broker may wait to fill the response with fetch.min.bytes.',
-            c => parseInt(c), 100)
-        .option('--kakfa-queue-buffering-max <queue-buffering-max>',
-            'Delay in milliseconds to wait for messages in the producer queue to accumulate before constructing message batches (MessageSets) to transmit to brokers',
-            c => parseFloat(c), 0.5)
-        .option('--kafka-queue-buffering-max-messages <queue-buffering-max-message>', 'Maximum number of messages allowed on the producer queue.',
-            c => parseInt(c), 100000)
-        .option('--kafka-batch-num-messages <batch-num-message>', 'Maximum number of messages batched in one MessageSet. ',
-            c => parseInt(c), 10000)
-        .option('--kafka-socket-timeout-ms <kafka-socket-timeout>', 'Default timeout for network requests.', c => parseInt(c), 60000)
+        .option('--kafka-connection-timeout <connection-timeout>', 'Time in milliseconds to wait for a sucessful connection', c => parseInt(c), 3000)
+        .option('--kafka-request-timeout <request-timeout>', 'Time in milliseconds to wait for a successful request', c => parseInt(c), 30000)
+        .option('--kafka-max-retry-time <max-retry-time>', 'Max wait time for a retry in milliseconds', c => parseInt(c), 30000)
+        .option('--kafka-initial-retry-time <retry-time>', 'Initial value used to calculate retry in milliseconds', c => parseInt(c), 300)
+        .option('--kafka-max-retries <max-retries>', 'Max number of retries per call', c => parseInt(c), 5)
+        .option('--kafka-metadata-max-age <metadata-max-age>', 'The period of time in milliseconds after which we force a refresh of metadata', c => parseInt(c), 300000)
+        .option('--kafka-transaction-timeout <transaction-timeout>', 'The maximum amount of time in ms that the transaction coordinator will wait for a transaction status update from the produce', c => parseInt(c), 60000)
+        .option('--kafka-max-in-flight-reqeusts <max-in-flight-request>', 'Max number of requests that may be in progress at any time. If falsey then no limit', c => parseInt(c), 0)
+        .option('--kafka-session-timeout <session-timeout>', 'Timeout in milliseconds used to detect failures.', c => parseInt(c), 30000)
+        .option('--kafka-rebalance-timeout <rebalance-timeout>', 'The maximum time that the coordinator will wait for each member to rejoin when rebalancing the group', c => parseInt(c), 60000)
+        .option('--kafka-heartbeat-interval <heartbeat-interval>', 'The expected time in milliseconds between heartbeats to the consumer coordinator.', c => parseInt(c), 3000)
+        .option('--kafka-max-bytes-per-partition <max-bytes-per-partition>', 'The maximum amount of data per-partition the server will return.', c => parseInt(c), 1048576)
+        .option('--kafka-min-bytes <min-bytes>', 'Minimum amount of data the server should return for a fetch request.', c => parseInt(c), 1)
+        .option('--kafka-max-bytes <max-bytes>', 'Maximum amount of bytes to accumulate in the response.', c => parseInt(c), 10485760)
+        .option('--kafka-max-wait-time <max-wait-time>', 'The maximum amount of time in milliseconds the server will block before answering the fetch request if there isn’t sufficient data to immediately satisfy the requirement given by minBytes', c => parseInt(c), 5000)
     return cmd;
 }
 
@@ -60,39 +37,31 @@ function addKafkaSSLOptions(cmd) {
         .option('--kafka-ssl-ca <ssl-ca-path>', 'File or directory path to CA certificate(s) (PEM) for verifying the broker\'s key')
         .option('--kafka-ssl-certificate <ssl-path>', 'Path to client\'s public key (PEM) used for authentication')
         .option('--kafka-ssl-key <ssl-path>', 'Path to client\'s private key (PEM) used for authentication')
-        .option('--kafka-ssl-key-password <ssl-password>', 'Private key passphrase, if any (for use with --kafka-ssl-key)')
         .option('--kafka-sasl-mechanisms <sasl-mechanisms>', 'SASL Mechanisms (default plan)', 'PLAIN')
         .option('--kafka-sasl-username <sasl-username>', 'Username to be used for SASL_SSL auth')
-        .option('--kafka-sasl-password <sasl-password>', 'Password to be used for SASL_SSL auth');
-
+        .option('--kafka-sasl-password <sasl-password>', 'Password to be used for SASL_SSL auth')
+        .option('--kafka-authentication-timeout <authentication-timout>', 'Timeout in ms for authentication requests', c => parseInt(c), 1000)
+        .option('--kafka-reauthentication-threshold <reauthentication-threshold>', 'When periodic reauthentication (connections.max.reauth.ms) is configured on the broker side, reauthenticate when reauthenticationThreshold milliseconds remain of session lifetime.', c => parseInt(c), 10000);
 }
 
+/**
+ * Prepare kafka standard options
+ * @param {commander} cmd 
+ */
 function parseStandardKafkaOptions(options) {
     const kafkaOptions = {
-        'bootstrap.servers': options.kafkaBrokerList,
-        'client.id': options.kafkaClientId,
-        'group.id': options.kafkaConsumerGroup,
-        'enable.auto.commit': options.kafkaAutoCommit,
-        'auto.commit.interval.ms': options.kafkaAutoCommitInterval,
-        "heartbeat.interval.ms": options.kafkaHeartbeatInterval,
-        'retry.backoff.ms': options.kafkaRetryBackoff,
-        'message.send.max.retries': options.kafkaMessageSendMaxRetries,
-        "message.max.bytes": options.kafkaMessageMaxBytes,
-        'socket.keepalive.enable': true,
-        "fetch.min.bytes": options.kafkaFetchMinBytes,
-        "fetch.message.max.bytes": options.kafkaFetchMessageMaxBytes,
-        "queued.min.messages": 1,
-        "fetch.error.backoff.ms": options.kafkaFetchErrorBackoff,
-        "queued.max.messages.kbytes": options.kafkaQueuedMaxMessageKbytes,
-        "fetch.wait.max.ms": options.kafkaFetchWaitMax,
-        "queue.buffering.max.ms": options.kakfaQueueBufferingMax,
-        'queue.buffering.max.messages': options.kafkaQueueBufferingMaxMessages,
-        'batch.num.messages': options.kafkaBatchNumMessages,
-        'socket.timeout.ms': options.kafkaSocketTimeoutMs
+        brokers: options.kafkaBrokerList.split(','),
+        clientId: options.kafkaClientId,
+        connectionTimeout: options.kafkaConnectionTimeout,
+        requestTimeout: options.kafkaRequestTimeout,
+        retry: {
+            maxRetryTime: options.kafkaMaxRetryTime,
+            initialRetryTime: options.kafkaInitialRetryTime,
+            retries: options.kafkaMaxRetries,
+        },
     }
     return kafkaOptions
 }
-
 
 /**
  * Prepare SSL options for kafka client.
@@ -100,25 +69,75 @@ function parseStandardKafkaOptions(options) {
  * @returns {Object}
  */
 function parseKafkaSSLOptions(options) {
-    if(options.kafkaSecurityProtocol === 'sasl_ssl') {
+    function sslOptions() {
+        if (options.kafkaSslCa && options.kafkaSslKey && options.kafkaSslCertificate) {
+            return {
+                rejectUnauthorized: false,
+                ca: [fs.readFileSync(options.kafkaSslCa, 'utf-8')],
+                key: fs.readFileSync(options.kafkaSslKey, 'utf-8'),
+                cert: fs.readFileSync(options.kafkaSslCertificate, 'utf-8')
+            }
+        } else {
+            return true
+        }
+    }
+
+    if (options.kafkaSecurityProtocol === 'sasl_ssl') {
         return {
-            'security.protocol': options.kafkaSecurityProtocol,
-            'sasl.mechanisms': options.kafkaSaslMechanisms,
-            'sasl.username': options.kafkaSaslUsername,
-            'sasl.password': options.kafkaSaslPassword,
-            'enable.ssl.certificate.verification': options.kafkaSslCertificate != undefined?'true': 'false'
+            authenticationTimeout: kafkaAuthenticationTimeout,
+            reauthenticationThreshold: kafkaReauthenticationThreshold,
+            ssl: sslOptions(),
+            sasl: {
+                mechanism: options.kafkaSaslMechanisms,
+                username: options.kafkaSaslUsername,
+                password: options.kafkaSaslPassword,
+            }
         }
     } else if (options.kafkaSecurityProtocol === 'ssl') {
         return {
-            'security.protocol': options.kafkaSecurityProtocol,
-            'ssl.ca.location': options.kafkaSslCa,
-            'ssl.certificate.location': options.kafkaSslCertificate,
-            'ssl.key.location': options.kafkaSslKey,
-            'ssl.key.password': options.kafkaSslKeyPassword
+            authenticationTimeout: 1000,
+            ssl: sslOptions()
         };
     } else {
         return {};
     }
+}
+
+/**
+ * Prepare Producer options.
+ * @param {Object} options
+ * @returns {Object}
+ */
+function parseKakfaProducerOptions(options) {
+    const kafkaProducerOptions = {
+        metadataMaxAge: options.kafkaMetadataMaxAge,
+        allowAutoTopicCreation: false,
+        transactionTimeout: options.kafkaTransactionTimeout,
+        maxInFlightRequests: options.kafkaMaxInFlightRequests
+    }
+    return kafkaProducerOptions;
+}
+
+/**
+ * Prepare Consumer options.
+ * @param {Object} options
+ * @returns {Object}
+ */
+function parseKakfaConsumerOptions(options) {
+    const kafkaConsumerOptions = {
+        groupId: options.kafkaConsumerGroup,
+        sessionTimeout: options.kafkaSessionTimeout,
+        rebalanceTimeout: options.kafkaRebalanceTimeout,
+        heartbeatInterval: options.kafkaHeartbeatInterval,
+        metadataMaxAge: options.kafkaMetadataMaxAge,
+        allowAutoTopicCreation: false,
+        maxInFlightRequests: options.kafkaMaxInFlightRequests,
+        maxBytesPerPartition: options.kafkaMaxBytesPerPartition,
+        minBytes: options.kafkaMinBytes,
+        maxBytes: options.kafakMaxBytes,
+        maxWaitTimeInMs: options.kafkaMaxWaitTime
+    }
+    return kafkaConsumerOptions;
 }
 
 function parseKafkaOptions(options) {
@@ -128,119 +147,165 @@ function parseKafkaOptions(options) {
     }
 }
 
+function toWinstonLogLevel(level) {
+    switch (level) {
+        case logLevel.ERROR:
+        case logLevel.NOTHING:
+            return 'error'
+        case logLevel.WARN:
+            return 'warn'
+        case logLevel.INFO:
+            return 'info'
+        case logLevel.DEBUG:
+            return 'debug'
+    }
+}
+
+function toLogLevel(level) {
+    switch (level) {
+        case 'error':
+            return logLevel.ERROR;
+        case 'warn':
+            return logLevel.WARN;
+        case 'info':
+            return logLevel.INFO;
+        case 'debug':
+            return logLevel.DEBUG
+    }
+}
+/**
+ * Get kafka instance
+ * @param {Object} context
+ * @return {Kafka}
+ */
+function getKafkaInstance(context) {
+    const { log, options } = context;
+    let { kafka } = context;
+    const logger = log;
+    if (!kafka) {
+        const kafkaOptions = parseKafkaOptions(options)
+        kafka = new Kafka({
+            ...kafkaOptions,
+            logLevel: toLogLevel(logger.level == 'debug' ? 'info' : logger.level),
+            logCreator: (level) => {
+                return ({ namespace, level, label, log }) => {
+                    const { message, ...extra } = log
+                    logger.log({
+                        level: toWinstonLogLevel(level),
+                        message,
+                        extra,
+                    })
+                }
+            }
+        });
+    }
+    context.kafka = kafka;
+    return kafka
+}
+
 async function createKakfaProducer(context) {
-    const { log, options } = context
-    const kafkaOptions = parseKafkaOptions(options)
-    const producer = kafka.HighLevelProducer({ ...kafkaOptions, dr_cb: true });
-    Promise.promisifyAll(producer, {
-        filter: event => /^(connect|disconnect|flush)$/.test(event)
-    })
-    producer.setValueSerializer((value) => {
-        return Buffer.from(JSON.stringify(value));
-    });
-    producer.setPollInterval(100);
-
-    producer.on('error', (err) => {
-        log.error(`Kafka producer: error: ${JSON.stringify(err)}`);
-    });
-
-    producer.on('event.error', (err) => {
-        log.error(`Kafka producer: event.error: ${JSON.stringify(err)}`);
-    });
-
-    producer.on('delivery-report', (err, report) => {
-        if (err) {
-            log.error(`Kafka producer: Delivery error: ${JSON.stringify(err)}`);
-        } else {
-            const r = { ...report };
-            r.key = r.key.toString();
-            log.info(`Kafka producer: Delivery report: ${JSON.stringify(r)}`);
-        }
-    });
-
-    const ready = new Promise((resolve, _) => {
-        producer.on('ready', () => {
-            resolve();
-        })
-    });
-
-    log.info('Connecting kafka producer');
-    await producer.connectAsync({});
-    log.info('kafka producer connected')
-
-    await ready;
-    log.info('kafka producer is ready')
-
-    producer.setPollInterval(100);
-
+    const { log, options } = context;
+    const kafka = getKafkaInstance(context);
+    const producerOptions = parseKakfaProducerOptions(options);
+    const producer = kafka.producer(producerOptions);
+    log.info('connecting kafka producer');
+    await producer.connect();
     const kafkaProducer = {
         _producer: producer
+    };
+
+    kafkaProducer.send = async function (topic, message, key) {
+        try {
+            const response = await this._producer.send({
+                topic: topic,
+                messages: [{
+                    key: key,
+                    value: JSON.stringify(message),
+                    acks: 1
+                }]
+            });
+            log.info(`Sucessfully produced message ${JSON.stringify(response)}`);
+        } catch (error) {
+            log.error(`Error while producing message ${error}`);
+            throw error;
+        }
+
     }
 
-    kafkaProducer.send = function (topic, message, key) {
-        this._producer.produce(topic, null, message, key, Date.now(), (err, offset) => {
-            if (err) {
-                log.error(`Error while producing topic ${err}`);
-            }
-            log.info(`offset: ${offset}`);
-        });
-    };
     kafkaProducer.disconnect = async function () {
         log.info("Disconnecting kafka producer");
         try {
-            await this._producer.flushAsync(20000)
-            log.info("Producer flushed all queued message");
+            await this._producer.disconnect()
+            log.info("Producer disconnected")
         } catch (err) {
-            log.error(`Error while flushing kafka message queue: ${err}`);
-        } finally {
-            await this._producer.disconnectAsync(10000, (err, data) => {
-                if (err) {
-                    log.error(`Producer failed to disconnect ${err}`);
-                    return;
-                }
-                log.info("Producer disconnected")
-            })
+            log.error(`Producer failed to disconnect ${err}`);
         }
+
     }
     return kafkaProducer;
 }
 
 async function createKafkaConsumer(context) {
     const { listenerEvents, options, log } = context;
-    const kafkaOptions = parseKafkaOptions(options);
-    const consumer_worker_path = path.join(__dirname, 'kafka-workers/consumer.worker.js');
-    let consumerWorker = fork(consumer_worker_path, [], {
-        slient: true,
-        execArgv: ['--harmony']
-    });
-    
-
+    const kafka = getKafkaInstance(context);
+    const consumerOptions = parseKakfaConsumerOptions(options);
+    const consumer = kafka.consumer(consumerOptions);
     const kafkaConsumer = {
-        _consumer: consumerWorker,
+        _consumer: consumer,
+        disconnect: false,
         onMessage: () => { },
-        disconnect: async function() {
-            this._consumer.send('kill')
+        disconnect: async function () {
+            this.disconnect = true;
+            try {
+                log.info("Disconnecting kafka producer");
+                await this._consumer.disconnect();
+                log.info("Producer disconnected")
+            } catch (error) {
+                log.error(`Consumer failed to disconnect ${err}`);
+            }
+
         }
     }
-    let resolve;
-    const ready = new Promise((success, _) => { resolve = success });
-    consumerWorker.on('message', function (msg) {
-        if (msg === 'online') {
-            resolve();
-            consumerWorker.send({ type: 'option', topics: listenerEvents, kafka_config: kafkaOptions });
-            return;
+    try {
+        log.info('Connecting consumer.')
+        await consumer.connect();
+        log.info('Consumer connected sucessfully.')
+    } catch (error) {
+        log.error(`Error while connecting consumer. ${error}`);
+        throw error;
+    }
+
+    try {
+        log.info(`Subscribing consumer to topics ${listenerEvents}`);
+        const subscribePromise = [];
+        for (let i = 0; i < listenerEvents.length; i++) {
+            let promise = consumer.subscribe({ topic: listenerEvents[i] });
+            subscribePromise.push(promise)
         }
-        kafkaConsumer.onMessage(msg.topic, msg.value)
-    })
-    consumerWorker.on('error', (err) => {
-        log.error(`consumer worker throws error ${err}`)
-    });
-
-    consumerWorker.on('exit', (exitCode) => {
-        log.info(`consumer worker exit with code ${exitCode}`);
-    });
-
-    await ready
+        await Promise.all(subscribePromise);
+        log.info(`Consumer subscribe to topics successfully`);
+    } catch (error) {
+        log.error(`Error while subscribing to the topics ${error}`)
+        throw error;
+    }
+    setTimeout(async () => {
+        try {
+            log.info(`Running consumer`);
+            await consumer.run({
+                eachMessage: ({ topic, message }) => {
+                    const data = {
+                        key: message.key.toString(),
+                        value: JSON.parse(message.value.toString())
+                    }
+                    const logInfo = { ...message, key: data.key, value: { META: data.value.META } };
+                    log.info(`new data received ${JSON.stringify(logInfo)}`);
+                    kafkaConsumer.onMessage(topic, data.value);
+                }
+            });
+        } catch (error) {
+            log.error(`Error while running consumer ${error}`, error);
+        }
+    }, 500);
 
     return kafkaConsumer;
 }
