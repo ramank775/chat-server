@@ -84,8 +84,8 @@ function parseKafkaSSLOptions(options) {
 
     if (options.kafkaSecurityProtocol === 'sasl_ssl') {
         return {
-            authenticationTimeout: kafkaAuthenticationTimeout,
-            reauthenticationThreshold: kafkaReauthenticationThreshold,
+            authenticationTimeout: options.kafkaAuthenticationTimeout,
+            reauthenticationThreshold: options.kafkaReauthenticationThreshold,
             ssl: sslOptions(),
             sasl: {
                 mechanism: options.kafkaSaslMechanisms,
