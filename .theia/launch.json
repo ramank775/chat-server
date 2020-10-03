@@ -20,8 +20,6 @@
                 "--kafka-error-message-send-topic=${TOPIC_MESSAGE_SENT_ERROR}",
                 "--kafka-new-message-topic=${TOPIC_NEW_MESSAGE}",
                 "--kafka-broker-list=${BROKER_LIST}",
-                "--kakfa-queue-buffering-max=0.6",
-                "--kafka-socket-timeout-ms=2000"
             ],
             "envFile": "${workspaceFolder}/.env",
             "autoAttachChildProcesses": true
