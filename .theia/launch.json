@@ -20,6 +20,9 @@
                 "--kafka-error-message-send-topic=${TOPIC_MESSAGE_SENT_ERROR}",
                 "--kafka-new-message-topic=${TOPIC_NEW_MESSAGE}",
                 "--kafka-broker-list=${BROKER_LIST}",
+                "--kafka-security-protocol=${KAFKA_SECURITY_PROTOCOL}",
+                "--kafka-sasl-username=${KAFKA_SASL_USERNAME}",
+                "--kafka-sasl-password=${KAFKA_SASL_PASSWORD}"
             ],
             "envFile": "${workspaceFolder}/.env",
             "autoAttachChildProcesses": true
@@ -36,7 +39,10 @@
                 "--kafka-user-connected-topic=${TOPIC_USER_CONNECTED}",
                 "--kafka-user-disconnected-topic=${TOPIC_USER_DISCONNECTED}",
                 "--kafka-broker-list=${BROKER_LIST}",
-                "--json-server-port=${SESSION_MS_PORT}"
+                "--json-server-port=${SESSION_MS_PORT}",
+                "--kafka-security-protocol=${KAFKA_SECURITY_PROTOCOL}",
+                "--kafka-sasl-username=${KAFKA_SASL_USERNAME}",
+                "--kafka-sasl-password=${KAFKA_SASL_PASSWORD}"
             ],
             "envFile": "${workspaceFolder}/.env",
             "autoAttachChildProcesses": true
@@ -56,7 +62,10 @@
                 "--kafka-persistence-message-topic=${TOPIC_DB_MESSAGE}",
                 "--kafka-broker-list=${BROKER_LIST}",
                 "--session-service-url=${SESSION_MS_HOST}:${SESSION_MS_PORT}",
-                "--kafka-group-message-topic=${TOPIC_NEW_GROUP_MS}"
+                "--kafka-group-message-topic=${TOPIC_NEW_GROUP_MS}",
+                "--kafka-security-protocol=${KAFKA_SECURITY_PROTOCOL}",
+                "--kafka-sasl-username=${KAFKA_SASL_USERNAME}",
+                "--kafka-sasl-password=${KAFKA_SASL_PASSWORD}"
             ],
             "envFile": "${workspaceFolder}/.env",
             "autoAttachChildProcesses": true
@@ -73,9 +82,12 @@
                 "--kafka-user-connected-topic=${TOPIC_USER_CONNECTED}",
                 "--kafka-new-message-topic=${TOPIC_NEW_MESSAGE}",
                 "--kafka-broker-list=${BROKER_LIST}",
-                "--session-service-url=localhost:8001",
+                "--session-service-url=${SESSION_MS_HOST}:${SESSION_MS_PORT}",
                 "--kafka-persistence-message-topic=${TOPIC_DB_MESSAGE}",
-                "--mongo-url=mongodb://localhost:27017/chat"
+                "--mongo-url=${MONGO_URL}",
+                "--kafka-security-protocol=${KAFKA_SECURITY_PROTOCOL}",
+                "--kafka-sasl-username=${KAFKA_SASL_USERNAME}",
+                "--kafka-sasl-password=${KAFKA_SASL_PASSWORD}"
             ],
             "envFile": "${workspaceFolder}/.env",
             "autoAttachChildProcesses": true
@@ -88,7 +100,7 @@
                 "--app-name=profile-ms-1",
                 "--debug",
                 "--port=4000",
-                "--mongo-url=mongodb://localhost:27017/chat",
+                "--mongo-url=${MONGO_URL}",
                 "--firebase-project-id=${FIREBASE_PROJECT_ID}"
             ],
             "envFile": "${workspaceFolder}/.env",
