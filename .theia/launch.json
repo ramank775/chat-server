@@ -101,7 +101,12 @@
                 "--debug",
                 "--port=4000",
                 "--mongo-url=${MONGO_URL}",
-                "--firebase-project-id=${FIREBASE_PROJECT_ID}"
+                "--firebase-project-id=${FIREBASE_PROJECT_ID}",
+                "--kafka-broker-list=${BROKER_LIST}",
+                "--kafka-security-protocol=${KAFKA_SECURITY_PROTOCOL}",
+                "--kafka-sasl-username=${KAFKA_SASL_USERNAME}",
+                "--kafka-sasl-password=${KAFKA_SASL_PASSWORD}",
+                "--kafka-new-login-topic=${TOPIC_NEW_LOGIN}"
             ],
             "envFile": "${workspaceFolder}/.env",
             "autoAttachChildProcesses": true
@@ -151,6 +156,27 @@
                 "--session-service-url=${SESSION_MS_HOST}:${SESSION_MS_PORT}",
                 "--group-service-url=${GROUP_MS_JSON_HOST}:${GROUP_MS_JSON_PORT}",
                 "--kafka-persistence-message-topic=${TOPIC_DB_MESSAGE}"
+            ],
+            "envFile": "${workspaceFolder}/.env",
+            "autoAttachChildProcesses": true
+        },{
+            "type": "node",
+            "request": "launch",
+            "name": "Launch notification MS",
+            "program": "${workspaceFolder}/services/notification-ms/notification-ms.js",
+            "args": [
+                "--app-name=notification-ms-1",
+                "--debug",
+                "--mongo-url=${MONGO_URL}",
+                "--firebase-admin-credential-json-path=${FIREBASE_ADMIN_CRED_JSON_PATH}",
+                "--kafka-broker-list=${BROKER_LIST}",
+                "--kafka-security-protocol=${KAFKA_SECURITY_PROTOCOL}",
+                "--kafka-sasl-username=${KAFKA_SASL_USERNAME}",
+                "--kafka-sasl-password=${KAFKA_SASL_PASSWORD}",
+                "--kafka-consumer-group=notification-ms",
+                "--kafka-new-login-topic=${TOPIC_NEW_LOGIN}",
+                "--kafka-offline-message-topic=${TOPIC_DB_MESSAGE}",
+                "--db-app-initial=${PERSISTENCE_MESSAGE_MS_INITIAL}"
             ],
             "envFile": "${workspaceFolder}/.env",
             "autoAttachChildProcesses": true

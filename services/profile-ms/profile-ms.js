@@ -11,6 +11,7 @@ const {
         addMongodbOptions,
         initMongoClient
     } = require('../../libs/mongo-utils'),
+    kafka = require('../../libs/kafka-utils'),
     { uuidv4, extractInfoFromRequest } = require('../../helper'),
     admin = require('firebase-admin'),
     asMain = (require.main === module);
@@ -34,6 +35,9 @@ function parseOptions(argv) {
     cmd = addStandardHttpOptions(cmd);
     cmd = addMongodbOptions(cmd);
     cmd = firebaseProjectOptions(cmd);
+    cmd = kafka.addStandardKafkaOptions(cmd);
+    cmd = kafka.addKafkaSSLOptions(cmd);
+    cmd.option('--kafka-new-login-topic <new-login-topic>', 'New login kafka topic')
     return cmd.parse(argv).opts();
 }
 
@@ -41,6 +45,7 @@ async function initResource(options) {
     return await initDefaultResources(options)
         .then(initMongoClient)
         .then(initFirebaseAdmin)
+        .then(kafka.initEventProducer)
 }
 
 class ProfileMs extends HttpServiceBase {
@@ -50,6 +55,8 @@ class ProfileMs extends HttpServiceBase {
         this.profileCollection = context.mongodbClient.collection('profile');
         this.authCollection = context.mongodbClient.collection('session_auth');
         this.firebaseAuth = context.firebaseAuth;
+        this.newLoginTopic = this.options.kafkaNewLoginTopic;
+        this.publisher = context.publisher;
     }
 
     async init() {
@@ -75,7 +82,8 @@ class ProfileMs extends HttpServiceBase {
         });
 
         this.addRoute('/login', 'POST', async (req, res) => {
-            const { payload: { username } } = req;
+            const { payload } = req;
+            const { username } = payload;
             const token = extractInfoFromRequest(req, 'token');
             let isNew = false;
             let result;
@@ -98,6 +106,7 @@ class ProfileMs extends HttpServiceBase {
             }
 
             const accesskey = await this.getAccessKey(username);
+            this.publisher.send(this.newLoginTopic, payload, username);
             return {
                 status: true,
                 username,
@@ -143,7 +152,7 @@ class ProfileMs extends HttpServiceBase {
             accesskey: newAccessKey,
             updatedOn: new Date().toUTCString()
         }
-        await this.authCollection.update({ username }, {
+        await this.authCollection.updateOne({ username }, {
             $set: newAuthDoc,
             $setOnInsert: {
                 addedOn: new Date().toUTCString()

@@ -1,6 +1,6 @@
 var ws;
-var groups;
-
+var groups = [];
+var id = 0;
 function getCookie(cname) {
     var name = cname + "=";
     var decodedCookie = decodeURIComponent(document.cookie);
@@ -47,12 +47,19 @@ function connect() {
 }
 
 function sendMessage() {
+    function getChatId(to) {
+        const [username] = getUserInfo()
+        const values =  [username.replace('+', ''), to.replace('+', '')].sort();
+        return values.join('');
+    }
     let msg = document.getElementById('msg').value;
     let to = document.getElementById('to').value;
     let sMesgae = {
-        message: msg,
+        msgId: to + Date.now() + (++id),
+        text: msg,
         to: to,
-        type: groups.filter(x=>x.groupId == to).length > 0?'group': 'single'
+        chatId:getChatId(to),
+        type: groups.filter(x => x.groupId == to).length > 0 ? 'group' : 'text'
     }
     ws.send(JSON.stringify(sMesgae));
 }
@@ -69,7 +76,7 @@ function getGroups() {
                 newGroup.appendChild(document.createTextNode(JSON.stringify(group)));
                 group_space.appendChild(newGroup);
             });
-            groups = res; 
+            groups = res;
 
         })
 }
@@ -181,24 +188,26 @@ function setupUI() {
             if (!(username && secretPhase)) {
                 return;
             }
-            fetch('/login', {
-                method: 'post',
-                body: JSON.stringify({
-                    username,
-                    secretPhase
-                }),
-                headers: new Headers({
-                    'Content-Type': 'application/json'
-                })
-            }).then(res => res.json())
-                .then(res => {
-                    if (!res.status) {
-                        alert('Loggin failed');
-                        return;
-                    }
-                    login(res.username, res.accesskey);
-                    setupUI();
-                })
+            login(username, 'test');
+            setupUI();
+            // fetch('/login', {
+            //     method: 'post',
+            //     body: JSON.stringify({
+            //         username,
+            //         secretPhase
+            //     }),
+            //     headers: new Headers({
+            //         'Content-Type': 'application/json'
+            //     })
+            // }).then(res => res.json())
+            //     .then(res => {
+            //         if (!res.status) {
+            //             alert('Loggin failed');
+            //             return;
+            //         }
+            //         login(res.username, res.accesskey);
+            //         setupUI();
+            //     })
         }
 
 
@@ -211,7 +220,7 @@ function setupUI() {
         document.getElementById('msg_submit').onclick = sendMessage;
         connect();
         document.getElementById('create_group').onclick = createGroup;
-        getGroups();
+        //getGroups();
     }
 }
 
