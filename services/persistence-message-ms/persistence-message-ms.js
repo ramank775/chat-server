@@ -10,7 +10,7 @@ const kafka = require('../../libs/kafka-utils'),
         initMongoClient
     } = require('../../libs/mongo-utils'),
     mongo = require('mongodb'),
-    io = require('@pm2/io'),
+    io = require('@pm2/io').init({ tracing: true }),
     asMain = (require.main === module);
 
 async function prepareEventListFromKafkaTopics(context) {

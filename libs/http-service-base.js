@@ -1,7 +1,7 @@
 const {
     ServiceBase
 } = require('./service-base'),
-    io = require('@pm2/io'),
+    io = require('@pm2/io').init({ tracing: true }),
     Hapi = require('@hapi/hapi')
 
 

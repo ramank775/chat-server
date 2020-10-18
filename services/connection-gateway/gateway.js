@@ -9,7 +9,7 @@ const
         resolveEnvVariables } = require('../../libs/service-base'),
     kafka = require('../../libs/kafka-utils'),
     { uuidv4 } = require('../../helper'),
-    io = require('@pm2/io'),
+    io = require('@pm2/io').init({ tracing: true }),
     asMain = (require.main === module)
 
 async function initWebsocket(context) {

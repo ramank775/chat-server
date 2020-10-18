@@ -10,7 +10,7 @@ const
         addJsonServerOptions,
         initJsonServer
     } = require('../../libs/json-socket-utils'),
-    io = require('@pm2/io'),
+    io = require('@pm2/io').init({ tracing: true }),
     asMain = (require.main === module);
 
 

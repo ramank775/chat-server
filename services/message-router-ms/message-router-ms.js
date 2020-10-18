@@ -8,7 +8,7 @@ const kafka = require('../../libs/kafka-utils'),
     {
         initJsonClient
     } = require('../../libs/json-socket-utils'),
-    io = require('@pm2/io'),
+    io = require('@pm2/io').init({ tracing: true }),
     asMain = (require.main === module);
 
 async function prepareEventListFromKafkaTopics(context) {
