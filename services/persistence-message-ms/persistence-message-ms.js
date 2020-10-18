@@ -33,7 +33,7 @@ async function initDatabase(context) {
     const db = {}
     db.save = async function (message) {
         const user = message.META.to;
-        await messageCollection.update({ user }, {
+        await messageCollection.updateOne({ user }, {
             $push: {
                 messages: { _id: new mongo.ObjectID(), payload: message.payload }
             },
@@ -49,7 +49,7 @@ async function initDatabase(context) {
         return user_records ? user_records.messages : [];
     }
     db.removeMessageByUser = async function (user, messages) {
-        await messageCollection.update({ user }, {
+        await messageCollection.updateOne({ user }, {
             $pull: {
                 messages: { _id: { $in: messages } }
             }
