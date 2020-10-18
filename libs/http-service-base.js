@@ -24,14 +24,14 @@ class HttpServiceBase extends ServiceBase {
         this.hapiServer.ext('onRequest', (req, h) => {
             const meter = this.meterDict[req.url.pathname];
             if(meter) meter.mark();
-            req.tracer = this.tracer.startChildSpan(req.url.pathname);
-            req.tracker.start();
+            //req.tracer = this.tracer.startChildSpan(req.url.pathname, 1);
+            //req.tracker.start();
             log.info(`new request : ${req.url}`)
             return h.continue;
         });
 
         this.hapiServer.ext('onPreResponse', (req, h) =>{
-            req.tracker.end();
+            //req.tracker.end();
             return h.continue;
         })
 

@@ -66,7 +66,7 @@ class MessageRouterMS extends ServiceBase {
             type: 'meter'
         });
 
-        this.serverRequestTracer = io.getTracer();
+        //this.serverRequestTracer = io.getTracer();
     }
     init() {
         const { listener, listenerEvents, publisher, events } = this.context;
@@ -96,10 +96,10 @@ class MessageRouterMS extends ServiceBase {
         if(message.META.type === 'group') {
             receiver = events['group-message']
         } else {
-            const tracer = this.serverRequestTracer.startChildSpan('getServer', 1);
-            tracer.start();
+            // const tracer = this.serverRequestTracer.startChildSpan('getServer', 1);
+            // tracer.start();
             receiver = await this.getServer(user);
-            tracker.end();
+            // tracker.end();
         }
         publisher.send(receiver, message, user);
     }
