@@ -96,7 +96,7 @@ class MessageRouterMS extends ServiceBase {
         if(message.META.type === 'group') {
             receiver = events['group-message']
         } else {
-            const tracer = this.serverRequestTracer.startChildSpan('getServer');
+            const tracer = this.serverRequestTracer.startChildSpan('getServer', 1);
             tracer.start();
             receiver = await this.getServer(user);
             tracker.end();

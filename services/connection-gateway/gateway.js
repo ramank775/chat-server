@@ -22,7 +22,7 @@ async function initWebsocket(context) {
     
     const wss = new webSocker.Server({ noServer: true });
     httpServer.on('upgrade', (request, socket, head) => {
-        const upgradeTracker = tracker.startChildSpan('upgradeRequest');
+        const upgradeTracker = tracker.startChildSpan('upgradeRequest', 1);
         upgradeTracker.start();
         wss.handleUpgrade(request, socket, head, (ws) => {
             wss.emit('connection', ws, request);
