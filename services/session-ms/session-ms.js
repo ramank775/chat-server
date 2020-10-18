@@ -10,7 +10,6 @@ const
         addJsonServerOptions,
         initJsonServer
     } = require('../../libs/json-socket-utils'),
-    io = require('@pm2/io').init({ tracing: true }),
     asMain = (require.main === module);
 
 
@@ -64,10 +63,10 @@ class SessionMS extends ServiceBase {
         super(context);
         this.jsonServer = context.jsonServer;
         this.memCache = context.memCache;
-        this.userConnectedCounter = io.counter({
+        this.userConnectedCounter = this.statsClient.counter({
             name: 'userconnected'
         });
-        this.getServerMeter = io.meter({
+        this.getServerMeter = this.statsClient.meter({
             name: 'getServer/sec',
             type: 'meter'
         });

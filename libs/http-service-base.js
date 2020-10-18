@@ -1,7 +1,6 @@
 const {
     ServiceBase
 } = require('./service-base'),
-    io = require('@pm2/io').init({ tracing: true }),
     Hapi = require('@hapi/hapi')
 
 
@@ -11,7 +10,6 @@ class HttpServiceBase extends ServiceBase {
         super(context);
         this.hapiServer = null;
         this.meterDict = {};
-        this.tracer = io.getTracer();
     }
 
     async init() {
@@ -24,14 +22,15 @@ class HttpServiceBase extends ServiceBase {
         this.hapiServer.ext('onRequest', (req, h) => {
             const meter = this.meterDict[req.url.pathname];
             if(meter) meter.mark();
-            //req.tracer = this.tracer.startChildSpan(req.url.pathname, 1);
-            //req.tracker.start();
+            const tracer = this.tracer.startChildSpan(req.url.pathname, 1);
+            tracer.start();
+            req.tracer = tracer;
             log.info(`new request : ${req.url}`)
             return h.continue;
         });
 
         this.hapiServer.ext('onPreResponse', (req, h) =>{
-            //req.tracker.end();
+            req.tracer.end();
             return h.continue;
         })
 
@@ -47,6 +46,10 @@ class HttpServiceBase extends ServiceBase {
     }
 
     addRoute(uri, method, handler, options = {}) {
+        this.meterDict[uri] = this.statsClient.meter({
+            name: `${uri}/sec`,
+            type: 'meter'
+        });
         this.hapiServer.route({
             method: method,
             path: uri,

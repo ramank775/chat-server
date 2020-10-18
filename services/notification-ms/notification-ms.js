@@ -11,7 +11,6 @@ const kafka = require('../../libs/kafka-utils'),
     } = require('../../libs/mongo-utils'),
     mongo = require('mongodb'),
     admin = require('firebase-admin'),
-    io = require('@pm2/io').init({ tracing: true }),
     asMain = (require.main === module);
 
 async function prepareEventListFromKafkaTopics(context) {
@@ -69,12 +68,12 @@ class NotificationMS extends ServiceBase {
         this.notificationTokensCollection = context.mongodbClient.collection('notification_tokens');
         this.firebaseMessaging = context.firebaseMessaging;
         
-        this.notificationMeter = io.meter({
+        this.notificationMeter = this.statsClient.meter({
             name: 'notificationMeter/sec',
             type: 'meter'
         });
 
-        this.failedNotificationMeter = io.meter({
+        this.failedNotificationMeter = this.statsClient.meter({
             name: 'failedNotification/sec',
             type: 'meter'
         });

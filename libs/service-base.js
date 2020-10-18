@@ -1,13 +1,15 @@
 const
     commander = require('commander'),
-    logger = require('./logger')
+    logger = require('./logger'),
+    statsClient = require('./stats-client');
 
 
 async function initDefaultResources(options) {
     let ctx = {
         options: options || {}
     }
-    ctx = initLogger(ctx);
+    ctx = await initLogger(ctx);
+    ctx = await statsClient.initStatsClient(ctx);
     return ctx;
 }
 
@@ -29,7 +31,7 @@ function initDefaultOptions() {
 }
 
 function addStandardHttpOptions(cmd) {
-    cmd.option('--port <port>', 'Http port (default 8000)',(c) => parseInt(c), 8000)
+    cmd.option('--port <port>', 'Http port (default 8000)', (c) => parseInt(c), 8000)
         .option('--ssl-cert <ssl-cert>', 'SSL public certificate')
         .option('--ssl-key <ssl-key>', 'SSL private key');
     return cmd;
@@ -72,9 +74,9 @@ async function initHttpServer(context) {
 
 function resolveEnvVariables(options) {
     for (let index = 0; index < options.length; index++) {
-        if(typeof options[index] === "string") {
+        if (typeof options[index] === "string") {
             options[index] = options[index].replace(/\${([A-Z0-9_]*)}/ig, (_, n) => process.env[n])
-        }        
+        }
     }
     // options = { ...options }
     // for (const key in options) {
@@ -94,13 +96,15 @@ class ServiceBase {
         this.context = context;
         this.options = context.options;
         this.log = context.log;
+        this.statsClient = context.statsClient;
+        this.tracer = context.tracer;
     }
     init() {
 
     }
 
     async run() {
-        this.log.info('Starting service with options'+ JSON.stringify(this.options, (key, value) =>
+        this.log.info('Starting service with options' + JSON.stringify(this.options, (key, value) =>
             (/(Password|Secret|Key|Cert|Token)$/i.test(key) ? '*****' : value)
         ));
         this.init();
@@ -132,6 +136,7 @@ class ServiceBase {
         this.log.info('Shutting down service');
         try {
             await this.shutdown()
+            this.tracer.currentRootSpan.end();
             process.exit(0);
         } catch (error) {
             this.log.error('Error while shutdown the application gracefully', error);

@@ -8,7 +8,6 @@ const kafka = require('../../libs/kafka-utils'),
     {
         initJsonClient
     } = require('../../libs/json-socket-utils'),
-    io = require('@pm2/io').init({ tracing: true }),
     asMain = (require.main === module);
 
 async function prepareEventListFromKafkaTopics(context) {
@@ -52,21 +51,19 @@ class MessageRouterMS extends ServiceBase {
     constructor(context) {
         super(context);
         this.maxRetryCount = this.options.messageMaxRetries;
-        this.redirectMessageMeter = io.meter({
+        this.redirectMessageMeter = this.statsClient.meter({
             name: 'redirectMessage/sec',
             type: 'meter'
         });
-        this.failedMessageMeter = io.meter({
+        this.failedMessageMeter = this.statsClient.meter({
             name: 'failedMessage/sec',
             type: 'meter'
         });
 
-        this.retryMessageMeter = io.meter({
+        this.retryMessageMeter = this.statsClient.meter({
             name: 'retryMessage/sec',
             type: 'meter'
         });
-
-        //this.serverRequestTracer = io.getTracer();
     }
     init() {
         const { listener, listenerEvents, publisher, events } = this.context;
@@ -96,10 +93,10 @@ class MessageRouterMS extends ServiceBase {
         if(message.META.type === 'group') {
             receiver = events['group-message']
         } else {
-            // const tracer = this.serverRequestTracer.startChildSpan('getServer', 1);
-            // tracer.start();
+            const tracer = this.tracer.startChildSpan('getServer', 1);
+            tracer.start();
             receiver = await this.getServer(user);
-            // tracker.end();
+            tracer.end();
         }
         publisher.send(receiver, message, user);
     }

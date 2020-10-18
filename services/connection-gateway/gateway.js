@@ -9,12 +9,11 @@ const
         resolveEnvVariables } = require('../../libs/service-base'),
     kafka = require('../../libs/kafka-utils'),
     { uuidv4 } = require('../../helper'),
-    io = require('@pm2/io').init({ tracing: true }),
     asMain = (require.main === module)
 
 async function initWebsocket(context) {
-    const tracker = io.getTracer();
-    const upgradeMeter = io.meter({
+    const {tracer, statsClient} = context;
+    const upgradeMeter = statsClient.meter({
         name: 'upgradeSocket/sec',
         type: 'meter'
     });
@@ -22,12 +21,12 @@ async function initWebsocket(context) {
     
     const wss = new webSocker.Server({ noServer: true });
     httpServer.on('upgrade', (request, socket, head) => {
-        //const upgradeTracker = tracker.startChildSpan('upgradeRequest', 1);
-        //upgradeTracker.start();
+        const upgradeTracker = tracer.startChildSpan('upgradeRequest', 1);
+        upgradeTracker.start();
         wss.handleUpgrade(request, socket, head, (ws) => {
             wss.emit('connection', ws, request);
             upgradeMeter.mark();
-            //upgradeTracker.end();
+            upgradeTracker.end();
         });
     });
     context.wss = wss;
@@ -81,7 +80,7 @@ class Gateway extends ServiceBase {
         const publishEvent = (event, user, eventArgs) => {
             publisher.send(event, eventArgs, user)
         }
-        const userConnectedCounter = io.counter({
+        const userConnectedCounter = this.statsClient.counter({
             name: 'userConnected'
         });
         this.userEvents = {
@@ -101,17 +100,17 @@ class Gateway extends ServiceBase {
             }
         }
 
-        const newMessageMeter = io.meter({
+        const newMessageMeter = this.statsClient.meter({
             name: 'newMessage/sec',
             type: 'meter'
         });
 
-        const messageDeliverySuccessfulMeter = io.meter({
+        const messageDeliverySuccessfulMeter = this.statsClient.meter({
             name: 'messageDeliverySuccessful/sec',
             type: 'meter'
         });
 
-        const messageDeliveryFailureMeter = io.meter({
+        const messageDeliveryFailureMeter = this.statsClient.meter({
             name: 'messageDeliveryFailure/sec',
             type: 'meter'
         });

@@ -10,7 +10,6 @@ const kafka = require('../../libs/kafka-utils'),
         initMongoClient
     } = require('../../libs/mongo-utils'),
     mongo = require('mongodb'),
-    io = require('@pm2/io').init({ tracing: true }),
     asMain = (require.main === module);
 
 async function prepareEventListFromKafkaTopics(context) {
@@ -85,11 +84,11 @@ function parseOptions(argv) {
 class PersistenceMessageMS extends ServiceBase {
     constructor(context) {
         super(context);
-        this.saveMessageMeter = io.meter({
+        this.saveMessageMeter = this.statsClient.meter({
             name: 'saveMessage/sec',
             type: 'meter'
         });
-        this.sendMessageMeter = io.meter({
+        this.sendMessageMeter = this.statsClient.meter({
             name: 'sendMessage/sec',
             type: 'meter'
         });
