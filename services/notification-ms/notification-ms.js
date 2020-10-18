@@ -11,6 +11,7 @@ const kafka = require('../../libs/kafka-utils'),
     } = require('../../libs/mongo-utils'),
     mongo = require('mongodb'),
     admin = require('firebase-admin'),
+    io = require('@pm2/io'),
     asMain = (require.main === module);
 
 async function prepareEventListFromKafkaTopics(context) {
@@ -67,6 +68,16 @@ class NotificationMS extends ServiceBase {
         this.mongoClient = context.mongoClient;
         this.notificationTokensCollection = context.mongodbClient.collection('notification_tokens');
         this.firebaseMessaging = context.firebaseMessaging;
+        
+        this.notificationMeter = io.meter({
+            name: 'notificationMeter/sec',
+            type: 'meter'
+        });
+
+        this.failedNotificationMeter = io.meter({
+            name: 'failedNotification/sec',
+            type: 'meter'
+        });
     }
     init() {
         const { listener, events, options: { dbAppInitial } } = this.context;
@@ -95,6 +106,7 @@ class NotificationMS extends ServiceBase {
                         if (payload.type == 'notification') return;
                         const record = await this.notificationTokensCollection.findOne({ username: to }, { projection: { _id: 0, notificationToken: 1 } });
                         if (record) {
+                            this.notificationMeter.mark();
                             const { notificationToken } = record;
                             const notification = {
                                 notification: {
@@ -112,6 +124,7 @@ class NotificationMS extends ServiceBase {
                                 timeToLive: 60 * 60 * 24
                             };
                             this.firebaseMessaging.sendToDevice(notificationToken, notification, options).catch(err => {
+                                this.failedNotificationMeter.mark();
                                 this.log.error(`Error while sending push notification ${err}`, err);
                             });
                         }

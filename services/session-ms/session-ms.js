@@ -10,6 +10,7 @@ const
         addJsonServerOptions,
         initJsonServer
     } = require('../../libs/json-socket-utils'),
+    io = require('@pm2/io'),
     asMain = (require.main === module);
 
 
@@ -63,6 +64,13 @@ class SessionMS extends ServiceBase {
         super(context);
         this.jsonServer = context.jsonServer;
         this.memCache = context.memCache;
+        this.userConnectedCounter = io.counter({
+            name: 'userconnected'
+        });
+        this.getServerMeter = io.meter({
+            name: 'getServer/sec',
+            type: 'meter'
+        });
     }
     init() {
         const { listener, events } = this.context;
@@ -70,11 +78,13 @@ class SessionMS extends ServiceBase {
             switch (event) {
                 case events['user-connected']:
                     this.memCache.set(value.user, value.server)
+                    this.userConnectedCounter.inc(1);
                     break;
                 case events['user-disconnected']:
                     const server = this.memCache.get(value.user)
                     if (server == value.server) {
-                        this.memCache.remove(value.user)
+                        this.memCache.remove(value.user);
+                        this.userConnectedCounter.dec(1);
                     }
                     break;
             }
@@ -83,6 +93,7 @@ class SessionMS extends ServiceBase {
             let method = message.func || 'get-server';
             const funcMapping = {
                 'get-server': (message) => {
+                    this.getServerMeter.mark();
                     const { user } = message;
                     return this.getServer(user);
                 },
@@ -91,6 +102,7 @@ class SessionMS extends ServiceBase {
                     return this.getUserStatus(user);
                 },
                 'get-servers': async (message) => {
+                    this.getServerMeter.mark();
                     const { users } = message;
                     const serverMapping = {};
                     for (const user of users) {

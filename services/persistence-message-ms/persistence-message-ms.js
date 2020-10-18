@@ -10,6 +10,7 @@ const kafka = require('../../libs/kafka-utils'),
         initMongoClient
     } = require('../../libs/mongo-utils'),
     mongo = require('mongodb'),
+    io = require('@pm2/io'),
     asMain = (require.main === module);
 
 async function prepareEventListFromKafkaTopics(context) {
@@ -84,17 +85,28 @@ function parseOptions(argv) {
 class PersistenceMessageMS extends ServiceBase {
     constructor(context) {
         super(context);
+        this.saveMessageMeter = io.meter({
+            name: 'saveMessage/sec',
+            type: 'meter'
+        });
+        this.sendMessageMeter = io.meter({
+            name: 'sendMessage/sec',
+            type: 'meter'
+        });
     }
     init() {
         const { listener, events, publisher, db, options: { appName } } = this.context;
         listener.onMessage = async (event, message) => {
             switch (event) {
                 case events['send-message-db']:
+                    this.saveMessageMeter.mark();
                     await db.save(message);
                     break;
                 case events['user-connected']:
                     const messages = await db.getUndeliveredMessageByUser(message.user);
                     if (!(messages && messages.length)) break;
+
+                    this.sendMessageMeter.mark();
                     const payload = JSON.stringify( messages.map(x => x.payload));
                     const sendMessage = {
                         META: { to: message.user, parsed: true, retry: 0, from: appName },

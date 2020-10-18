@@ -9,15 +9,25 @@ const
         resolveEnvVariables } = require('../../libs/service-base'),
     kafka = require('../../libs/kafka-utils'),
     { uuidv4 } = require('../../helper'),
+    io = require('@pm2/io'),
     asMain = (require.main === module)
 
 async function initWebsocket(context) {
+    const tracker = io.getTracer();
+    const upgradeMeter = io.meter({
+        name: 'upgradeSocket/sec',
+        type: 'meter'
+    });
     const { httpServer } = context;
-
+    
     const wss = new webSocker.Server({ noServer: true });
     httpServer.on('upgrade', (request, socket, head) => {
+        const upgradeTracker = tracker.startChildSpan('upgradeRequest');
+        upgradeTracker.start();
         wss.handleUpgrade(request, socket, head, (ws) => {
             wss.emit('connection', ws, request);
+            upgradeMeter.mark();
+            upgradeTracker.end();
         });
     });
     context.wss = wss;
@@ -71,28 +81,52 @@ class Gateway extends ServiceBase {
         const publishEvent = (event, user, eventArgs) => {
             publisher.send(event, eventArgs, user)
         }
+        const userConnectedCounter = io.counter({
+            name: 'userConnected'
+        });
         this.userEvents = {
             onConnect: function (user) {
+                userConnectedCounter.inc(1);
                 publishEvent(events['user-connected'], user, {
                     user: user,
                     server: serverName
                 })
             },
             onDisconnect: function (user) {
+                userConnectedCounter.dec(1);
                 publishEvent(events['user-disconnected'], user, {
                     user: user,
                     server: serverName
                 })
             }
         }
+
+        const newMessageMeter = io.meter({
+            name: 'newMessage/sec',
+            type: 'meter'
+        });
+
+        const messageDeliverySuccessfulMeter = io.meter({
+            name: 'messageDeliverySuccessful/sec',
+            type: 'meter'
+        });
+
+        const messageDeliveryFailureMeter = io.meter({
+            name: 'messageDeliveryFailure/sec',
+            type: 'meter'
+        });
+
         this.messageEvents = {
             onNewMessage: function (message) {
+                newMessageMeter.mark();
                 publishEvent(events['new-message'], message.META.from, message)
             },
             onMessageSent: function (message) {
+                messageDeliverySuccessfulMeter.mark();
                 publishEvent(events['message-sent'], message.META.from, message)
             },
             onMessageSentFailed: function (message, err) {
+                messageDeliveryFailureMeter.mark();
                 publishEvent(events['error-message-sent'], message.META.from, {
                     message: message,
                     error: err
