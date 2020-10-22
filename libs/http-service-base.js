@@ -10,6 +10,7 @@ class HttpServiceBase extends ServiceBase {
         super(context);
         this.hapiServer = null;
         this.meterDict = {};
+        this.histDict = {};
     }
 
     async init() {
@@ -19,18 +20,18 @@ class HttpServiceBase extends ServiceBase {
             host: '127.0.0.1'
         });
 
-        this.hapiServer.ext('onRequest', (req, h) => {
+        this.hapiServer.ext('onRequest', async (req, h)  => {
             const meter = this.meterDict[req.url.pathname];
             if(meter) meter.mark();
-            const tracer = this.tracer.startChildSpan(req.url.pathname, 1);
-            tracer.start();
-            req.tracer = tracer;
+            req.startTime = Date.now();
             log.info(`new request : ${req.url}`)
             return h.continue;
         });
 
         this.hapiServer.ext('onPreResponse', (req, h) =>{
-            req.tracer.end();
+            const timeElapsed = Date.now() - req.startTime;
+            const hist = this.histDict[req.url.pathname];
+            if(hist) hist.set(timeElapsed);
             return h.continue;
         })
 
@@ -49,6 +50,11 @@ class HttpServiceBase extends ServiceBase {
         this.meterDict[uri] = this.statsClient.meter({
             name: `${uri}/sec`,
             type: 'meter'
+        });
+        this.histDict[uri] = this.statsClient.metric({
+            name: uri,
+            type: 'histogram',
+            measurement: 'median'
         });
         this.hapiServer.route({
             method: method,

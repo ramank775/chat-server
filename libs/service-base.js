@@ -97,8 +97,8 @@ class ServiceBase {
         this.options = context.options;
         this.log = context.log;
         this.statsClient = context.statsClient;
-        this.tracer = context.tracer;
     }
+
     init() {
 
     }
@@ -135,8 +135,7 @@ class ServiceBase {
     async _shutdown() {
         this.log.info('Shutting down service');
         try {
-            await this.shutdown()
-            this.tracer.currentRootSpan.end();
+            await this.shutdown();
             process.exit(0);
         } catch (error) {
             this.log.error('Error while shutdown the application gracefully', error);

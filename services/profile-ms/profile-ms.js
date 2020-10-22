@@ -129,7 +129,6 @@ class ProfileMs extends HttpServiceBase {
 
         this.addRoute('/user/sync', 'POST', async (req) => {
             const {users = []} = req.payload;
-            req.tracer.addAttribute('length', users.length);
             const availableUsers = await this.profileCollection.find({username: {$in: users}, isActive: true}, {projection: {_id: 0, username: 1}}).toArray();
             const result = {};
             users.forEach(user => {

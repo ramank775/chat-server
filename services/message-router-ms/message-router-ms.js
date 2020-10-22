@@ -64,6 +64,12 @@ class MessageRouterMS extends ServiceBase {
             name: 'retryMessage/sec',
             type: 'meter'
         });
+
+        this.getServerHist = this.statsClient.metric({
+            name: 'getServer',
+            type: 'histogram',
+            measurement: 'median'
+        });
     }
     init() {
         const { listener, listenerEvents, publisher, events } = this.context;
@@ -93,10 +99,9 @@ class MessageRouterMS extends ServiceBase {
         if(message.META.type === 'group') {
             receiver = events['group-message']
         } else {
-            const tracer = this.tracer.startChildSpan('getServer', 1);
-            tracer.start();
+            const startTime = Date.now();
             receiver = await this.getServer(user);
-            tracer.end();
+            this.getServerHist.set((Date.now() - startTime));
         }
         publisher.send(receiver, message, user);
     }

@@ -12,21 +12,25 @@ const
     asMain = (require.main === module)
 
 async function initWebsocket(context) {
-    const {tracer, statsClient} = context;
+    const {statsClient} = context;
     const upgradeMeter = statsClient.meter({
         name: 'upgradeSocket/sec',
         type: 'meter'
+    });
+    const upgradeHist = statsClient.metric({
+            name: 'upgradeSocket',
+            type: 'histogram',
+            measurement: 'median'
     });
     const { httpServer } = context;
     
     const wss = new webSocker.Server({ noServer: true });
     httpServer.on('upgrade', (request, socket, head) => {
-        const upgradeTracker = tracer.startChildSpan('upgradeRequest', 1);
-        upgradeTracker.start();
+        const startTime = Date.now();
         wss.handleUpgrade(request, socket, head, (ws) => {
-            wss.emit('connection', ws, request);
-            upgradeMeter.mark();
-            upgradeTracker.end();
+                wss.emit('connection', ws, request);
+                upgradeHist.set((Date.now()-startTime));
+                upgradeMeter.mark();
         });
     });
     context.wss = wss;
