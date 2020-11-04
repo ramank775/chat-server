@@ -4,7 +4,6 @@ const
         ServiceBase,
         addStandardHttpOptions,
         initDefaultOptions,
-        initHttpServer,
         initDefaultResources,
         resolveEnvVariables } = require('../../libs/service-base'),
     kafka = require('../../libs/kafka-utils'),
@@ -12,27 +11,9 @@ const
     asMain = (require.main === module)
 
 async function initWebsocket(context) {
-    const {statsClient} = context;
-    const upgradeMeter = statsClient.meter({
-        name: 'upgradeSocket/sec',
-        type: 'meter'
-    });
-    const upgradeHist = statsClient.metric({
-            name: 'upgradeSocket',
-            type: 'histogram',
-            measurement: 'median'
-    });
-    const { httpServer } = context;
-    
-    const wss = new webSocker.Server({ noServer: true });
-    httpServer.on('upgrade', (request, socket, head) => {
-        const startTime = Date.now();
-        wss.handleUpgrade(request, socket, head, (ws) => {
-                wss.emit('connection', ws, request);
-                upgradeHist.set((Date.now()-startTime));
-                upgradeMeter.mark();
-        });
-    });
+    const { options} = context;
+    const { port } = options;
+    const wss = new webSocker.Server({ port });
     context.wss = wss;
     return context;
 }
@@ -52,7 +33,7 @@ async function prepareListEventFromKafkaTopic(context) {
 }
 async function initResources(options) {
     const context = await initDefaultResources(options)
-        .then(initHttpServer)
+        //.then(initHttpServer)
         .then(initWebsocket)
         .then(prepareListEventFromKafkaTopic)
         .then(kafka.initEventProducer)

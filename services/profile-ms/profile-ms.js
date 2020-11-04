@@ -30,6 +30,41 @@ async function initFirebaseAdmin(context) {
     return context;
 }
 
+async function initAccessKeyCache(context) {
+    const authCollection = context.mongodbClient.collection('session_auth');
+    const cache = {};
+    cache.get = async (username) => {
+        const accesskey = cache[username];
+        if (!accesskey) {
+            const auth = await authCollection.findOne({ username }, { projection: { _id: 0, username: 1, accesskey: 1 } });
+            if(auth) {
+                cache[username] = auth.accesskey;
+            }
+        }
+        return cache[username];
+    }
+    cache.create = async (username) => {
+        const newAccessKey = uuidv4();
+        const newAuthDoc = {
+            username,
+            accesskey: newAccessKey,
+            updatedOn: new Date().toUTCString()
+        }
+        await authCollection.updateOne({ username }, {
+            $set: newAuthDoc,
+            $setOnInsert: {
+                addedOn: new Date().toUTCString()
+            }
+        }, {
+            upsert: true
+        });
+        cache[username] = newAccessKey;
+        return newAccessKey;
+    }
+    context.accessKeyProvider= cache;
+    return context;
+}
+
 function parseOptions(argv) {
     let cmd = initDefaultOptions();
     cmd = addStandardHttpOptions(cmd);
@@ -46,6 +81,7 @@ async function initResource(options) {
         .then(initMongoClient)
         .then(initFirebaseAdmin)
         .then(kafka.initEventProducer)
+        .then(initAccessKeyCache)
 }
 
 class ProfileMs extends HttpServiceBase {
@@ -53,10 +89,10 @@ class ProfileMs extends HttpServiceBase {
         super(context);
         this.mongoClient = context.mongoClient;
         this.profileCollection = context.mongodbClient.collection('profile');
-        this.authCollection = context.mongodbClient.collection('session_auth');
         this.firebaseAuth = context.firebaseAuth;
         this.newLoginTopic = this.options.kafkaNewLoginTopic;
         this.publisher = context.publisher;
+        this.accessKeyProvider = context.accessKeyProvider;
     }
 
     async init() {
@@ -66,22 +102,20 @@ class ProfileMs extends HttpServiceBase {
             const username = extractInfoFromRequest(req, 'user');
             const accesskey = extractInfoFromRequest(req, 'accesskey');
             const token = extractInfoFromRequest(req, 'token');
-            if(this.options.debug && accesskey == "test") {
-                return res.response({}).code(200); 
+            if (this.options.debug && accesskey == "test") {
+                return res.response({}).code(200);
+            }
+            const accessKeyDb = await this.accessKeyProvider.get(username);
+            if(accesskey != accessKeyDb) {
+                return res.response({}).code(401);
             }
             try {
                 await this.verify(token);
-
             } catch (error) {
                 this.log.error(`Error while authentication : ${error}`);
                 return res.response({}).code(401);
             }
-
-            const authProfile = await this.authCollection.findOne({ username, accesskey })
-            if (authProfile) {
-                return res.response({}).code(200);
-            }
-            return res.response({}).code(401);
+            return res.response({}).code(200);
         });
 
         this.addRoute('/login', 'POST', async (req, res) => {
@@ -107,8 +141,7 @@ class ProfileMs extends HttpServiceBase {
                 }
                 await this.profileCollection.insertOne(profile);
             }
-
-            const accesskey = await this.getAccessKey(username);
+            const accesskey = await this.accessKeyProvider.create(username);
             this.publisher.send(this.newLoginTopic, payload, username);
             return {
                 status: true,
@@ -128,13 +161,13 @@ class ProfileMs extends HttpServiceBase {
         });
 
         this.addRoute('/user/sync', 'POST', async (req) => {
-            const {users = []} = req.payload;
-            const availableUsers = await this.profileCollection.find({username: {$in: users}, isActive: true}, {projection: {_id: 0, username: 1}}).toArray();
+            const { users = [] } = req.payload;
+            const availableUsers = await this.profileCollection.find({ username: { $in: users }, isActive: true }, { projection: { _id: 0, username: 1 } }).toArray();
             const result = {};
             users.forEach(user => {
-                result[user] = availableUsers.find(x=>x.username == user) != null;
+                result[user] = availableUsers.find(x => x.username == user) != null;
             });
-            return result|| {};
+            return result || {};
         })
     }
 
@@ -146,24 +179,6 @@ class ProfileMs extends HttpServiceBase {
     async verify(accesskey) {
         const decodedToken = await this.firebaseAuth.verifyIdToken(accesskey);
         return decodedToken;
-    }
-
-    async getAccessKey(username) {
-        const newAccessKey = uuidv4();
-        const newAuthDoc = {
-            username,
-            accesskey: newAccessKey,
-            updatedOn: new Date().toUTCString()
-        }
-        await this.authCollection.updateOne({ username }, {
-            $set: newAuthDoc,
-            $setOnInsert: {
-                addedOn: new Date().toUTCString()
-            }
-        }, {
-            upsert: true
-        });
-        return newAccessKey;
     }
 
     async shutdown() {

@@ -32,6 +32,7 @@ class HttpServiceBase extends ServiceBase {
             const timeElapsed = Date.now() - req.startTime;
             const hist = this.histDict[req.url.pathname];
             if(hist) hist.set(timeElapsed);
+            this.log.info(`${req.url.pathname} time elapsed ${timeElapsed}ms`);
             return h.continue;
         })
 

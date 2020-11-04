@@ -109,10 +109,11 @@ function connect_socket() {
         console.log("WebSocket object is supported in your browser");
 
         const host = window.location.hostname;
-
+        const startTime = Date.now()
         ws = new WebSocket(`wss://${host}/wss/`);
 
         ws.onopen = function () {
+            console.log('connection time', Date.now()- startTime);
             document.getElementById('status').innerText = "Connected";
             console.log("onopen");
         };
