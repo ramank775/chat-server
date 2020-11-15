@@ -111,7 +111,7 @@ class Gateway extends ServiceBase {
             },
             onMessageSentFailed: function (message, err) {
                 messageDeliveryFailureMeter.mark();
-                publishEvent(events['error-message-sent'], message.META.from, {
+                publishEvent(events['error-message-send'], message.META.from, {
                     message: message,
                     error: err
                 });
