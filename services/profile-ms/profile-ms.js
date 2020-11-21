@@ -164,8 +164,8 @@ class ProfileMs extends HttpServiceBase {
             const { users = [] } = req.payload;
             const availableUsers = await this.profileCollection.find({ username: { $in: users }, isActive: true }, { projection: { _id: 0, username: 1 } }).toArray();
             const result = {};
-            users.forEach(user => {
-                result[user] = availableUsers.find(x => x.username == user) != null;
+            availableUsers.forEach(u=> {
+                result[u.username] = true;
             });
             return result || {};
         })
