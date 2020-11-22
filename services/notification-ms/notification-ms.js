@@ -107,25 +107,34 @@ class NotificationMS extends ServiceBase {
                         if (record) {
                             this.notificationMeter.mark();
                             const { notificationToken } = record;
-                            const notification = {
-                                notification: {
-                                    title: "New Message",
-                                    body: payload.text.length > 30 ? payload.text.substring(0, 25) + '...' : payload.text
-                                },
+                            const chatPayload = {
                                 data: {
-                                    msgId: payload.msgId,
-                                    chatId: payload.chatId,
-                                    click_action: 'FLUTTER_NOTIFICATION_CLICK'
+                                    message: message.payload
                                 }
                             };
                             const options = {
                                 priority: "high",
                                 timeToLive: 60 * 60 * 24
                             };
-                            this.firebaseMessaging.sendToDevice(notificationToken, notification, options).catch(err => {
+                            this.firebaseMessaging.sendToDevice(notificationToken, chatPayload, options).catch(err => {
                                 this.failedNotificationMeter.mark();
                                 this.log.error(`Error while sending push notification ${err}`, err);
                             });
+                            
+                            // This is to keep the backward compatibility before build 1.0.0+18 will be remove in future
+                            const notification = {
+                                notification: {
+                                    title: "New Message",
+                                    body: payload.text.length > 30 ? payload.text.substring(0, 25) + '...' : payload.text
+                                },
+                                data: {
+                                    click_action: 'FLUTTER_NOTIFICATION_CLICK'
+                                }
+                            };
+                             this.firebaseMessaging.sendToDevice(notificationToken, notification, options).catch(err => {
+                                this.log.error(`Error while sending push notification ${err}`, err);
+                            });
+
                         }
                     }
                     break;
