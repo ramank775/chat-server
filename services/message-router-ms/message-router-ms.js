@@ -73,8 +73,10 @@ class MessageRouterMS extends ServiceBase {
     }
     init() {
         const { listener, listenerEvents, publisher, events } = this.context;
-        listener.onMessage = async (topic, message) => {
+        listener.onMessage = async (topic, payload) => {
+            let message;
             if (topic === listenerEvents['error-message-sent']) {
+                message = payload.message;
                 message.META.retry = message.META.retry || 0;
                 message.META.retry += 1;
                 if (message.META.retry > this.maxRetryCount) {
@@ -83,6 +85,8 @@ class MessageRouterMS extends ServiceBase {
                     return;
                 }
                 this.retryMessageMeter.mark();
+            } else {
+                message = payload;
             }
             this.redirectMessageMeter.mark();
             await this.redirectMessage(message);
