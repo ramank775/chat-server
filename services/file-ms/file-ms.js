@@ -13,7 +13,8 @@ const {
     } = require('../../libs/mongo-utils'),
     path = require('path'),
     { uuidv4, extractInfoFromRequest } = require('../../helper'),
-    AWS = require('aws-sdk');
+    AWS = require('aws-sdk'),
+    { ObjectId } = require('mongodb')
     asMain = (require.main === module);
 
 function parseOptions(argv) {
@@ -48,7 +49,8 @@ async function initFileService(context) {
         {
             accessKeyId: s3AccessKeyId,
             secretAccessKey: s3SecretAccessKey,
-            region: s3Region
+            region: s3Region,
+            signatureVersion: 'v4'
         }
     );
     context.fileService = s3;
@@ -76,50 +78,57 @@ class FileMS extends HttpServiceBase {
         });
     }
 
-    async getDownloadURL(req, h){
+    async getDownloadURL(req, h) {
         const payload = {
             fileName: req.payload.fileName,
             contentType: req.payload.contentType,
         };
-        const file = await this.fileStore.findOne({ _id: payload.fileName });
+        const file = await this.fileStore.findOne({ _id: ObjectId(payload.fileName) });
         if (file == null) {
             return h.send({ error: 'file not found' }).status(404);
         }
         payload.fileName = file.name
-        const preSignedURL = await getSignedURL(payload, 'getObject')
-        return { url: preSignedURL
-        }
+        const preSignedURL = await this.getSignedURL(payload, 'getObject')
+        return { url: preSignedURL }
     }
 
-    async getUploadURL(req, h){
+    async getUploadURL(req, h) {
         const userName = extractInfoFromRequest(req, 'user');
         const payload = {
             fileName: this.getFilename(req.payload.fileName),
             contentType: req.payload.contentType,
         };
-        const file = await this.fileStore.insertOne({ name: payload.fileName, user: userName, createdAt: new Date().toUTCString()});
-        const preSignedURL = await getSignedURL(payload, 'putObject')
+        const fileRecord = { name: payload.fileName, user: userName, createdAt: new Date().toUTCString() };
+        const file = await this.fileStore.insertOne(fileRecord);
+        const preSignedURL = await this.getSignedURL(payload, 'putObject')
         return {
             url: preSignedURL,
-            fileName: file._id
+            fileName: fileRecord._id
         }
     }
 
     async getSignedURL(payload, operation) {
         const params = {
             Bucket: this.options.s3BucketName,
-            key: payload.fileName,
-            Expires: this.options.urlExpireTime,
-            ContentType: payload.contentType
+            Key: payload.fileName,
+            Expires: this.options.urlExpireTime
         }
-        const preSignedURL = await this.fileService.getSignedUrl(operation, params);
-        this.log.info(preSignedURL)
-        return preSignedURL
+        if(operation == 'putObject') {
+            params.ContentType = payload.contentType;
+        }
+        try {
+            const preSignedURL = await this.fileService.getSignedUrl(operation, params);
+            this.log.info(preSignedURL)
+            return preSignedURL
+        } catch (error) {
+            throw error;
+        }
+
     }
 
     getFilename(file) {
-        const ext = path.extname(file.hapi.filename);
-        const filename = path.basename(file.hapi.filename, ext);
+        const ext = path.extname(file);
+        const filename = path.basename(file, ext);
         return `${filename}.${uuidv4()}${ext}`;
     }
 
