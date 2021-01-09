@@ -7,8 +7,9 @@
   "author": "Raman <raman.jay14@gmail.com>",
   "license": "MIT",
   "dependencies": {
-    "@hapi/hapi": "^19.1.1",
+    "@hapi/hapi": "^20.0.3",
     "@pm2/io": "^4.3.5",
+    "aws-sdk": "^2.824.0",
     "bluebird": "^3.7.2",
     "commander": "^5.1.0",
     "firebase-admin": "^9.1.1",

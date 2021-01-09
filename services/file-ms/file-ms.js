@@ -11,13 +11,10 @@ const {
         addMongodbOptions,
         initMongoClient
     } = require('../../libs/mongo-utils'),
-    {
-        getContentTypeByExt
-    } = require('../../libs/content-type-utils')
-    fs = require('fs'),
     path = require('path'),
-    { Promise } = require('bluebird'),
     { uuidv4, extractInfoFromRequest } = require('../../helper'),
+    AWS = require('aws-sdk'),
+    { ObjectId } = require('mongodb')
     asMain = (require.main === module);
 
 function parseOptions(argv) {
@@ -36,105 +33,105 @@ async function initResource(options) {
 
 function addFileServiceOptions(cmd) {
     cmd.option('--base-upload-dir <upload-dir>', 'base directory for upload', 'uploads')
+    cmd.option('--s3-access-key-id <access-key-id>', 's3 access key id')
+    cmd.option('--s3-secret-access-key <secret-access-key>', 's3 secret access key')
+    cmd.option('--s3-region <region>', 's3 region', 'ap-south-1')
+    cmd.option('--url-expire-time <expire-time>', 'pre signed url expire time', 600)
+    cmd.option('--s3-bucket-name <bucket-name>', 's3 bucket name')
     return cmd;
 }
 
 async function initFileService(context) {
-    const { options: { baseUploadDir: basedir } } = context;
-    if (!fs.existsSync(basedir)) {
-        fs.mkdirSync(basedir);
-    }
-    const getfilePath = (filename) => {
-        return path.join(basedir, filename);
-    };
-    const fileService = {}
-    fileService.save = async (file, options) => {
-        const { filename } = options;
-        const filepath = getfilePath(filename)
-        const fileStream = fs.createWriteStream(filepath);
-
-        const filePromise = new Promise((resolve, reject) => {
-            file.on('error', function (err) {
-                reject(err);
-            });
-
-            file.pipe(fileStream);
-
-            file.on('end', function (err) {
-
-                resolve({ filename });
-            })
-        })
-        const fileDetails = await filePromise;
-        return fileDetails
-    };
-    fileService.get = async (filename) => {
-        const exists = Promise.promisify(fs.exists);
-        const filepath = getfilePath(filename);
-        if (!fs.existsSync(filepath)) return null;
-        return fs.createReadStream(filepath);
-    }
-
-    fileService.delete = async (filename) => {
-        const filepath = getfilePath(filename);
-        const deletefile = Promise.promisify(fs.unlink);
-        return deletefile(filepath);
-    }
-    context.fileService = fileService;
-    return context;
+    const { options } = context;
+    const { s3AccessKeyId, s3SecretAccessKey, s3Region } = options;
+    const s3 = new AWS.S3();
+    s3.config.update(
+        {
+            accessKeyId: s3AccessKeyId,
+            secretAccessKey: s3SecretAccessKey,
+            region: s3Region,
+            signatureVersion: 'v4'
+        }
+    );
+    context.fileService = s3;
+    return context
 }
 
-class ImageMS extends HttpServiceBase {
+class FileMS extends HttpServiceBase {
     constructor(context) {
         super(context);
         this.mongoClient = this.context.mongoClient;
-        this.filePermission = this.context.mongodbClient.collection('file_permission');
+        this.fileStore = this.context.mongodbClient.collection('file_store');
         this.fileService = this.context.fileService;
     }
 
     async init() {
         await super.init();
-
-        this.addRoute('/upload', 'POST', async (req, _) => {
-            const { file, accesslist =[]} = req.payload;
-            const user = extractInfoFromRequest(req, 'user');
-            const filename = this.getFilename(file);
-            accesslist.push(user)
-            const finalAccesslist = new Set(accesslist)
-            const fileObject = { user, filename, accesslist: [...finalAccesslist], addedon: new Date().toUTCString() };
-            await this.filePermission.insert(fileObject);
-            await this.fileService.save(file, { filename });
-            return { filename }
-        }, {
-            payload: {
-                output: 'stream',
-                parse: true,
-                allow: 'multipart/form-data',
-                multipart: true
+        this.addRoute('/signed_url', 'POST', async (req, h) => {
+            const type = req.payload.type;
+            if (type == 'download') {
+                return await this.getDownloadURL(req, h)
+            } else if (type == 'upload') {
+                return await this.getUploadURL(req, h)
             }
+            return h.send({ error: 'Bad request' }).status(400);
         });
+    }
 
-        this.addRoute('/{filename}', 'GET', async (req, h) => {
-            const { filename } = req.params;
-            const user = extractInfoFromRequest(req, user);
-            const file_permission = await this.filePermission.findOne({ filename, $or: [{ accesslist: '*' }, { accesslist: user }] });
-            if (!file_permission) {
-                return h.send({ error: 'file not found' }).status(404);
-            }
-            const file = await this.fileService.get(filename);
-            if (!file) return;
-            const fileExt = path.extname(filename);
-            const response = h.response(file).type(getContentTypeByExt(fileExt))
-            return response;
-        });
+    async getDownloadURL(req, h) {
+        const payload = {
+            fileName: req.payload.fileName,
+            contentType: req.payload.contentType,
+        };
+        const file = await this.fileStore.findOne({ _id: ObjectId(payload.fileName) });
+        if (file == null) {
+            return h.send({ error: 'file not found' }).status(404);
+        }
+        payload.fileName = file.name
+        const preSignedURL = await this.getSignedURL(payload, 'getObject')
+        return { url: preSignedURL }
+    }
+
+    async getUploadURL(req, h) {
+        const userName = extractInfoFromRequest(req, 'user');
+        const payload = {
+            fileName: this.getFilename(req.payload.fileName),
+            contentType: req.payload.contentType,
+        };
+        const fileRecord = { name: payload.fileName, user: userName, createdAt: new Date().toUTCString() };
+        const file = await this.fileStore.insertOne(fileRecord);
+        const preSignedURL = await this.getSignedURL(payload, 'putObject')
+        return {
+            url: preSignedURL,
+            fileName: fileRecord._id
+        }
+    }
+
+    async getSignedURL(payload, operation) {
+        const params = {
+            Bucket: this.options.s3BucketName,
+            Key: payload.fileName,
+            Expires: this.options.urlExpireTime
+        }
+        if(operation == 'putObject') {
+            params.ContentType = payload.contentType;
+        }
+        try {
+            const preSignedURL = await this.fileService.getSignedUrl(operation, params);
+            this.log.info(preSignedURL)
+            return preSignedURL
+        } catch (error) {
+            throw error;
+        }
+
     }
 
     getFilename(file) {
-        const ext = path.extname(file.hapi.filename);
-        const filename = path.basename(file.hapi.filename, ext);
+        const ext = path.extname(file);
+        const filename = path.basename(file, ext);
         return `${filename}.${uuidv4()}${ext}`;
     }
-   
+
     async shutdown() {
         await super.shutdown();
         await this.mongoClient.close();
@@ -146,7 +143,7 @@ if (asMain) {
     const argv = resolveEnvVariables(process.argv);
     const options = parseOptions(argv);
     initResource(options).then(async context => {
-        await new ImageMS(context).run()
+        await new FileMS(context).run()
     }).catch(async error => {
         console.error('Failed to initialized Image MS', error);
         process.exit(1);
