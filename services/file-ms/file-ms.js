@@ -14,7 +14,11 @@ const {
     path = require('path'),
     { uuidv4, extractInfoFromRequest } = require('../../helper'),
     AWS = require('aws-sdk'),
-    { ObjectId } = require('mongodb')
+    { ObjectId } = require('mongodb'),
+    {
+        getContentTypeByExt
+    } = require('../../libs/content-type-utils'),
+    path = require('path'),
     asMain = (require.main === module);
 
 function parseOptions(argv) {
@@ -76,6 +80,22 @@ class FileMS extends HttpServiceBase {
             }
             return h.send({ error: 'Bad request' }).status(400);
         });
+        this.addRoute('/status', 'PUT', this.updateFileUploadStatus);
+    }
+
+    async updateFileUploadStatus(req, h) {
+        const { fileName, status } = req.payload;
+        const user = extractInfoFromRequest(req, 'user');
+        const file = await this.fileStore.findOne({_id: fileName, user: user});
+        if(!file) {
+            return h.send({error: 'file not found'}).status(404);
+        }
+        if(file.status === true) {
+            return h.send({error: 'bad request'}).status(400);
+        }
+        await this.fileStore.updateOne({_id: fileName}, {
+            $set: { status: !!status }
+        })
     }
 
     async getDownloadURL(req, h) {
@@ -83,7 +103,7 @@ class FileMS extends HttpServiceBase {
             fileName: req.payload.fileName,
             contentType: req.payload.contentType,
         };
-        const file = await this.fileStore.findOne({ _id: ObjectId(payload.fileName) });
+        const file = await this.fileStore.findOne({ _id: ObjectId(payload.fileName), status: true });
         if (file == null) {
             return h.send({ error: 'file not found' }).status(404);
         }
@@ -94,9 +114,11 @@ class FileMS extends HttpServiceBase {
 
     async getUploadURL(req, h) {
         const userName = extractInfoFromRequest(req, 'user');
+        const { fileName } = req.payload;
+        const contentType = getContentTypeByExt(path.extname(fileName));
         const payload = {
-            fileName: this.getFilename(req.payload.fileName),
-            contentType: req.payload.contentType,
+            fileName: this.getFilename(fileName),
+            contentType: contentType,
         };
         const fileRecord = { name: payload.fileName, user: userName, createdAt: new Date().toUTCString() };
         const file = await this.fileStore.insertOne(fileRecord);
@@ -113,7 +135,7 @@ class FileMS extends HttpServiceBase {
             Key: payload.fileName,
             Expires: this.options.urlExpireTime
         }
-        if(operation == 'putObject') {
+        if (operation == 'putObject') {
             params.ContentType = payload.contentType;
         }
         try {
