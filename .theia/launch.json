@@ -120,7 +120,10 @@
                 "--debug",
                 "--port=4001",
                 "--mongo-url=mongodb://localhost:27017/chat",
-                "--base-upload-dir=/workspace/upload"
+                "--base-upload-dir=/workspace/upload",
+                "--s3-access-key-id=${S3_ACCESS_KEY_ID}",
+                "--s3-secret-access-key=${S3_SECRET_ACCESS_KEY}",
+                "--s3-bucket-name=${S3_BUCKET_NAME}"
             ],
             "envFile": "${workspaceFolder}/.env",
             "autoAttachChildProcesses": true

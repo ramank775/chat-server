@@ -18,7 +18,6 @@ const {
     {
         getContentTypeByExt
     } = require('../../libs/content-type-utils'),
-    path = require('path'),
     asMain = (require.main === module);
 
 function parseOptions(argv) {
