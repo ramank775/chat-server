@@ -202,7 +202,7 @@ class GroupMs extends HttpServiceBase {
         const type = 'group';
         body.from = sender;
         body.to = groupId;
-        body.category = 'notification';
+        body.type = 'notification';
         const message = {
             META: {
                 to: groupId,
