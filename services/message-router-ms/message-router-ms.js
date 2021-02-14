@@ -100,7 +100,7 @@ class MessageRouterMS extends ServiceBase {
         }
         const user = message.META.to;
         let receiver;
-        if(message.META.type === 'group') {
+        if(message.META.chatType === 'group') {
             receiver = events['group-message']
         } else {
             const startTime = Date.now();
@@ -113,12 +113,13 @@ class MessageRouterMS extends ServiceBase {
     async formatMessage(message) {
         const { META: meta, payload } = message;
         const parsedPayload = JSON.parse(payload);
-        const { to, type, ...msg } = parsedPayload;
+        const { to, type, chatType, ...msg } = parsedPayload;
         msg.from = meta.from;
         msg.to = to;
         msg.type = type;
+        msg.chatType = chatType;
         const formattedMessage = {
-            META: { to, type, ...meta, parsed: true },
+            META: { to, type, chatType, ...meta, parsed: true },
             payload: JSON.stringify(msg)
         }
         return formattedMessage;

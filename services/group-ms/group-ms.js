@@ -209,7 +209,7 @@ class GroupMs extends HttpServiceBase {
                 users: receivers,
                 from: sender,
                 category: 'notification',
-                type,
+                chatType: type,
                 parsed: true
             },
             payload: JSON.stringify(body)

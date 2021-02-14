@@ -60,24 +60,26 @@ class GroupMessageRouterMS extends ServiceBase {
         if (!users) {
             users = await this.getGroupUsers(message.META.to, message.META.from);
         }
-        users = users.filter(x => x!== message.META.from);
+        users = users.filter(x => x !== message.META.from);
         const servers = await this.getServers(users);
         for (const user of users) {
             const server = servers[user];
-            message.META = {...message.META, to: user, type: 'single', users: undefined}; // Set message META property type as single so failed message to be handled by mesasge router
-            publisher.send(server, message, user);    
+            message.META = { ...message.META, to: user, type: 'single', users: undefined }; // Set message META property type as single so failed message to be handled by mesasge router
+            publisher.send(server, message, user);
         }
-        
+
     }
 
     async formatMessage(message) {
         const { META: meta, payload } = message;
         const parsedPayload = JSON.parse(payload);
-        const { to, type, ...msg } = parsedPayload;
+        const { to, type, chatType, ...msg } = parsedPayload;
         msg.from = meta.from;
         msg.to = to;
+        msg.type = type;
+        msg.chatType = chatType
         const formattedMessage = {
-            META: { to, type, ...meta, parsed: true },
+            META: { to, type, chatType, ...meta, parsed: true },
             payload: JSON.stringify(msg)
         }
         return formattedMessage;
@@ -112,7 +114,7 @@ class GroupMessageRouterMS extends ServiceBase {
         for (const server in servers) {
             if (servers.hasOwnProperty(server)) {
                 const topic = servers[server];
-                if(!topic) {
+                if (!topic) {
                     servers[server] = events['send-message-db']
                 }
             }
