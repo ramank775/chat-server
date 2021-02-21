@@ -120,7 +120,7 @@ class GroupMs extends HttpServiceBase {
                 }
             }
             const query = {
-                $pull: { 'members.username': member }
+                $pull: { members: { username: member } }
             }
 
             await this.groupCollection.updateOne({ _id: group._id }, query);
@@ -131,7 +131,7 @@ class GroupMs extends HttpServiceBase {
                     const nextAdmin = group.members.find(x => x.username !== user);
                     if (nextAdmin) {
                         nextAdmin.role = 'admin';
-                        await this.groupCollection.update({ _id: group._id, 'members.username': nextAdmin.username }, { 'members.$.role': 'admin' });
+                        await this.groupCollection.update({ _id: group._id, 'members.username': nextAdmin.username }, { $set: {'members.$.role': 'admin' }});
                     }
                 }
             }
