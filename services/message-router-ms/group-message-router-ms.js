@@ -62,7 +62,10 @@ class GroupMessageRouterMS extends ServiceBase {
         }
         users = users.filter(x => x !== message.META.from);
         const servers = await this.getServers(users);
-        for (const user of users) {
+        for (let user of users) {
+            if(typeof user === "object") {
+                user = user.username;
+            }
             const server = servers[user];
             message.META = { ...message.META, to: user, type: 'single', users: undefined }; // Set message META property type as single so failed message to be handled by mesasge router
             publisher.send(server, message, user);

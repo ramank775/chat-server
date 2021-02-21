@@ -137,7 +137,7 @@ class GroupMs extends HttpServiceBase {
             }
             this.sendNotification({
                 sender: user,
-                receivers: group.members,
+                receivers: group.members.map(u => u.username),
                 groupId: groupId,
                 module: 'group',
                 action: 'remove'
