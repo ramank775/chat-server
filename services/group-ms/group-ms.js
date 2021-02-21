@@ -157,7 +157,7 @@ class GroupMs extends HttpServiceBase {
                 projection: { _id: 0, groupId: 1, name: 1, members: 1, profilePic: 1 }
             });
             if (!group) {
-                return res.response({ status: false }).status(404);
+                return res.response({ status: false }).code(404);
             }
             return group;
         })
