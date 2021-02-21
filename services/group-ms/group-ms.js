@@ -120,17 +120,19 @@ class GroupMs extends HttpServiceBase {
                 }
             }
             const query = {
-                $pull: { members : {username: member} }
+                $pull: { members: { username: member } }
             }
 
-            await this.groupCollection.updateOne({ _id: group._id }, query);    
-            
+            await this.groupCollection.updateOne({ _id: group._id }, query);
+
             if (isSelf && self.role === 'admin') {
                 const admin = group.members.find(x => x.username !== user && x.role === 'admin');
                 if (!admin) {
                     const nextAdmin = group.members.find(x => x.username !== user);
-                    nextAdmin.role = 'admin';
-                    await this.groupCollection.updateOne({ _id: group._id, 'members.username': nextAdmin.username }, { 'members.$.role': 'admin' });
+                    if (nextAdmin) {
+                        nextAdmin.role = 'admin';
+                        await this.groupCollection.update({ _id: group._id, 'members.username': nextAdmin.username }, { 'members.$.role': 'admin' });
+                    }
                 }
             }
             this.sendNotification({
