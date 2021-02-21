@@ -82,7 +82,7 @@ class GroupMs extends HttpServiceBase {
         this.addRoute('/{groupId}/add', 'POST', async (req, res) => {
             const user = extractInfoFromRequest(req, 'user');
             const { groupId } = req.params;
-            const group = await this.groupCollection.findOne({ groupId, members: { username: user } });
+            const group = await this.groupCollection.findOne({ groupId, "members.username": user });
             if (!group) {
                 return res.response({ status: false }).code(404);
             }
