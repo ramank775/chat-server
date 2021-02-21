@@ -120,7 +120,7 @@ class GroupMs extends HttpServiceBase {
                 }
             }
             const query = {
-                $pull: { members: { username: member } }
+                $pull: { 'members.username': member }
             }
 
             await this.groupCollection.updateOne({ _id: group._id }, query);
