@@ -12,10 +12,6 @@ const {
         initMongoClient
     } = require('../../libs/mongo-utils'),
     { uuidv4, extractInfoFromRequest } = require('../../helper'),
-    {
-        addJsonServerOptions,
-        initJsonServer
-    } = require('../../libs/json-socket-utils'),
     kafka = require('../../libs/kafka-utils'),
     asMain = (require.main === module);
 
@@ -24,7 +20,6 @@ function parseOptions(argv) {
     let cmd = initDefaultOptions();
     cmd = addStandardHttpOptions(cmd);
     cmd = addMongodbOptions(cmd);
-    cmd = addJsonServerOptions(cmd);
     cmd = kafka.addStandardKafkaOptions(cmd);
     cmd = kafka.addKafkaSSLOptions(cmd);
     cmd = cmd.option('--kafka-new-group-message-topic <new-group-message-topic>', 'Used by consumer to consume new group message for each new incoming message');
@@ -34,7 +29,6 @@ function parseOptions(argv) {
 async function initResource(options) {
     return await initDefaultResources(options)
         .then(initMongoClient)
-        .then(initJsonServer)
         .then(kafka.initEventProducer)
 }
 
@@ -45,7 +39,6 @@ class GroupMs extends HttpServiceBase {
         this.mongoClient = context.mongoClient;
         this.groupCollection = context.mongodbClient.collection('groups');
         this.publisher = this.context.publisher;
-        this.jsonServer = this.context.jsonServer;
     }
 
     async init() {
@@ -172,30 +165,6 @@ class GroupMs extends HttpServiceBase {
 
         });
 
-        this.jsonServer.on('request', async (message, socket) => {
-            let method = message.func || 'get-users';
-            const funcMapping = {
-                'get-users': async (message) => {
-                    const { groupId, user } = message;
-                    const group = await this.groupCollection.findOne({ groupId, 'members.username': user });
-                    return group.members.map(x => x.username);
-                }
-            };
-
-            const func = funcMapping[method]
-            if (!func) {
-                socket.write({
-                    error: 'bad request',
-                    code: 400
-                });
-                return;
-            }
-            let result = await func(message);
-            socket.write({
-                code: 200,
-                result
-            });
-        });
     }
 
     sendNotification(notification) {

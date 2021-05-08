@@ -67,7 +67,7 @@ class NotificationMS extends ServiceBase {
         this.mongoClient = context.mongoClient;
         this.notificationTokensCollection = context.mongodbClient.collection('notification_tokens');
         this.firebaseMessaging = context.firebaseMessaging;
-        
+
         this.notificationMeter = this.statsClient.meter({
             name: 'notificationMeter/sec',
             type: 'meter'
@@ -99,28 +99,44 @@ class NotificationMS extends ServiceBase {
                     break;
                 case events['push-notification']:
                     {
-                        const { to, from } = message.META;
-                        if (from && from.startsWith(dbAppInitial)) return;
-                        const payload = JSON.parse(message.payload);
-                        if (payload.type == 'notification') return;
-                        const record = await this.notificationTokensCollection.findOne({ username: to }, { projection: { _id: 0, notificationToken: 1 } });
-                        if (record) {
-                            this.notificationMeter.mark();
-                            const { notificationToken } = record;
-                            const chatPayload = {
-                                data: {
-                                    message: message.payload
-                                }
-                            };
-                            const options = {
-                                priority: "high",
-                                timeToLive: 60 * 60 * 24
-                            };
-                            this.firebaseMessaging.sendToDevice(notificationToken, chatPayload, options).catch(err => {
-                                this.failedNotificationMeter.mark();
-                                this.log.error(`Error while sending push notification ${err}`, err);
-                            });
+                        let messages = []
+                        if (typeof message == typeof []) {
+                            messages = message;
+                        } else {
+                            messages = [message];
                         }
+                        messages.forEach((msg) => {
+                            const { to, from } = msg.META;
+                            if (from && from.startsWith(dbAppInitial)) return;
+                            const payload = JSON.parse(msg.payload);
+                            let payloads = []
+                            if (typeof payload == typeof []) {
+                                payloads = payload
+                            } else {
+                                paylaods = [payload]
+                            }
+                            payloads = payloads.filter(x => x.type != "notification")
+                            if (!payloads.length) return;
+                            const record = await this.notificationTokensCollection.findOne({ username: to }, { projection: { _id: 0, notificationToken: 1 } });
+                            if (record) {
+                                this.notificationMeter.mark();
+                                const { notificationToken } = record;
+                                const chatPayload = {
+                                    data: {
+                                        message: msg.payload
+                                    }
+                                };
+                                const options = {
+                                    priority: "high",
+                                    timeToLive: 60 * 60 * 24
+                                };
+                                this.firebaseMessaging.sendToDevice(notificationToken, chatPayload, options).catch(err => {
+                                    this.failedNotificationMeter.mark();
+                                    this.log.error(`Error while sending push notification ${err}`, err);
+                                });
+                            }
+                        })
+
                     }
                     break;
             }

@@ -6,14 +6,15 @@ const kafka = require('../../libs/kafka-utils'),
         resolveEnvVariables
     } = require('../../libs/service-base'),
     {
-        initJsonClient
-    } = require('../../libs/json-socket-utils'),
+        addMongodbOptions,
+        initMongoClient
+    } = require('../../libs/mongo-utils'),
     asMain = (require.main === module);
 
 async function prepareEventListFromKafkaTopics(context) {
     const { options } = context;
     const eventName = {
-        'send-message-db': options.kafkaPersistenceMessageTopic
+        'send-message': options.kafkaSendMessageTopic
     }
     context.events = eventName;
     context.listenerEvents = [
@@ -24,6 +25,7 @@ async function prepareEventListFromKafkaTopics(context) {
 
 async function initResources(options) {
     const context = await initDefaultResources(options)
+        .then(initMongoClient)
         .then(prepareEventListFromKafkaTopics)
         .then(kafka.initEventProducer)
         .then(kafka.initEventListener)
@@ -34,20 +36,22 @@ function parseOptions(argv) {
     let cmd = initDefaultOptions();
     cmd = kafka.addStandardKafkaOptions(cmd);
     cmd = kafka.addKafkaSSLOptions(cmd);
+    cmd = addMongodbOptions(cmd);
     cmd.option('--kafka-new-group-message-topic <new-group-message-topic>', 'Used by consumer to consume new group message for each new incoming message')
-        .option('--kafka-persistence-message-topic <persistence-message-topic>', 'Used by producer to produce new message to saved into a persistence db')
-        .option('--session-service-url <session-service-url>', 'URL of session service')
-        .option('--group-service-url <group-service-url>', 'URL of group service')
+        .option('--kafka-send-message-topic <send-message-topic>', 'Used by producer to produce new message to send message to user')
+
     return cmd.parse(argv).opts();
 }
 
 class GroupMessageRouterMS extends ServiceBase {
     constructor(context) {
         super(context);
+        this.mongoClient = context.mongoClient;
+        this.groupCollection = context.mongodbClient.collection('groups');
     }
     init() {
         const { listener } = this.context;
-        listener.onMessage = async (topic, message) => {
+        listener.onMessage = async (_, message) => {
             await this.redirectMessage(message);
         }
     }
@@ -61,16 +65,16 @@ class GroupMessageRouterMS extends ServiceBase {
             users = await this.getGroupUsers(message.META.to, message.META.from);
         }
         users = users.filter(x => x !== message.META.from);
-        const servers = await this.getServers(users);
+        const messages = []
         for (let user of users) {
-            if(typeof user === "object") {
+            if (typeof user === "object") {
                 user = user.username;
             }
-            const server = servers[user];
-            message.META = { ...message.META, to: user, type: 'single', users: undefined }; // Set message META property type as single so failed message to be handled by mesasge router
-            publisher.send(server, message, user);
+            // Set message META property type as single so failed message to be handled by mesasge router
+            message.META = { ...message.META, to: user, type: 'single', users: undefined };
+            messages.push(message)
         }
-
+        publisher.send(server, { items: messages });
     }
 
     async formatMessage(message) {
@@ -92,60 +96,13 @@ class GroupMessageRouterMS extends ServiceBase {
         const { publisher, listener } = this.context;
         await publisher.disconnect();
         await listener.disconnect();
-    }
-
-    async getServers(users) {
-        const { events, options } = this.context;
-        const client = initJsonClient(options.sessionServiceUrl)
-        const request = new Promise((resolve, reject) => {
-            client.send({
-                func: 'get-servers',
-                users
-            });
-            client.on('response', (data) => {
-                if (data.code != 200) {
-                    reject(data);
-                    return;
-                }
-                resolve(data.result)
-            });
-            client.on('error', (err) => {
-                reject(err);
-            })
-        })
-        const servers = await request;
-        for (const server in servers) {
-            if (servers.hasOwnProperty(server)) {
-                const topic = servers[server];
-                if (!topic) {
-                    servers[server] = events['send-message-db']
-                }
-            }
-        }
-        return servers;
+        await this.context.mongoClient.close();
     }
 
     async getGroupUsers(groupId, user) {
-        const { options } = this.context;
-        const client = initJsonClient(options.groupServiceUrl);
-        const request = new Promise((resolve, reject) => {
-            client.send({
-                func: 'get-users',
-                groupId,
-                user
-            });
-            client.on('response', data => {
-                if (data.code != 200) {
-                    reject(data);
-                    return;
-                }
-                resolve(data.result);
-            });
-            client.on('error', (err) => {
-                reject(err);
-            });
-        });
-        const users = await request;
+        const { groupId, user } = message;
+        const group = await this.groupCollection.findOne({ groupId, 'members.username': user });
+        const users = group.members.map(x => x.username);
         return users;
     }
 }

@@ -1,17 +1,20 @@
 const
     webSocker = require('ws'),
     {
-        ServiceBase,
         addStandardHttpOptions,
         initDefaultOptions,
         initDefaultResources,
-        resolveEnvVariables } = require('../../libs/service-base'),
+        resolveEnvVariables
+    } = require('../../libs/service-base'),
+    {
+        HttpServiceBase
+    } = require('../../libs/http-service-base'),
     kafka = require('../../libs/kafka-utils'),
     { uuidv4 } = require('../../helper'),
     asMain = (require.main === module)
 
 async function initWebsocket(context) {
-    const { options} = context;
+    const { options } = context;
     const { port } = options;
     const wss = new webSocker.Server({ port });
     context.wss = wss;
@@ -23,21 +26,16 @@ async function prepareListEventFromKafkaTopic(context) {
     const eventName = {
         'user-connected': options.kafkaUserConnectedTopic,
         'user-disconnected': options.kafkaUserDisconnectedTopic,
-        'new-message': options.kafkaNewMessageTopic,
-        'message-sent': options.kafkaMessageSentTopic,
-        'error-message-send': options.kafkaErrorMessageSendTopic
+        'new-message': options.kafkaNewMessageTopic
     }
     context.events = eventName;
-    context.listenerEvents = [options.gatewayName]
     return context;
 }
 async function initResources(options) {
     const context = await initDefaultResources(options)
-        //.then(initHttpServer)
         .then(initWebsocket)
         .then(prepareListEventFromKafkaTopic)
-        .then(kafka.initEventProducer)
-        .then(kafka.initEventListener);
+        .then(kafka.initEventProducer);
 
     return context;
 }
@@ -50,13 +48,11 @@ function parseOptions(argv) {
     cmd.option('--gateway-name <app-name>', 'Used as gateway server idenitifer for the user connected to this server, as well as the kafka topic for send message')
         .option('--kafka-user-connected-topic <new-user-topic>', 'Used by producer to produce new message when a user connected to server')
         .option('--kafka-user-disconnected-topic <user-disconnected-topic>', 'Used by producer to produce new message when a user disconnected from the server')
-        .option('--kafka-message-sent-topic <message-sent-topic>', 'Used by producer to produce new message for successfuly sent message')
-        .option('--kafka-error-message-send-topic <message-sent-error-topic>', 'Used by producer to produce new message when there is error while sending a message')
         .option('--kafka-new-message-topic <new-message-topic>', 'Used by producer to produce new message for each new incoming message');
     return cmd.parse(argv).opts();
 }
 
-class Gateway extends ServiceBase {
+class Gateway extends HttpServiceBase {
     constructor(context) {
         super(context);
         const publisher = this.context.publisher;
@@ -84,44 +80,14 @@ class Gateway extends ServiceBase {
                 })
             }
         }
-
-        const newMessageMeter = this.statsClient.meter({
-            name: 'newMessage/sec',
-            type: 'meter'
-        });
-
-        const messageDeliverySuccessfulMeter = this.statsClient.meter({
-            name: 'messageDeliverySuccessful/sec',
-            type: 'meter'
-        });
-
-        const messageDeliveryFailureMeter = this.statsClient.meter({
-            name: 'messageDeliveryFailure/sec',
-            type: 'meter'
-        });
-
-        this.messageEvents = {
-            onNewMessage: function (message) {
-                newMessageMeter.mark();
-                publishEvent(events['new-message'], message.META.from, message)
-            },
-            onMessageSent: function (message) {
-                messageDeliverySuccessfulMeter.mark();
-                publishEvent(events['message-sent'], message.META.from, message)
-            },
-            onMessageSentFailed: function (message, err) {
-                messageDeliveryFailureMeter.mark();
-                publishEvent(events['error-message-send'], message.META.from, {
-                    message: message,
-                    error: err
-                });
-            }
-        }
+        
         this.userSocketMapping = {}
         this.pingTimer;
     }
-    init() {
-        const { wss, listener } = this.context;
+    async init() {
+        await super.init();
+        const wss = new webSocker.Server({ server: this.hapiServer.listener });
+        this.context.wss = wss;
         const { userEvents, messageEvents, userSocketMapping } = this;
         wss.on('connection', (ws, request) => {
             const user = this.getUserInfoFromRequest(request);
@@ -142,20 +108,26 @@ class Gateway extends ServiceBase {
                 delete userSocketMapping[this.user];
             })
         });
-        listener.onMessage = (topic, message) => {
-            const ws = userSocketMapping[message.META.to];
-            if (ws) {
-                const payload = message.payload;
-                ws.send(payload);
-                messageEvents.onMessageSent(message);
-                return;
-            } else {
-                messageEvents.onMessageSentFailed(message, {
-                    code: -1,
-                    reason: 'user socket not found'
-                });
+
+        this.addRoute('/send', 'post', async (req, res) => {
+            const { items: [] } = req.payload;
+            const errors = [];
+            items.forEach((message) => {
+                const ws = userSocketMapping[message.META.to];
+                if (ws) {
+                    const payload = message.payload;
+                    ws.send(payload);
+                } else {
+                    errors.push({
+                        message,
+                        code: 404
+                    });
+                }
+            })
+            return {
+                errors: errors
             }
-        };
+        });
         this.enablePing();
     }
 
@@ -182,7 +154,7 @@ class Gateway extends ServiceBase {
 
     getUserInfoFromRequest(request) {
         let user = request.headers.user;
-        if(user) return user;
+        if (user) return user;
         const rc = request.headers.cookie;
         const cookies = {};
         rc & rc.split(';').forEach((cookie) => {
