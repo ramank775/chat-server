@@ -13,7 +13,7 @@
     "bluebird": "^3.7.2",
     "commander": "^5.1.0",
     "firebase-admin": "^9.1.1",
-    "kafkajs": "^1.14.0",
+    "kafkajs": "^1.15.0",
     "moment": "^2.26.0",
     "mongodb": "^3.5.8",
     "node-fetch": "^2.6.1",
