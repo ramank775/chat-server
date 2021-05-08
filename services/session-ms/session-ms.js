@@ -94,7 +94,7 @@ class SessionMS extends ServiceBase {
     }
     init() {
         const { listener, events } = this.context;
-        listener.onMessage = (event, value) => {
+        listener.onMessage = async(event, value) => {
             switch (event) {
                 case events['user-connected']: {
                     this.memCache.set(value.user, value.server)
@@ -125,8 +125,8 @@ class SessionMS extends ServiceBase {
 
         Object.keys(online).forEach(async (key) => {
             const messages = online[key];
-            let url = await this.discoveryService.getServiceUrl(key);
-            fetch(url, {
+            const url = await this.discoveryService.getServiceUrl(key);
+            fetch(`${url}/send`, {
                 method: 'post',
                 body: JSON.stringify({ items: messages }),
                 headers: { 'Content-Type': 'application/json' },
@@ -148,7 +148,7 @@ class SessionMS extends ServiceBase {
         const users = new Set();
         const dbMessages = [];
         items.forEach((message) => {
-            const { to, retry = -1 } = message.META;
+            let { to, retry = -1 } = message.META;
             if (retry > this.maxRetryCount) {
                 dbMessages.push(message);
                 return;
@@ -176,7 +176,7 @@ class SessionMS extends ServiceBase {
                 if (item) {
                     item.push(user_mapping[u]);
                 } else {
-                    server_mapping[server].push(user_mapping[u]);
+                    server_mapping[server] = [user_mapping[u]];
                 }
             }
         }

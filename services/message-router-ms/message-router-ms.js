@@ -10,7 +10,7 @@ const kafka = require('../../libs/kafka-utils'),
 async function prepareEventListFromKafkaTopics(context) {
     const { options } = context;
     const eventName = {
-        'new-message': kafkaNewMessageTopic,
+        'new-message': options.kafkaNewMessageTopic,
         'send-message': options.kafkaSendMessageTopic,
         'group-message': options.kafkaGroupMessageTopic
     }

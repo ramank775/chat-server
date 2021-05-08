@@ -13,13 +13,6 @@ const
     { uuidv4 } = require('../../helper'),
     asMain = (require.main === module)
 
-async function initWebsocket(context) {
-    const { options } = context;
-    const { port } = options;
-    const wss = new webSocker.Server({ port });
-    context.wss = wss;
-    return context;
-}
 
 async function prepareListEventFromKafkaTopic(context) {
     const { options } = context;
@@ -33,7 +26,6 @@ async function prepareListEventFromKafkaTopic(context) {
 }
 async function initResources(options) {
     const context = await initDefaultResources(options)
-        .then(initWebsocket)
         .then(prepareListEventFromKafkaTopic)
         .then(kafka.initEventProducer);
 
@@ -80,7 +72,17 @@ class Gateway extends HttpServiceBase {
                 })
             }
         }
-        
+        const newMessageMeter = this.statsClient.meter({
+            name: 'newMessage/sec',
+            type: 'meter'
+        });
+        this.messageEvents = {
+            onNewMessage: function (message) {
+                newMessageMeter.mark();
+                publishEvent(events['new-message'], message.META.from, message)
+            }
+        }
+
         this.userSocketMapping = {}
         this.pingTimer;
     }
@@ -110,7 +112,7 @@ class Gateway extends HttpServiceBase {
         });
 
         this.addRoute('/send', 'post', async (req, res) => {
-            const { items: [] } = req.payload;
+            const items = req.payload.items || [];
             const errors = [];
             items.forEach((message) => {
                 const ws = userSocketMapping[message.META.to];
