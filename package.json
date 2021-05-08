@@ -8,7 +8,7 @@
   "license": "MIT",
   "dependencies": {
     "@hapi/hapi": "^20.0.3",
-    "@pm2/io": "^4.3.5",
+    "@pm2/io": "^5.0.0",
     "aws-sdk": "^2.824.0",
     "bluebird": "^3.7.2",
     "commander": "^5.1.0",
