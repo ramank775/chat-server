@@ -1,6 +1,6 @@
+
 image:
   file: .gitpod.Dockerfile
-  context: deployment/dev
 
 ports:
   - port: 8080
@@ -18,3 +18,9 @@ tasks:
     command: nginx
   - name: mongodb
     command: mkdir -p /workspace/data && mongod --dbpath /workspace/data
+  - name: redis
+    command:  redis-server 
+
+vscode:
+  extensions:
+    - editorconfig.editorconfig
