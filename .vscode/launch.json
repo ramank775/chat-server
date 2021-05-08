@@ -79,7 +79,6 @@
                 "--kafka-user-connected-topic=${TOPIC_USER_CONNECTED}",
                 "--kafka-new-message-topic=${TOPIC_NEW_MESSAGE}",
                 "--kafka-broker-list=${BROKER_LIST}",
-                "--session-service-url=${SESSION_MS_HOST}:${SESSION_MS_PORT}",
                 "--kafka-persistence-message-topic=${TOPIC_DB_MESSAGE}",
                 "--mongo-url=${MONGO_URL}",
                 "--kafka-security-protocol=${KAFKA_SECURITY_PROTOCOL}",

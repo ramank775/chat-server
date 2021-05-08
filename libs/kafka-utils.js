@@ -294,7 +294,7 @@ async function createKafkaConsumer(context) {
             await consumer.run({
                 eachMessage: ({ topic, message }) => {
                     const data = {
-                        key: message.key.toString(),
+                        key: message.key ? message.key.toString() : null,
                         value: JSON.parse(message.value.toString())
                     }
                     const logInfo = { ...message, key: data.key, value: { META: data.value.META } };

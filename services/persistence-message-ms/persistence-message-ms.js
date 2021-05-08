@@ -32,12 +32,12 @@ async function initDatabase(context) {
     const messageCollection = mongodbClient.collection("ps_message")
     const db = {}
     db.save = async function (messages) {
-        messages.forEach(message => {
+        messages.forEach(async (message) => {
             let payloads = []
             if (typeof message.payload != typeof []) {
                 payloads = [message.payload]
             } else {
-                paylaods = message.payload;
+                payloads = message.payload;
             }
             const payloadToInsert = payloads.map(payload => ({ _id: new mongo.ObjectID(), payload: payload }))
             const user = message.META.to;
@@ -108,28 +108,32 @@ class PersistenceMessageMS extends ServiceBase {
         listener.onMessage = async (event, message) => {
             switch (event) {
                 case events['send-message-db']:
-                    this.saveMessageMeter.mark();
-                    let messages = [];
-                    if (typeof message != typeof []) {
-                        messages = [message]
-                    } else {
-                        messages = message
+                    {
+                        this.saveMessageMeter.mark();
+                        let messages = [];
+                        if (typeof message != typeof []) {
+                            messages = [message]
+                        } else {
+                            messages = message
+                        }
+                        await db.save(messages);
                     }
-                    await db.save(messages);
                     break;
                 case events['user-connected']:
-                    const messages = await db.getUndeliveredMessageByUser(message.user);
-                    if (!(messages && messages.length)) break;
+                    {
+                        const messages = await db.getUndeliveredMessageByUser(message.user);
+                        if (!(messages && messages.length)) break;
 
-                    this.sendMessageMeter.mark();
-                    const payload = JSON.stringify(messages.map(x => x.payload));
-                    const sendMessage = {
-                        META: { to: message.user, parsed: true, retry: 0, from: appName },
-                        payload
+                        this.sendMessageMeter.mark();
+                        const payload = JSON.stringify(messages.map(x => x.payload));
+                        const sendMessage = {
+                            META: { to: message.user, parsed: true, retry: 0, from: appName },
+                            payload
+                        }
+                        publisher.send(events['new-message'], sendMessage, message.user);
+                        const messages_ids = messages.map(x => x._id);
+                        await db.removeMessageByUser(message.user, messages_ids);
                     }
-                    publisher.send(events['new-message'], sendMessage, message.user);
-                    const messages_ids = messages.map(x => x._id);
-                    await db.removeMessageByUser(message.user, messages_ids);
                     break;
             }
         }
