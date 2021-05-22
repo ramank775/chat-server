@@ -18,7 +18,11 @@ A chat server based on the microservice architecture to ensure high availability
         - Maintaining Web Socket Connection
         - Forwarding event like `onConnect`, `onDisconnect`, `new-message` to message broker (Kafka)
         - Sending message back to client
-  
+
+- Rest Http Gateway: It handle rest call to send messages.
+    - Responsibility
+        - Send Message to message broker.
+
 - Profile MS: Rest Api Service provides functionality like `login`, `auth`, `contact-sync` 
     - Responsibility
         - Login, Auth
@@ -32,18 +36,23 @@ A chat server based on the microservice architecture to ensure high availability
 
 - Session MS: Maintaining the info about which user connected to which gateway instance.
     - Responsibility
-        - Maintain User connection state
+        - Maintain User connection state.
+        - Route message to gateway user connected with.
+        - Retry failed message.
+        - Handle Ack message.
+        - Route message to store/push notification
 
 - Message Router: Route the incoming `new message` to respective destination
     - Responsibility
-        - Route 1-to-1 chat message to gateway
-        - Route message to store/push notification
-        - Retry failed message
-        - Route group message to Group Message Router
+        - Parse message.
+        - Redirect message to respective destination for e.g.
+            - Route group message to Group Message Router.
 
 - Group Message Router: Route the incoming group messages to respective destination
     - Responsibility
-        - Route Group Message to respective destination
+        - Fetch group users for particular user.
+        - Update message meta with user list.
+        - Redirect Message to respective destination.
 
 - Push Notification: Deliver message to user when user is offline
     - Responsibility
@@ -53,6 +62,10 @@ A chat server based on the microservice architecture to ensure high availability
     - Responsibility
         - Store message new user is offline
         - Deliver message as user come online
+
+- Persistence Storage Rest Endpoint: To handle rest call to fetch messages
+    - Responsibility
+        - Return stored message for a user
 
 ## Directory Structure
 
