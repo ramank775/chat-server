@@ -117,7 +117,7 @@ class Gateway extends HttpServiceBase {
             items.forEach((message) => {
                 const ws = userSocketMapping[message.META.to];
                 if (ws) {
-                    const payload = message.payload;
+                    const payload = JSON.stringify(message.payload);
                     ws.send(payload);
                 } else {
                     errors.push({

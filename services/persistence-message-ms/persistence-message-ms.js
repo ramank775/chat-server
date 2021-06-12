@@ -121,6 +121,7 @@ class PersistenceMessageMS extends ServiceBase {
                     break;
                 case events['user-connected']:
                     {
+                        if(message.action != 'connect') return;
                         const messages = await db.getUndeliveredMessageByUser(message.user);
                         if (!(messages && messages.length)) break;
 

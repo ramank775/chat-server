@@ -120,6 +120,7 @@ function connect_socket() {
         ws.onmessage = function (e) {
             const msgSpace = document.getElementById('message');
             const newMsgItem = document.createElement('li');
+           
             console.log(e.data);
             newMsgItem.appendChild(document.createTextNode(e.data));
             msgSpace.appendChild(newMsgItem);

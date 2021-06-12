@@ -6,12 +6,19 @@ function uuidv4() {
 }
 
 
-function extractInfoFromRequest(req, key='user', defaultValue=null) {
+function extractInfoFromRequest(req, key = 'user', defaultValue = null) {
     return req.headers[key] || req.state[key] || defaultValue;
 }
 
+function getUTCEpoch() {
+    const now = new Date()
+    const utcMilllisecondsSinceEpoch = now.getTime() + (now.getTimezoneOffset() * 60 * 1000)
+    const utcSecondsSinceEpoch = Math.round(utcMilllisecondsSinceEpoch / 1000)
+    return utcSecondsSinceEpoch;
+}
 
 module.exports = {
     uuidv4,
-    extractInfoFromRequest
+    extractInfoFromRequest,
+    getUTCEpoch
 }

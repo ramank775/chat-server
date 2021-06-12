@@ -5,6 +5,7 @@ const kafka = require('../../libs/kafka-utils'),
         initDefaultResources,
         resolveEnvVariables
     } = require('../../libs/service-base'),
+    { getUTCEpoch } = require('../../helper')
     asMain = (require.main === module);
 
 async function prepareEventListFromKafkaTopics(context) {
@@ -87,7 +88,7 @@ class MessageRouterMS extends ServiceBase {
             msg.head = head;
             msg.id = id;
             msg.body = body;
-            msg.body.ts = Date.UTC();
+            msg.body.ts = getUTCEpoch();
 
             Object.assign(META, meta);
             META.to = head.to;
@@ -127,7 +128,7 @@ class MessageRouterMS extends ServiceBase {
             };
             msg.body = {
                 text: _msg.text,
-                ts: Date.UTC()
+                ts: getUTCEpoch()
             };
 
             Object.assign(META, {
@@ -140,7 +141,7 @@ class MessageRouterMS extends ServiceBase {
 
         const formattedMessage = {
             META: { ...META, parsed: true },
-            payload: JSON.stringify(msg)
+            payload: msg
         }
         return formattedMessage;
     }
