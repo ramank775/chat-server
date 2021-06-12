@@ -12,6 +12,7 @@ const {
         initMongoClient
     } = require('../../libs/mongo-utils'),
     { uuidv4, extractInfoFromRequest } = require('../../helper'),
+    { formatMessage } = require('../../libs/message-utils'),
     kafka = require('../../libs/kafka-utils'),
     asMain = (require.main === module);
 
@@ -101,7 +102,7 @@ class GroupMs extends HttpServiceBase {
             const user = extractInfoFromRequest(req, 'user');
             const { member } = req.payload;
             const { groupId } = req.params;
-            const group = await this.groupCollection.findOne({ groupId });
+            const group = await this.groupCollection.findOne({ groupId, "members.username": user });
             if (!group) {
                 return res.response({ status: false }).code(404);
             }
@@ -124,7 +125,7 @@ class GroupMs extends HttpServiceBase {
                     const nextAdmin = group.members.find(x => x.username !== user);
                     if (nextAdmin) {
                         nextAdmin.role = 'admin';
-                        await this.groupCollection.update({ _id: group._id, 'members.username': nextAdmin.username }, { $set: {'members.$.role': 'admin' }});
+                        await this.groupCollection.updateOne({ _id: group._id, 'members.username': nextAdmin.username }, { $set: {'members.$.role': 'admin' }});
                     }
                 }
             }
@@ -174,17 +175,18 @@ class GroupMs extends HttpServiceBase {
         body.from = sender;
         body.to = groupId;
         body.type = 'notification';
-        const message = {
+        body.text = ''; // Added just to make app works fine TODO: remove this when current version of app is killed
+        const payload = {
             META: {
                 to: groupId,
                 users: receivers,
                 from: sender,
                 category: 'notification',
                 chatType: type,
-                parsed: true
             },
             payload: JSON.stringify(body)
         };
+        const message = formatMessage(payload);
         this.publisher.send(kafkaNewGroupMessageTopic, message, sender);
     }
     async shutdown() {

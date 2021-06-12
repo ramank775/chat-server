@@ -75,11 +75,11 @@ A chat server based on the microservice architecture to ensure high availability
     "_v": 2.0,
     "id": "string",
     "head" : {
-        "type": "chat|group-chat|channel|bot|notification",
+        "type": "chat|group|channel|bot|notification",
         "to": "username|group_id|channel_id|bot_id",
         "from": "username",
         "chatid": "chatid", // to be deperciated, added for backward comptibility only
-        "content_type": "json|text|video|audio|location|form",
+        "contentType": "json|text|video|audio|location|form",
         "action": "message|ack|subscribe|unsubscribe|join|leave|create|add-member|remove-member"
     },
     "meta": {
