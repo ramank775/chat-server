@@ -146,9 +146,11 @@
                 "--app-name=group-message-router-1",
                 "--debug",
                 "--kafka-client-id=group-message-router-1",
+                "--kafka-send-message-topic=${TOPIC_SEND_MESSAGE}",
                 "--kafka-consumer-group=${CONSUMER_GROUP_GROUP_MESSAGE_ROUTER}",
                 "--kafka-new-group-message-topic=${TOPIC_NEW_GROUP_MS}",
                 "--kafka-broker-list=${BROKER_LIST}",
+                "--mongo-url=${MONGO_URL}",
                 "--session-service-url=${SESSION_MS_HOST}:${SESSION_MS_PORT}",
                 "--group-service-url=${GROUP_MS_JSON_HOST}:${GROUP_MS_JSON_PORT}",
                 "--kafka-persistence-message-topic=${TOPIC_DB_MESSAGE}"

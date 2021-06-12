@@ -9,6 +9,7 @@ const kafka = require('../../libs/kafka-utils'),
         addMongodbOptions,
         initMongoClient
     } = require('../../libs/mongo-utils'),
+    { formatMessage } = require('../../libs/message-utils'),
     asMain = (require.main === module);
 
 async function prepareEventListFromKafkaTopics(context) {
@@ -56,9 +57,9 @@ class GroupMessageRouterMS extends ServiceBase {
         }
     }
     async redirectMessage(message) {
-        const { publisher } = this.context;
+        const { publisher, events } = this.context;
         if (!message.META.parsed) {
-            message = await this.formatMessage(message);
+            message = formatMessage(message);
         }
         let users = message.META.users;
         if (!users) {
@@ -71,23 +72,81 @@ class GroupMessageRouterMS extends ServiceBase {
                 user = user.username;
             }
             // Set message META property type as single so failed message to be handled by mesasge router
-            message.META = { ...message.META, to: user, type: 'single', users: undefined };
+            message.META = { ...message.META, to: user, users: undefined };
             messages.push(message)
         }
-        publisher.send(server, { items: messages });
+        const receiver = events['send-message']
+        publisher.send(receiver, { items: messages });
     }
 
     async formatMessage(message) {
-        const { META: meta, payload } = message;
+        const { META, payload } = message;
         const parsedPayload = JSON.parse(payload);
-        const { to, type, chatType, ...msg } = parsedPayload;
-        msg.from = meta.from;
-        msg.to = to;
-        msg.type = type;
-        msg.chatType = chatType
+        const msg = {
+            _v: parsedPayload._v || 1.0,
+        };
+
+
+        if (msg._v >= 2.0) {
+            const { id, head, meta, body } = parsedPayload;
+            head.from = META.from;
+            msg.head = head;
+            msg.id = id;
+            msg.body = body;
+            msg.body.ts = getUTCEpoch();
+
+            Object.assign(META, meta);
+            META.to = head.to;
+            META.id = id;
+            META.type = head.type;
+            META.contentType = head.contentType
+
+            // Add legacy keys for backward compatibility
+            // TODO: remove this in next stable build
+            msg.from = META.from;
+            msg.to = head.to;
+            msg.msgId = id;
+            msg.type = head.contentType;
+            msg.chatId = head.chatId; // to be deperciated, added for backward comptibility only
+            msg.text = body.text;
+            msg.module = head.type;
+            msg.action = head.action;
+            msg.chatType = head.type;
+
+        } else {
+            const { to, type, chatType, ..._msg } = parsedPayload;
+            Object.assign(msg, _msg);
+            msg.from = META.from;
+            msg.to = to;
+            msg.type = type;
+            msg.chatType = chatType;
+
+            // Add new format keys
+            msg.id = msg.msgId;
+            msg.head = {
+                type: chatType || msg.module,
+                to: to,
+                from: META.from,
+                chatid: msg.chatId,
+                contentType: msg.type,
+                action: msg.action || 'message'
+            };
+            msg.body = {
+                text: _msg.text,
+                ts: getUTCEpoch()
+            };
+
+            Object.assign(META, {
+                to: to,
+                id: msg.id,
+                type: chatType,
+                contentType: type
+            })
+        }
+
         const formattedMessage = {
-            META: { to, type, chatType, ...meta, parsed: true },
-            payload: JSON.stringify(msg)
+            META: { ...META, parsed: true },
+            payload: msg
         }
         return formattedMessage;
     }
@@ -100,7 +159,6 @@ class GroupMessageRouterMS extends ServiceBase {
     }
 
     async getGroupUsers(groupId, user) {
-        const { groupId, user } = message;
         const group = await this.groupCollection.findOne({ groupId, 'members.username': user });
         const users = group.members.map(x => x.username);
         return users;
