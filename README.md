@@ -67,6 +67,50 @@ A chat server based on the microservice architecture to ensure high availability
     - Responsibility
         - Return stored message for a user
 
+
+### Message Format
+
+```json
+{
+    "_v": 2.0,
+    "id": "string",
+    "head" : {
+        "type": "chat|group-chat|channel|bot|notification",
+        "to": "username|group_id|channel_id|bot_id",
+        "from": "username",
+        "chatid": "chatid", // to be deperciated, added for backward comptibility only
+        "content_type": "json|text|video|audio|location|form",
+        "action": "message|ack|subscribe|unsubscribe|join|leave|create|add-member|remove-member"
+    },
+    "meta": {
+        "hash": "md5:hash",
+        "content_hash": "md5:hash",
+        "generate_ts": 123455667890
+    },
+    "body": {
+        "text": "Hello this a text message",
+        "ts":123455667890
+    }
+}
+```
+
+#### Mapping with previous Message format
+
+```json
+{
+    "msgId": "id",
+    "from": "head.from",
+    "type": "head.content_type",
+    "to": "head.to",
+    "chatId": "head.to",
+    "text": "body.text",
+    "state": "n/a",
+    "module": "head.type",
+    "action": "head.action",
+    "chatType": "head.type"
+}
+```
+
 ## Directory Structure
 
 | Name |  Description |

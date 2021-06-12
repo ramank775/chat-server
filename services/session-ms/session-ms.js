@@ -44,14 +44,13 @@ async function initMemCache(context) {
 
 async function prepareEventListFromKafkaTopics(context) {
     const { options } = context;
-    const { kafkaUserConnectedTopic, kafkaUserDisconnectedTopic, kafkaSendMessageTopic } = options;
+    const { kafkaUserConnectionStateTopic, kafkaSendMessageTopic, kafkaPersistenceMessageTopic } = options;
     context.events = {
-        'user-connected': kafkaUserConnectedTopic,
-        'user-disconnected': kafkaUserDisconnectedTopic,
+        'user-connection-state': kafkaUserConnectionStateTopic,
         'send-message': kafkaSendMessageTopic,
-        'offline-message': options.kafkaPersistenceMessageTopic,
+        'offline-message': kafkaPersistenceMessageTopic,
     }
-    context.listenerEvents = [kafkaUserConnectedTopic, kafkaUserDisconnectedTopic, kafkaSendMessageTopic]
+    context.listenerEvents = [kafkaUserConnectionStateTopic, kafkaSendMessageTopic]
     return context;
 }
 
@@ -70,8 +69,7 @@ function parseOptions(argv) {
     cmd = kafka.addStandardKafkaOptions(cmd);
     cmd = kafka.addKafkaSSLOptions(cmd)
         .option('--service-discovery-path <service-discovery-path>', 'Path to service discovery service')
-        .option('--kafka-user-connected-topic <new-user-topic>', 'Used by consumer to consume new message when a user connected to server')
-        .option('--kafka-user-disconnected-topic <user-disconnected-topic>', 'Used by consumer to consume new message when a user disconnected from the server')
+        .option('--kafka-user-connection-state-topic <user-connection-state-topic>', 'Used by consumer to consume new message when a user connected/disconnected to server')
         .option('--kafka-send-message-topic <send-message-topic>', 'Used by consumer to consume new message to send to user')
         .option('--kafka-persistence-message-topic <persistence-message-topic>', 'Used by producer to produce new message to saved into a persistence db')
         .option('--message-max-retries <message-max-retries>', 'Max no of retries to deliver message (default value is 3)', (value) => parseInt(value), 3);
@@ -94,18 +92,23 @@ class SessionMS extends ServiceBase {
     }
     init() {
         const { listener, events } = this.context;
-        listener.onMessage = async(event, value) => {
+        listener.onMessage = async (event, value) => {
             switch (event) {
-                case events['user-connected']: {
-                    this.memCache.set(value.user, value.server)
-                    this.userConnectedCounter.inc(1);
-                }
-                    break;
-                case events['user-disconnected']: {
-                    const server = this.memCache.get(value.user)
-                    if (server == value.server) {
-                        this.memCache.remove(value.user);
-                        this.userConnectedCounter.dec(1);
+                case events['user-connection-state']: {
+                    const { action, user, server } = value;
+                    switch (action) {
+                        case 'connect': {
+                            this.memCache.set(user, server)
+                            this.userConnectedCounter.inc(1);
+                        }
+                            break;
+                        case 'disconnect': {
+                            const exitingServer = this.memCache.get(user)
+                            if (exitingServer == server) {
+                                this.memCache.remove(user);
+                                this.userConnectedCounter.dec(1);
+                            }
+                        }
                     }
                 }
                     break;

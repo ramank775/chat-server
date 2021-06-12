@@ -17,8 +17,7 @@ const
 async function prepareListEventFromKafkaTopic(context) {
     const { options } = context;
     const eventName = {
-        'user-connected': options.kafkaUserConnectedTopic,
-        'user-disconnected': options.kafkaUserDisconnectedTopic,
+        'user-connection-state': options.kafkaUserConnectionStateTopic,
         'new-message': options.kafkaNewMessageTopic
     }
     context.events = eventName;
@@ -38,8 +37,7 @@ function parseOptions(argv) {
     cmd = kafka.addStandardKafkaOptions(cmd);
     cmd = kafka.addKafkaSSLOptions(cmd);
     cmd.option('--gateway-name <app-name>', 'Used as gateway server idenitifer for the user connected to this server, as well as the kafka topic for send message')
-        .option('--kafka-user-connected-topic <new-user-topic>', 'Used by producer to produce new message when a user connected to server')
-        .option('--kafka-user-disconnected-topic <user-disconnected-topic>', 'Used by producer to produce new message when a user disconnected from the server')
+        .option('--kafka-user-connection-state-topic <user-connection-state-topic>', 'Used by producer to produce message when a user connected/disconnected to server')
         .option('--kafka-new-message-topic <new-message-topic>', 'Used by producer to produce new message for each new incoming message');
     return cmd.parse(argv).opts();
 }
@@ -59,14 +57,16 @@ class Gateway extends HttpServiceBase {
         this.userEvents = {
             onConnect: function (user) {
                 userConnectedCounter.inc(1);
-                publishEvent(events['user-connected'], user, {
+                publishEvent(events['user-connection-state'], user, {
+                    action: 'connect',
                     user: user,
                     server: serverName
                 })
             },
             onDisconnect: function (user) {
                 userConnectedCounter.dec(1);
-                publishEvent(events['user-disconnected'], user, {
+                publishEvent(events['user-connection-state'], user, {
+                    action: 'disconnect',
                     user: user,
                     server: serverName
                 })
