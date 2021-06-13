@@ -133,6 +133,7 @@ class Gateway extends HttpServiceBase {
         this.enablePing();
     }
 
+    // TODO: Let client handles the pings, it offload server load
     enablePing() {
         const { userSocketMapping } = this;
         this.pingTimer = setInterval(() => {

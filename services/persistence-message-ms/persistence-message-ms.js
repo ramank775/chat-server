@@ -1,3 +1,5 @@
+const { formatMessage } = require('../../libs/message-utils');
+
 const kafka = require('../../libs/kafka-utils'),
     {
         ServiceBase,
@@ -17,7 +19,7 @@ async function prepareEventListFromKafkaTopics(context) {
     const eventName = {
         'send-message-db': options.kafkaPersistenceMessageTopic,
         'user-connected': options.kafkaUserConnectedTopic,
-        'new-message': options.kafkaNewMessageTopic
+        'send-message': options.kafkaSendMessageTopic
     }
     context.events = eventName;
     context.listenerEvents = [
@@ -39,7 +41,7 @@ async function initDatabase(context) {
             } else {
                 payloads = message.payload;
             }
-            const payloadToInsert = payloads.map(payload => ({ _id: new mongo.ObjectID(), payload: payload }))
+            const payloadToInsert = payloads.map(payload => ({ _id: new mongo.ObjectID(), payload: payload, META: message.META }))
             const user = message.META.to;
             await messageCollection.updateOne({ user }, {
                 $push: {
@@ -87,7 +89,7 @@ function parseOptions(argv) {
     cmd = addMongodbOptions(cmd);
     cmd.option('--kafka-user-connected-topic <user-connect-topic>', 'Used by consumer to consume new message when a user connected to server')
         .option('--kafka-persistence-message-topic <presistence-message-topic>', 'Used by producer to produce new message to saved into a persistence db')
-        .option('--kafka-new-message-topic <new-message-topic>', 'Used by producer to produce new message for saved incoming message');
+        .option('--kafka-send-message-topic <send-message-topic>', 'Used by producer to produce new message to send message to user');
     return cmd.parse(argv).opts();
 }
 
@@ -121,17 +123,27 @@ class PersistenceMessageMS extends ServiceBase {
                     break;
                 case events['user-connected']:
                     {
-                        if(message.action != 'connect') return;
+                        if (message.action != 'connect') return;
                         const messages = await db.getUndeliveredMessageByUser(message.user);
                         if (!(messages && messages.length)) break;
 
                         this.sendMessageMeter.mark();
-                        const payload = JSON.stringify(messages.map(x => x.payload));
+                        const payload = messages.map(m => {
+                            let { _id, ...msg } = m;
+                            if (!msg.META) {
+                                msg.META = { to: message.user, parsed: true, retry: 0, from: appName }
+                            } else {
+                                msg.META.from = appName
+                            }
+                            if(typeof msg.payload == typeof '') {
+                                msg = formatMessage(msg);
+                            }
+                            return msg;
+                        });
                         const sendMessage = {
-                            META: { to: message.user, parsed: true, retry: 0, from: appName },
-                            payload
+                            items: payload
                         }
-                        publisher.send(events['new-message'], sendMessage, message.user);
+                        publisher.send(events['send-message'], sendMessage, message.user);
                         const messages_ids = messages.map(x => x._id);
                         await db.removeMessageByUser(message.user, messages_ids);
                     }

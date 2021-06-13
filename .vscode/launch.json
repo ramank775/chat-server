@@ -74,7 +74,7 @@
                 "--kafka-client-id=persistence-message-1",
                 "--kafka-consumer-group=${CONSUMER_GROUP_PERSISTENCE_MESSAGE}",
                 "--kafka-user-connected-topic=${TOPIC_USER_CONNECTION_STATE}",
-                "--kafka-new-message-topic=${TOPIC_NEW_MESSAGE}",
+                "--kafka-send-message-topic=${TOPIC_SEND_MESSAGE}",
                 "--kafka-broker-list=${BROKER_LIST}",
                 "--kafka-persistence-message-topic=${TOPIC_OFFLINE_MESSAGE}",
                 "--mongo-url=${MONGO_URL}",
