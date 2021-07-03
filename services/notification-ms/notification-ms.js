@@ -57,7 +57,7 @@ function parseOptions(argv) {
     cmd.option('--kafka-offline-message-topic <offline-message-topic>', 'Used by producer to produce new message to send the push notification')
     cmd.option('--kafka-new-login-topic <new-login-topic>', 'New login kafka topic')
     cmd.option('--firebase-admin-credential-json-path <firebaes-admin-cred-file>', 'Path to the firebase admin credentials file')
-    cmd.option('--db-app-initial <db-app-initial>', 'Initial of db apps', 'persistence-message')
+    cmd.option('--offline-msg-initial <offline-msg-initial>', 'Initial for saved messages', 'persistence-message')
     return cmd.parse(argv).opts();
 }
 
@@ -79,7 +79,7 @@ class NotificationMS extends ServiceBase {
         });
     }
     init() {
-        const { listener, events, options: { dbAppInitial } } = this.context;
+        const { listener, events, options: { offlineMsgInitial } } = this.context;
         listener.onMessage = async (event, message) => {
             switch (event) {
                 case events['new-login']:
@@ -100,42 +100,42 @@ class NotificationMS extends ServiceBase {
                 case events['push-notification']:
                     {
                         let messages = []
-                        if (typeof message == typeof []) {
+                        if (Array.isArray(message)) {
                             messages = message;
                         } else {
                             messages = [message];
                         }
-                        messages.forEach((msg) => {
-                            const { to, from } = msg.META;
-                            if (from && from.startsWith(dbAppInitial)) return;
-                            const payload = JSON.parse(msg.payload);
-                            let payloads = []
-                            if (typeof payload == typeof []) {
-                                payloads = payload
-                            } else {
-                                paylaods = [payload]
+                        const map_user_messages = messages.reduce((mapping, msg) => {
+                            const user = msg.META.to
+                            if (!mapping[user]) {
+                                mapping[user] = []
                             }
-                            payloads = payloads.filter(x => x.type != "notification")
-                            if (!payloads.length) return;
-                            const record = await this.notificationTokensCollection.findOne({ username: to }, { projection: { _id: 0, notificationToken: 1 } });
-                            if (record) {
-                                this.notificationMeter.mark();
-                                const { notificationToken } = record;
-                                const chatPayload = {
-                                    data: {
-                                        message: msg.payload
-                                    }
-                                };
-                                const options = {
-                                    priority: "high",
-                                    timeToLive: 60 * 60 * 24
-                                };
-                                this.firebaseMessaging.sendToDevice(notificationToken, chatPayload, options).catch(err => {
-                                    this.failedNotificationMeter.mark();
-                                    this.log.error(`Error while sending push notification ${err}`, err);
-                                });
-                            }
-                        })
+                            mapping[user].push(msg)
+                            return mapping
+                        }, {})
+                        Object.entries(map_user_messages)
+                            .forEach(async ([to, msgs]) => {
+                                msgs = msgs.filter(msg => msg.META.type != "notification")
+                                const payloads = msgs.map(msg => msg.payload)
+                                const record = await this.notificationTokensCollection.findOne({ username: to }, { projection: { _id: 0, notificationToken: 1 } });
+                                if (record) {
+                                    this.notificationMeter.mark();
+                                    const { notificationToken } = record;
+                                    const chatPayload = {
+                                        data: {
+                                            message: JSON.stringify(payloads)
+                                        }
+                                    };
+                                    const options = {
+                                        priority: "high",
+                                        timeToLive: 60 * 60 * 24
+                                    };
+                                    this.firebaseMessaging.sendToDevice(notificationToken, chatPayload, options).catch(err => {
+                                        this.failedNotificationMeter.mark();
+                                        this.log.error(`Error while sending push notification ${err}`, err);
+                                    });
+                                }
+                            })
 
                     }
                     break;

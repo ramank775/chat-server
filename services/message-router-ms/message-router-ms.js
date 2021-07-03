@@ -13,7 +13,8 @@ async function prepareEventListFromKafkaTopics(context) {
     const eventName = {
         'new-message': options.kafkaNewMessageTopic,
         'send-message': options.kafkaSendMessageTopic,
-        'group-message': options.kafkaGroupMessageTopic
+        'group-message': options.kafkaGroupMessageTopic,
+        'ack': options.kafkaAckTopic
     }
     context.events = eventName;
     context.listenerEvents = [
@@ -37,6 +38,7 @@ function parseOptions(argv) {
     cmd.option('--kafka-new-message-topic <new-message-topic>', 'Used by consumer to consume new message for each new incoming message')
         .option('--kafka-group-message-topic <group-message-topic>', 'Used by producer to produce new message to handle by message router')
         .option('--kafka-send-message-topic <send-message-topic>', 'Used by producer to produce new message to send message to user')
+        .option('--kafka-ack-topic <ack-topic>', 'Used by producer to produce new message for acknowledgment')
     return cmd.parse(argv).opts();
 }
 
@@ -63,12 +65,15 @@ class MessageRouterMS extends ServiceBase {
             message = formatMessage(message);
         }
         const user = message.META.to;
-        let receiver;
-        if (message.META.type === 'group') {
-            receiver = events['group-message']
+
+        if (message.META.type === 'ack') {
+            const receiver = events['ack']
+            publisher.send(receiver, { items: [message] }, message.head.from)
+        } else if (message.META.type === 'group') {
+            const receiver = events['group-message']
             publisher.send(receiver, message, user);
         } else {
-            receiver = events['send-message'];
+            const receiver = events['send-message'];
             publisher.send(receiver, { items: [message] }, user);
         }
     }

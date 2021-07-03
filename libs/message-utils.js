@@ -20,6 +20,7 @@ function formatMessage(message) {
         META.id = id;
         META.type = head.type;
         META.contentType = head.contentType
+        META.action = head.action
 
         // Add legacy keys for backward compatibility
         // TODO: remove this in next stable build
@@ -60,7 +61,8 @@ function formatMessage(message) {
             to: to,
             id: msg.id,
             type: chatType,
-            contentType: type
+            contentType: type,
+            action: msg.head.action
         })
     }
 

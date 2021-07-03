@@ -49,19 +49,23 @@ function connect() {
 function sendMessage() {
     function getChatId(to) {
         const [username] = getUserInfo()
-        const values =  [username.replace('+', ''), to.replace('+', '')].sort();
+        const values = [username.replace('+', ''), to.replace('+', '')].sort();
         return values.join('');
     }
     let msg = document.getElementById('msg').value;
     let to = document.getElementById('to').value;
     let sMesgae = {
-        msgId: to + Date.now() + (++id),
+        msgId: get_msgid(to),
         text: msg,
         to: to,
-        chatId:getChatId(to),
+        chatId: getChatId(to),
         type: groups.filter(x => x.groupId == to).length > 0 ? 'group' : 'text'
     }
     ws.send(JSON.stringify(sMesgae));
+}
+
+function get_msgid(to) {
+    return to + Date.now() + (++id);
 }
 
 function getGroups() {
@@ -103,6 +107,32 @@ function createGroup() {
 
 }
 
+function send_ack(messages) {
+    const [username] = getUserInfo()
+    const ids = JSON.parse(messages).map(x=>x.id)
+    const message = {
+        "_v": 2.0,
+        "id": get_msgid('abs'),
+        "head": {
+            "type": "ack",
+            "to": "system",
+            "from": username,
+            "contentType": "json",
+            "action": "ack"
+        },
+        "meta": {
+            "hash": "md5:hash",
+            "content_hash": "md5:hash",
+            "generate_ts": 123455667890
+        },
+        "body": {
+            ids
+        }
+    }
+    ws.send(JSON.stringify(message));
+    console.log('Ack sent')
+}
+
 function connect_socket() {
     if (window.WebSocket) {
 
@@ -113,15 +143,16 @@ function connect_socket() {
         ws = new WebSocket(`wss://${host}/wss/`);
 
         ws.onopen = function () {
-            console.log('connection time', Date.now()- startTime);
+            console.log('connection time', Date.now() - startTime);
             document.getElementById('status').innerText = "Connected";
             console.log("onopen");
         };
         ws.onmessage = function (e) {
             const msgSpace = document.getElementById('message');
             const newMsgItem = document.createElement('li');
-           
+
             console.log(e.data);
+            send_ack(e.data)
             newMsgItem.appendChild(document.createTextNode(e.data));
             msgSpace.appendChild(newMsgItem);
             console.log("echo from server : " + e.data);

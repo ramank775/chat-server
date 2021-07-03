@@ -114,14 +114,17 @@ class Gateway extends HttpServiceBase {
         this.addRoute('/send', 'post', async (req, res) => {
             const items = req.payload.items || [];
             const errors = [];
-            items.forEach((message) => {
-                const ws = userSocketMapping[message.META.to];
+            items.forEach((messages) => {
+                if (!messages.length) return;
+                const to = messages[0].META.to
+                const ws = userSocketMapping[to];
                 if (ws) {
-                    const payload = JSON.stringify(message.payload);
+                    const payloads = messages.map(msg => msg.payload)
+                    const payload = JSON.stringify(payloads);
                     ws.send(payload);
                 } else {
                     errors.push({
-                        message,
+                        messages,
                         code: 404
                     });
                 }
