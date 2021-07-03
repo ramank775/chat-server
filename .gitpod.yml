@@ -1,3 +1,4 @@
+
 image:
   file: .gitpod.Dockerfile
 
@@ -17,3 +18,7 @@ tasks:
     command: nginx
   - name: mongodb
     command: mkdir -p /workspace/data && mongod --dbpath /workspace/data
+
+vscode:
+  extensions:
+    - editorconfig.editorconfig

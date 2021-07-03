@@ -1,165 +1,172 @@
 {
-    // Use IntelliSense to learn about possible attributes.
-    // Hover to view descriptions of existing attributes.
-    "version": "0.2.0",
-    "configurations": [
-        {
-            "type": "node",
-            "request": "launch",
-            "name": "Launch Gateway MS",
-            "program": "${workspaceFolder}/services/connection-gateway/gateway.js",
-            "args": [
-                "--app-name=ws-gateway-1",
-                "--debug",
-                "--gateway-name=gateway-1",
-                "--kafka-client-id=gateway-1",
-                "--kafka-user-connection-state-topic=${TOPIC_USER_CONNECTION_STATE}",
-                "--kafka-new-message-topic=${TOPIC_NEW_MESSAGE}",
-                "--kafka-broker-list=${BROKER_LIST}",
-                "--kafka-security-protocol=${KAFKA_SECURITY_PROTOCOL}",
-                "--kafka-sasl-username=${KAFKA_SASL_USERNAME}",
-                "--kafka-sasl-password=${KAFKA_SASL_PASSWORD}"
-            ],
-            "envFile": "${workspaceFolder}/.env",
-            "autoAttachChildProcesses": true
-        }, {
-            "type": "node",
-            "request": "launch",
-            "name": "Launch Message Delivery MS",
-            "program": "${workspaceFolder}/services/message-delivery/message-delivery-ms.js",
-            "args": [
-                "--app-name=message-delivery",
-                "--debug",
-                "--mongo-url=${MONGO_URL}",
-                "--kafka-client-id=message-delivery-1",
-                "--kafka-consumer-group=${CONSUMER_GROUP_MESSAGE_DELIVERY}",
-                "--kafka-user-connection-state-topic=${TOPIC_USER_CONNECTION_STATE}",
-                "--kafka-send-message-topic=${TOPIC_SEND_MESSAGE}",
-                "--kafka-ack-topic=${TOPIC_ACK_MESSAGE}",
-                "--kafka-offline-message-topic=${TOPIC_OFFLINE_MESSAGE}",
-                "--service-discovery-path=${SERVICE_DISCOVERY_PATH}",
-                "--kafka-broker-list=${BROKER_LIST}",
-                "--kafka-security-protocol=${KAFKA_SECURITY_PROTOCOL}",
-                "--kafka-sasl-username=${KAFKA_SASL_USERNAME}",
-                "--kafka-sasl-password=${KAFKA_SASL_PASSWORD}"
-            ],
-            "envFile": "${workspaceFolder}/.env",
-            "autoAttachChildProcesses": true
-        }, {
-            "type": "node",
-            "request": "launch",
-            "name": "Launch Message Router MS",
-            "program": "${workspaceFolder}/services/message-router-ms/message-router-ms.js",
-            "args": [
-                "--app-name=message-router-1",
-                "--debug",
-                "--kafka-client-id=message-router-1",
-                "--kafka-consumer-group=${CONSUMER_GROUP_MESSAGE_ROUTER}",
-                "--kafka-send-message-topic=${TOPIC_SEND_MESSAGE}",
-                "--kafka-new-message-topic=${TOPIC_NEW_MESSAGE}",
-                "--kafka-ack-topic=${TOPIC_ACK_MESSAGE}",
-                "--kafka-broker-list=${BROKER_LIST}",
-                "--kafka-group-message-topic=${TOPIC_NEW_GROUP_MS}",
-                "--kafka-security-protocol=${KAFKA_SECURITY_PROTOCOL}",
-                "--kafka-sasl-username=${KAFKA_SASL_USERNAME}",
-                "--kafka-sasl-password=${KAFKA_SASL_PASSWORD}"
-            ],
-            "envFile": "${workspaceFolder}/.env",
-            "autoAttachChildProcesses": true
-        }, {
-            "type": "node",
-            "request": "launch",
-            "name": "Launch profile MS",
-            "program": "${workspaceFolder}/services/profile-ms/profile-ms.js",
-            "args": [
-                "--app-name=profile-ms-1",
-                "--debug",
-                "--port=4000",
-                "--mongo-url=${MONGO_URL}",
-                "--firebase-project-id=${FIREBASE_PROJECT_ID}",
-                "--kafka-broker-list=${BROKER_LIST}",
-                "--kafka-security-protocol=${KAFKA_SECURITY_PROTOCOL}",
-                "--kafka-sasl-username=${KAFKA_SASL_USERNAME}",
-                "--kafka-sasl-password=${KAFKA_SASL_PASSWORD}",
-                "--kafka-new-login-topic=${TOPIC_NEW_LOGIN}"
-            ],
-            "envFile": "${workspaceFolder}/.env",
-            "autoAttachChildProcesses": true
-        }, {
-            "type": "node",
-            "request": "launch",
-            "name": "Launch file MS",
-            "program": "${workspaceFolder}/services/file-ms/file-ms.js",
-            "args": [
-                "--app-name=file-ms-1",
-                "--debug",
-                "--port=4001",
-                "--mongo-url=mongodb://localhost:27017/chat",
-                "--base-upload-dir=/workspace/upload",
-                "--s3-access-key-id=${S3_ACCESS_KEY_ID}",
-                "--s3-secret-access-key=${S3_SECRET_ACCESS_KEY}",
-                "--s3-bucket-name=${S3_BUCKET_NAME}"
-            ],
-            "envFile": "${workspaceFolder}/.env",
-            "autoAttachChildProcesses": true
-        }, {
-            "type": "node",
-            "request": "launch",
-            "name": "Launch group MS",
-            "program": "${workspaceFolder}/services/group-ms/group-ms.js",
-            "args": [
-                "--app-name=group-ms-1",
-                "--debug",
-                "--port=4002",
-                "--mongo-url=mongodb://localhost:27017/chat",
-                "--json-server-port=${GROUP_MS_JSON_PORT}",
-                "--kafka-client-id=group-1",
-                "--kafka-broker-list=${BROKER_LIST}",
-                "--kafka-new-group-message-topic=${TOPIC_NEW_GROUP_MS}"
-            ],
-            "envFile": "${workspaceFolder}/.env",
-            "autoAttachChildProcesses": true
-        }, {
-            "type": "node",
-            "request": "launch",
-            "name": "Launch Group Message Router MS",
-            "program": "${workspaceFolder}/services/message-router-ms/group-message-router-ms.js",
-            "args": [
-                "--app-name=group-message-router-1",
-                "--debug",
-                "--kafka-client-id=group-message-router-1",
-                "--kafka-send-message-topic=${TOPIC_SEND_MESSAGE}",
-                "--kafka-consumer-group=${CONSUMER_GROUP_GROUP_MESSAGE_ROUTER}",
-                "--kafka-new-group-message-topic=${TOPIC_NEW_GROUP_MS}",
-                "--kafka-broker-list=${BROKER_LIST}",
-                "--mongo-url=${MONGO_URL}",
-                "--session-service-url=${SESSION_MS_HOST}:${SESSION_MS_PORT}",
-                "--group-service-url=${GROUP_MS_JSON_HOST}:${GROUP_MS_JSON_PORT}",
-                "--kafka-persistence-message-topic=${TOPIC_DB_MESSAGE}"
-            ],
-            "envFile": "${workspaceFolder}/.env",
-            "autoAttachChildProcesses": true
-        },{
-            "type": "node",
-            "request": "launch",
-            "name": "Launch notification MS",
-            "program": "${workspaceFolder}/services/notification-ms/notification-ms.js",
-            "args": [
-                "--app-name=notification-ms-1",
-                "--debug",
-                "--mongo-url=${MONGO_URL}",
-                "--firebase-admin-credential-json-path=${FIREBASE_ADMIN_CRED_JSON_PATH}",
-                "--kafka-broker-list=${BROKER_LIST}",
-                "--kafka-security-protocol=${KAFKA_SECURITY_PROTOCOL}",
-                "--kafka-sasl-username=${KAFKA_SASL_USERNAME}",
-                "--kafka-sasl-password=${KAFKA_SASL_PASSWORD}",
-                "--kafka-consumer-group=notification-ms",
-                "--kafka-new-login-topic=${TOPIC_NEW_LOGIN}",
-                "--kafka-offline-message-topic=${TOPIC_DB_MESSAGE}",
-                "--db-app-initial=${PERSISTENCE_MESSAGE_MS_INITIAL}"
-            ],
-            "envFile": "${workspaceFolder}/.env",
-            "autoAttachChildProcesses": true
-        }
-    ]
+  // Use IntelliSense to learn about possible attributes.
+  // Hover to view descriptions of existing attributes.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Launch Gateway MS",
+      "program": "${workspaceFolder}/services/connection-gateway/gateway.js",
+      "args": [
+        "--app-name=ws-gateway-1",
+        "--debug",
+        "--gateway-name=gateway-1",
+        "--kafka-client-id=gateway-1",
+        "--kafka-user-connection-state-topic=${TOPIC_USER_CONNECTION_STATE}",
+        "--kafka-new-message-topic=${TOPIC_NEW_MESSAGE}",
+        "--kafka-broker-list=${BROKER_LIST}",
+        "--kafka-security-protocol=${KAFKA_SECURITY_PROTOCOL}",
+        "--kafka-sasl-username=${KAFKA_SASL_USERNAME}",
+        "--kafka-sasl-password=${KAFKA_SASL_PASSWORD}"
+      ],
+      "envFile": "${workspaceFolder}/.env",
+      "autoAttachChildProcesses": true
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Launch Message Delivery MS",
+      "program": "${workspaceFolder}/services/message-delivery/message-delivery-ms.js",
+      "args": [
+        "--app-name=message-delivery",
+        "--debug",
+        "--mongo-url=${MONGO_URL}",
+        "--kafka-client-id=message-delivery-1",
+        "--kafka-consumer-group=${CONSUMER_GROUP_MESSAGE_DELIVERY}",
+        "--kafka-user-connection-state-topic=${TOPIC_USER_CONNECTION_STATE}",
+        "--kafka-send-message-topic=${TOPIC_SEND_MESSAGE}",
+        "--kafka-ack-topic=${TOPIC_ACK_MESSAGE}",
+        "--kafka-offline-message-topic=${TOPIC_OFFLINE_MESSAGE}",
+        "--service-discovery-path=${SERVICE_DISCOVERY_PATH}",
+        "--kafka-broker-list=${BROKER_LIST}",
+        "--kafka-security-protocol=${KAFKA_SECURITY_PROTOCOL}",
+        "--kafka-sasl-username=${KAFKA_SASL_USERNAME}",
+        "--kafka-sasl-password=${KAFKA_SASL_PASSWORD}"
+      ],
+      "envFile": "${workspaceFolder}/.env",
+      "autoAttachChildProcesses": true
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Launch Message Router MS",
+      "program": "${workspaceFolder}/services/message-router-ms/message-router-ms.js",
+      "args": [
+        "--app-name=message-router-1",
+        "--debug",
+        "--kafka-client-id=message-router-1",
+        "--kafka-consumer-group=${CONSUMER_GROUP_MESSAGE_ROUTER}",
+        "--kafka-send-message-topic=${TOPIC_SEND_MESSAGE}",
+        "--kafka-new-message-topic=${TOPIC_NEW_MESSAGE}",
+        "--kafka-ack-topic=${TOPIC_ACK_MESSAGE}",
+        "--kafka-broker-list=${BROKER_LIST}",
+        "--kafka-group-message-topic=${TOPIC_NEW_GROUP_MS}",
+        "--kafka-security-protocol=${KAFKA_SECURITY_PROTOCOL}",
+        "--kafka-sasl-username=${KAFKA_SASL_USERNAME}",
+        "--kafka-sasl-password=${KAFKA_SASL_PASSWORD}"
+      ],
+      "envFile": "${workspaceFolder}/.env",
+      "autoAttachChildProcesses": true
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Launch profile MS",
+      "program": "${workspaceFolder}/services/profile-ms/profile-ms.js",
+      "args": [
+        "--app-name=profile-ms-1",
+        "--debug",
+        "--port=4000",
+        "--mongo-url=${MONGO_URL}",
+        "--firebase-project-id=${FIREBASE_PROJECT_ID}",
+        "--kafka-broker-list=${BROKER_LIST}",
+        "--kafka-security-protocol=${KAFKA_SECURITY_PROTOCOL}",
+        "--kafka-sasl-username=${KAFKA_SASL_USERNAME}",
+        "--kafka-sasl-password=${KAFKA_SASL_PASSWORD}",
+        "--kafka-new-login-topic=${TOPIC_NEW_LOGIN}"
+      ],
+      "envFile": "${workspaceFolder}/.env",
+      "autoAttachChildProcesses": true
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Launch file MS",
+      "program": "${workspaceFolder}/services/file-ms/file-ms.js",
+      "args": [
+        "--app-name=file-ms-1",
+        "--debug",
+        "--port=4001",
+        "--mongo-url=mongodb://localhost:27017/chat",
+        "--base-upload-dir=/workspace/upload",
+        "--s3-access-key-id=${S3_ACCESS_KEY_ID}",
+        "--s3-secret-access-key=${S3_SECRET_ACCESS_KEY}",
+        "--s3-bucket-name=${S3_BUCKET_NAME}"
+      ],
+      "envFile": "${workspaceFolder}/.env",
+      "autoAttachChildProcesses": true
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Launch group MS",
+      "program": "${workspaceFolder}/services/group-ms/group-ms.js",
+      "args": [
+        "--app-name=group-ms-1",
+        "--debug",
+        "--port=4002",
+        "--mongo-url=mongodb://localhost:27017/chat",
+        "--json-server-port=${GROUP_MS_JSON_PORT}",
+        "--kafka-client-id=group-1",
+        "--kafka-broker-list=${BROKER_LIST}",
+        "--kafka-new-group-message-topic=${TOPIC_NEW_GROUP_MS}"
+      ],
+      "envFile": "${workspaceFolder}/.env",
+      "autoAttachChildProcesses": true
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Launch Group Message Router MS",
+      "program": "${workspaceFolder}/services/message-router-ms/group-message-router-ms.js",
+      "args": [
+        "--app-name=group-message-router-1",
+        "--debug",
+        "--kafka-client-id=group-message-router-1",
+        "--kafka-send-message-topic=${TOPIC_SEND_MESSAGE}",
+        "--kafka-consumer-group=${CONSUMER_GROUP_GROUP_MESSAGE_ROUTER}",
+        "--kafka-new-group-message-topic=${TOPIC_NEW_GROUP_MS}",
+        "--kafka-broker-list=${BROKER_LIST}",
+        "--mongo-url=${MONGO_URL}",
+        "--session-service-url=${SESSION_MS_HOST}:${SESSION_MS_PORT}",
+        "--group-service-url=${GROUP_MS_JSON_HOST}:${GROUP_MS_JSON_PORT}",
+        "--kafka-persistence-message-topic=${TOPIC_DB_MESSAGE}"
+      ],
+      "envFile": "${workspaceFolder}/.env",
+      "autoAttachChildProcesses": true
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Launch notification MS",
+      "program": "${workspaceFolder}/services/notification-ms/notification-ms.js",
+      "args": [
+        "--app-name=notification-ms-1",
+        "--debug",
+        "--mongo-url=${MONGO_URL}",
+        "--firebase-admin-credential-json-path=${FIREBASE_ADMIN_CRED_JSON_PATH}",
+        "--kafka-broker-list=${BROKER_LIST}",
+        "--kafka-security-protocol=${KAFKA_SECURITY_PROTOCOL}",
+        "--kafka-sasl-username=${KAFKA_SASL_USERNAME}",
+        "--kafka-sasl-password=${KAFKA_SASL_PASSWORD}",
+        "--kafka-consumer-group=notification-ms",
+        "--kafka-new-login-topic=${TOPIC_NEW_LOGIN}",
+        "--kafka-offline-message-topic=${TOPIC_DB_MESSAGE}",
+        "--db-app-initial=${PERSISTENCE_MESSAGE_MS_INITIAL}"
+      ],
+      "envFile": "${workspaceFolder}/.env",
+      "autoAttachChildProcesses": true
+    }
+  ]
 }
