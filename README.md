@@ -34,13 +34,13 @@ A chat server based on the microservice architecture to ensure high availability
         - Add, Remove Members
         - Fetch groups
 
-- Session MS: Maintaining the info about which user connected to which gateway instance.
+- Message Delivery MS: Message delivery in real time when the user is connected, syncing messages when user is offline
     - Responsibility
-        - Maintain User connection state.
-        - Route message to gateway user connected with.
-        - Retry failed message.
-        - Handle Ack message.
-        - Route message to store/push notification
+       - Maintaining User connection state.
+       - Message push in real time when a user in connected.
+       - Store message when the user is disconnected.
+       - Guaranteed message delivery to the receiver.
+       - Ability to sync message in background.
 
 - Message Router: Route the incoming `new message` to respective destination
     - Responsibility
@@ -57,16 +57,6 @@ A chat server based on the microservice architecture to ensure high availability
 - Push Notification: Deliver message to user when user is offline
     - Responsibility
         - Deliver message to offline user
-
-- Persistence Storage service: To store message until it got delivered
-    - Responsibility
-        - Store message new user is offline
-        - Deliver message as user come online
-
-- Persistence Storage Rest Endpoint: To handle rest call to fetch messages
-    - Responsibility
-        - Return stored message for a user
-
 
 ### Message Format
 
@@ -168,5 +158,13 @@ Click on the Gitpod badge it will start the fully setup development environment.
 - (Optional) Start nginx using the configuration [deployment/dev/config/nginx.config](./deployment/dev/config/nginx.config)
 
 
+
+# Resources
+To follow the update keep a eye on vartalap blogs on [blog.one9x.org](https://blog.one9x.org)
+Some of the relevent blogs are:
+- [Vartalap: Open Source Personal Messaging App](https://blog.one9x.org/vartalap/2021/04/04/vartalap-personal-messaging-app.html)
+- [Vartalap: Chat Server Architecture V1](https://blog.one9x.org/vartalap/2021/04/10/vartalap-chat-server-architecture.html)
+- [Vartalap: Chat Server Architecture V2](https://blog.one9x.org/vartalap/2021/05/22/vartalap-chat-server-architecture-v2.html)
+- [Vartalap: Chat Server Architecture V2.1](https://blog.one9x.org/vartalap/2021/06/26/vartalap-chat-server-architecture-v2-1.html)
 ## LICENSE
  [MIT](./LICENSE)
