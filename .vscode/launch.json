@@ -137,10 +137,9 @@
         "--kafka-send-message-topic=${TOPIC_SEND_MESSAGE}",
         "--kafka-consumer-group=${CONSUMER_GROUP_GROUP_MESSAGE_ROUTER}",
         "--kafka-new-group-message-topic=${TOPIC_NEW_GROUP_MS}",
+        "--kafka-ack-topic=${TOPIC_ACK_MESSAGE}",
         "--kafka-broker-list=${BROKER_LIST}",
         "--mongo-url=${MONGO_URL}",
-        "--session-service-url=${SESSION_MS_HOST}:${SESSION_MS_PORT}",
-        "--group-service-url=${GROUP_MS_JSON_HOST}:${GROUP_MS_JSON_PORT}",
         "--kafka-persistence-message-topic=${TOPIC_DB_MESSAGE}"
       ],
       "envFile": "${workspaceFolder}/.env",
@@ -162,7 +161,7 @@
         "--kafka-sasl-password=${KAFKA_SASL_PASSWORD}",
         "--kafka-consumer-group=notification-ms",
         "--kafka-new-login-topic=${TOPIC_NEW_LOGIN}",
-        "--kafka-offline-message-topic=${TOPIC_DB_MESSAGE}",
+        "--kafka-offline-message-topic=${TOPIC_OFFLINE_MESSAGE}",
         "--db-app-initial=${PERSISTENCE_MESSAGE_MS_INITIAL}"
       ],
       "envFile": "${workspaceFolder}/.env",
