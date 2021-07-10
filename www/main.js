@@ -68,11 +68,11 @@ function sendMessage(version) {
       "_v": 2.0,
       "id": get_msgid(to),
       "head": {
-        "type": "chat",
+        "type": "INDIVIDUAL",
         "to": to,
         "from": username,
         "chatid": getChatId(to), // to be deperciated, added for backward comptibility only
-        "contentType": "json",
+        "contentType": "text",
         "action": "message"
       },
       "meta": {
