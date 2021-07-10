@@ -46,22 +46,46 @@ function connect() {
   connect_socket();
 }
 
-function sendMessage() {
+function sendMessage(version) {
+  const [username] = getUserInfo();
   function getChatId(to) {
-    const [username] = getUserInfo();
     const values = [username.replace('+', ''), to.replace('+', '')].sort();
     return values.join('');
   }
   let msg = document.getElementById('msg').value;
   let to = document.getElementById('to').value;
-  let sMesgae = {
-    msgId: get_msgid(to),
-    text: msg,
-    to: to,
-    chatId: getChatId(to),
-    type: groups.filter((x) => x.groupId == to).length > 0 ? 'group' : 'text'
-  };
-  ws.send(JSON.stringify(sMesgae));
+  let sMessage;
+  if (version == 1) {
+    sMessage = {
+      msgId: get_msgid(to),
+      text: msg,
+      to: to,
+      chatId: getChatId(to),
+      type: groups.filter((x) => x.groupId == to).length > 0 ? 'group' : 'text'
+    }
+  } else {
+    sMessage = {
+      "_v": 2.0,
+      "id": get_msgid(to),
+      "head": {
+        "type": "chat",
+        "to": to,
+        "from": username,
+        "chatid": getChatId(to), // to be deperciated, added for backward comptibility only
+        "contentType": "json",
+        "action": "message"
+      },
+      "meta": {
+        "hash": "md5:hash",
+        "content_hash": "md5:hash",
+        "generate_ts": Date.now()
+      },
+      "body": {
+        "text": msg
+      }
+    }
+  }
+  ws.send(JSON.stringify(sMessage));
 }
 
 function get_msgid(to) {
@@ -106,29 +130,32 @@ function createGroup() {
     });
 }
 
-function send_ack(messages) {
+function send_ack(payload) {
   const [username] = getUserInfo();
-  const ids = JSON.parse(messages).map((x) => x.id);
-  const message = {
-    _v: 2.0,
-    id: get_msgid('abs'),
-    head: {
-      type: 'ack',
-      to: 'system',
-      from: username,
-      contentType: 'json',
-      action: 'ack'
-    },
-    meta: {
-      hash: 'md5:hash',
-      content_hash: 'md5:hash',
-      generate_ts: 123455667890
-    },
-    body: {
-      ids
+  const messages = JSON.parse(payload)
+  const acks = messages.map((msg) => {
+    return {
+      _v: 2.0,
+      id: `${msg.id}_ack`,
+      meta: {
+        "hash": "md5:hash",
+        "content_hash": "md5:hash",
+        "generate_ts": Date.now() / 1000
+      },
+      head: {
+        ...msg.head,
+        to: msg.head.from,
+        from: username,
+        action: 'ack'
+      },
+      body: {
+        ids: [msg.id]
+      }
     }
-  };
-  ws.send(JSON.stringify(message));
+  })
+  acks.forEach(ack => {
+    ws.send(JSON.stringify(ack))
+  })
   console.log('Ack sent');
 }
 
@@ -243,8 +270,10 @@ function setupUI() {
     document.getElementById('div_reg').style.display = 'none';
     document.getElementById('div_login').style.display = 'none';
     document.getElementById('div_loggedIn').style.display = 'block';
+    
+    document.getElementById('msg_submit_v2').onclick = () => sendMessage(2);
+    document.getElementById('msg_submit_v1').onclick = () => sendMessage(1);
 
-    document.getElementById('msg_submit').onclick = sendMessage;
     connect();
     document.getElementById('create_group').onclick = createGroup;
     //getGroups();

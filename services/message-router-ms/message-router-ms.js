@@ -9,7 +9,7 @@ async function prepareEventListFromKafkaTopics(context) {
     'new-message': options.kafkaNewMessageTopic,
     'send-message': options.kafkaSendMessageTopic,
     'group-message': options.kafkaGroupMessageTopic,
-    ack: options.kafkaAckTopic
+    'ack': options.kafkaAckTopic
   };
   context.events = eventName;
   context.listenerEvents = [options.kafkaNewMessageTopic];
@@ -56,15 +56,17 @@ class MessageRouterMS extends ServiceBase {
     }
     const user = message.META.to;
 
-    if (message.META.type === 'ack') {
-      const receiver = events['ack'];
-      publisher.send(receiver, { items: [message] }, message.head.from);
-    } else if (message.META.type === 'group') {
+    if (message.META.type === 'group') {
       const receiver = events['group-message'];
       publisher.send(receiver, message, user);
     } else {
-      const receiver = events['send-message'];
-      publisher.send(receiver, { items: [message] }, user);
+      if (message.META.action === 'ack') {
+        const receiver = events['ack'];
+        publisher.send(receiver, { items: [message] }, message.META.from);
+      } else {
+        const receiver = events['send-message'];
+        publisher.send(receiver, { items: [message] }, user);
+      }
     }
   }
 

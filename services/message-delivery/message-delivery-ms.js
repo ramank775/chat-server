@@ -94,7 +94,7 @@ async function prepareEventListFromKafkaTopics(context) {
     'user-connection-state': kafkaUserConnectionStateTopic,
     'send-message': kafkaSendMessageTopic,
     'offline-message': kafkaOfflineMessageTopic,
-    ack: kafkaAckTopic
+    'ack': kafkaAckTopic
   };
   context.listenerEvents = [kafkaUserConnectionStateTopic, kafkaSendMessageTopic, kafkaAckTopic];
   return context;

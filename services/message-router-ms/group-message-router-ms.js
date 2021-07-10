@@ -7,7 +7,8 @@ const kafka = require('../../libs/kafka-utils'),
 async function prepareEventListFromKafkaTopics(context) {
   const { options } = context;
   const eventName = {
-    'send-message': options.kafkaSendMessageTopic
+    'send-message': options.kafkaSendMessageTopic,
+    'ack': options.kafkaAckTopic
   };
   context.events = eventName;
   context.listenerEvents = [options.kafkaNewGroupMessageTopic];
@@ -26,7 +27,8 @@ function parseOptions(argv) {
   cmd = addMongodbOptions(cmd);
   cmd
     .option('--kafka-new-group-message-topic <new-group-message-topic>', 'Used by consumer to consume new group message for each new incoming message')
-    .option('--kafka-send-message-topic <send-message-topic>', 'Used by producer to produce new message to send message to user');
+    .option('--kafka-send-message-topic <send-message-topic>', 'Used by producer to produce new message to send message to user')
+    .option('--kafka-ack-topic <ack-topic>', 'Used by producer to produce new message for acknowledgment');
 
   return cmd.parse(argv).opts();
 }
@@ -53,17 +55,23 @@ class GroupMessageRouterMS extends ServiceBase {
       users = await this.getGroupUsers(message.META.to, message.META.from);
     }
     users = users.filter((x) => x !== message.META.from);
-    const messages = [];
-    for (let user of users) {
-      if (typeof user === 'object') {
-        user = user.username;
+    if (message.META.action == 'ack') {
+      message.META.users = users;
+      const receiver = events['ack']
+      publisher.send(receiver, {items: [message]}, message.META.from)
+    } else {
+      const messages = [];
+      for (let user of users) {
+        if (typeof user === 'object') {
+          user = user.username;
+        }
+        // Set message META property type as single so failed message to be handled by mesasge router
+        message.META = { ...message.META, to: user, users: undefined };
+        messages.push(message);
       }
-      // Set message META property type as single so failed message to be handled by mesasge router
-      message.META = { ...message.META, to: user, users: undefined };
-      messages.push(message);
+      const receiver = events['send-message'];
+      publisher.send(receiver, { items: messages });
     }
-    const receiver = events['send-message'];
-    publisher.send(receiver, { items: messages });
   }
 
   async formatMessage(message) {
