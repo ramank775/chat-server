@@ -1,0 +1,7 @@
+.theia
+.vscode
+deployment
+docs
+www
+.env*
+**.md
