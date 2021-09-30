@@ -32,6 +32,7 @@ function initDefaultOptions() {
 
 function addStandardHttpOptions(cmd) {
     cmd.option('--port <port>', 'Http port (default 8000)', (c) => parseInt(c), 8000)
+        .option('--host <host>', 'Http Server Host (default 127.0.0.1)', '127.0.0.1')
         .option('--ssl-cert <ssl-cert>', 'SSL public certificate')
         .option('--ssl-key <ssl-key>', 'SSL private key');
     return cmd;

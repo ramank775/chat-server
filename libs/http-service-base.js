@@ -17,7 +17,7 @@ class HttpServiceBase extends ServiceBase {
         const { options, log } = this.context;
         this.hapiServer = Hapi.server({
             port: options.port,
-            host: '127.0.0.1'
+            host: options.host
         });
 
         this.hapiServer.ext('onRequest', async (req, h)  => {
