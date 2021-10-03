@@ -10,11 +10,11 @@ start_kafka_server() {
 
 
 create_topic() {
-    bin/kafka-topics.sh --create --zookeeper $ZOOKER_ENDPOINT --replication-factor 1 --partitions 1  --topic $1
+    bin/kafka-topics.sh --create --bootstrap-server localhost:9092 --replication-factor 1 --partitions 1  --topic $1
 }
 
 list_topics() {
-    bin/kafka-topics.sh --list --zookeeper $ZOOKER_ENDPOINT
+    bin/kafka-topics.sh --bootstrap-server localhost:9092 --list
 }
 
 

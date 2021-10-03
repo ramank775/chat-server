@@ -6,17 +6,27 @@
   "repository": "https://github.com/ramank775/chat-server.git",
   "author": "Raman <raman.jay14@gmail.com>",
   "license": "MIT",
+  "scripts": {
+    "lint": "eslint --fix ."
+  },
   "dependencies": {
     "@hapi/hapi": "^20.0.3",
-    "@pm2/io": "^4.3.5",
+    "@pm2/io": "^5.0.0",
     "aws-sdk": "^2.824.0",
     "bluebird": "^3.7.2",
     "commander": "^5.1.0",
     "firebase-admin": "^9.1.1",
-    "kafkajs": "^1.14.0",
+    "kafkajs": "^1.15.0",
     "moment": "^2.26.0",
     "mongodb": "^3.5.8",
+    "node-fetch": "^2.6.1",
     "winston": "^3.2.1",
     "ws": "^7.4.6"
+  },
+  "devDependencies": {
+    "eslint": "^7.30.0",
+    "eslint-config-prettier": "^8.3.0",
+    "eslint-plugin-prettier": "^3.4.0",
+    "prettier": "2.3.2"
   }
 }

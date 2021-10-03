@@ -56,11 +56,11 @@ class JsonSocket extends Duplex {
    */
   _wrapSocket(socket) {
     this._socket = socket;
-    this._socket.on('close', hadError => this.emit('close', hadError));
+    this._socket.on('close', (hadError) => this.emit('close', hadError));
     this._socket.on('connect', () => this.emit('connect'));
     this._socket.on('drain', () => this.emit('drain'));
     this._socket.on('end', () => this.emit('end'));
-    this._socket.on('error', err => this.emit('error', err));
+    this._socket.on('error', (err) => this.emit('error', err));
     this._socket.on('lookup', (err, address, family, host) => this.emit('lookup', err, address, family, host)); // prettier-ignore
     this._socket.on('ready', () => this.emit('ready'));
     this._socket.on('timeout', () => this.emit('timeout'));

@@ -18,7 +18,11 @@ A chat server based on the microservice architecture to ensure high availability
         - Maintaining Web Socket Connection
         - Forwarding event like `onConnect`, `onDisconnect`, `new-message` to message broker (Kafka)
         - Sending message back to client
-  
+
+- Rest Http Gateway: It handle rest call to send messages.
+    - Responsibility
+        - Send Message to message broker.
+
 - Profile MS: Rest Api Service provides functionality like `login`, `auth`, `contact-sync` 
     - Responsibility
         - Login, Auth
@@ -30,29 +34,72 @@ A chat server based on the microservice architecture to ensure high availability
         - Add, Remove Members
         - Fetch groups
 
-- Session MS: Maintaining the info about which user connected to which gateway instance.
+- Message Delivery MS: Message delivery in real time when the user is connected, syncing messages when user is offline
     - Responsibility
-        - Maintain User connection state
+       - Maintaining User connection state.
+       - Message push in real time when a user in connected.
+       - Store message when the user is disconnected.
+       - Guaranteed message delivery to the receiver.
+       - Ability to sync message in background.
 
 - Message Router: Route the incoming `new message` to respective destination
     - Responsibility
-        - Route 1-to-1 chat message to gateway
-        - Route message to store/push notification
-        - Retry failed message
-        - Route group message to Group Message Router
+        - Parse message.
+        - Redirect message to respective destination for e.g.
+            - Route group message to Group Message Router.
 
 - Group Message Router: Route the incoming group messages to respective destination
     - Responsibility
-        - Route Group Message to respective destination
+        - Fetch group users for particular user.
+        - Update message meta with user list.
+        - Redirect Message to respective destination.
 
 - Push Notification: Deliver message to user when user is offline
     - Responsibility
         - Deliver message to offline user
 
-- Persistence Storage service: To store message until it got delivered
-    - Responsibility
-        - Store message new user is offline
-        - Deliver message as user come online
+### Message Format
+
+```json
+{
+    "_v": 2.0,
+    "id": "string",
+    "head" : {
+        "type": "chat|group|channel|bot|notification",
+        "to": "username|group_id|channel_id|bot_id",
+        "from": "username",
+        "chatid": "chatid", // to be deperciated, added for backward comptibility only
+        "contentType": "json|text|video|audio|location|form",
+        "action": "message|ack|subscribe|unsubscribe|join|leave|create|add-member|remove-member"
+    },
+    "meta": {
+        "hash": "md5:hash",
+        "content_hash": "md5:hash",
+        "generate_ts": 123455667890
+    },
+    "body": {
+        "text": "Hello this a text message",
+        "ts":123455667890
+    }
+}
+```
+
+#### Mapping with previous Message format
+
+```json
+{
+    "msgId": "id",
+    "from": "head.from",
+    "type": "head.content_type",
+    "to": "head.to",
+    "chatId": "head.to",
+    "text": "body.text",
+    "state": "n/a",
+    "module": "head.type",
+    "action": "head.action",
+    "chatType": "head.type"
+}
+```
 
 ## Directory Structure
 
@@ -111,5 +158,13 @@ Click on the Gitpod badge it will start the fully setup development environment.
 - (Optional) Start nginx using the configuration [deployment/dev/config/nginx.config](./deployment/dev/config/nginx.config)
 
 
+
+# Resources
+To follow the update keep a eye on vartalap blogs on [blog.one9x.org](https://blog.one9x.org)
+Some of the relevent blogs are:
+- [Vartalap: Open Source Personal Messaging App](https://blog.one9x.org/vartalap/2021/04/04/vartalap-personal-messaging-app.html)
+- [Vartalap: Chat Server Architecture V1](https://blog.one9x.org/vartalap/2021/04/10/vartalap-chat-server-architecture.html)
+- [Vartalap: Chat Server Architecture V2](https://blog.one9x.org/vartalap/2021/05/22/vartalap-chat-server-architecture-v2.html)
+- [Vartalap: Chat Server Architecture V2.1](https://blog.one9x.org/vartalap/2021/06/26/vartalap-chat-server-architecture-v2-1.html)
 ## LICENSE
  [MIT](./LICENSE)
