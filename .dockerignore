@@ -1,7 +1,10 @@
 .theia
 .vscode
+node_modules
 deployment
 docs
 www
 .env*
 **.md
+discovery_service.json
+.gitpod.*

@@ -1,169 +1,91 @@
 const kafka = require('../../libs/kafka-utils'),
-    {
-        ServiceBase,
-        initDefaultOptions,
-        initDefaultResources,
-        resolveEnvVariables
-    } = require('../../libs/service-base'),
-    {
-        initJsonClient
-    } = require('../../libs/json-socket-utils'),
-    asMain = (require.main === module);
+  { ServiceBase, initDefaultOptions, initDefaultResources, resolveEnvVariables } = require('../../libs/service-base'),
+  { formatMessage } = require('../../libs/message-utils'),
+  asMain = require.main === module;
 
 async function prepareEventListFromKafkaTopics(context) {
-    const { options } = context;
-    const eventName = {
-        'message-sent-failed': options.kafkaMessageSentFailedTopic,
-        'send-message-db': options.kafkaPersistenceMessageTopic,
-        'group-message': options.kafkaGroupMessageTopic
-    }
-    context.events = eventName;
-    context.listenerEvents = [
-        options.kafkaNewMessageTopic,
-        options.kafkaErrorMessageSendTopic
-    ]
-    return context;
+  const { options } = context;
+  const eventName = {
+    'new-message': options.kafkaNewMessageTopic,
+    'send-message': options.kafkaSendMessageTopic,
+    'group-message': options.kafkaGroupMessageTopic,
+    'ack': options.kafkaAckTopic
+  };
+  context.events = eventName;
+  context.listenerEvents = [options.kafkaNewMessageTopic];
+  return context;
 }
 
 async function initResources(options) {
-    const context = await initDefaultResources(options)
-        .then(prepareEventListFromKafkaTopics)
-        .then(kafka.initEventProducer)
-        .then(kafka.initEventListener)
-    return context;
+  const context = await initDefaultResources(options).then(prepareEventListFromKafkaTopics).then(kafka.initEventProducer).then(kafka.initEventListener);
+  return context;
 }
 
 function parseOptions(argv) {
-    let cmd = initDefaultOptions();
-    cmd = kafka.addStandardKafkaOptions(cmd);
-    cmd = kafka.addKafkaSSLOptions(cmd);
-    cmd.option('--kafka-error-message-send-topic <message-send-error>', 'Used by consumer to consume new message when there is error while sending a message')
-        .option('--kafka-new-message-topic <new-message-topic>', 'Used by consumer to consume new message for each new incoming message')
-        .option('--kafka-message-sent-failed-topic <message-sent-failed-topic>', 'Used by producer to produce new message for message failed to sent')
-        .option('--kafka-persistence-message-topic <persistence-message-topic>', 'Used by producer to produce new message to saved into a persistence db')
-        .option('--kafka-group-message-topic <group-message-topic>', 'Used by producer to produce new message to handle by message router')
-        .option('--message-max-retries <message-max-retries>', 'Max no of retries to deliver message (default value is 3)', (value) => parseInt(value), 3)
-        .option('--session-service-url <session-service-url>', 'URL of session service')
-    return cmd.parse(argv).opts();
+  let cmd = initDefaultOptions();
+  cmd = kafka.addStandardKafkaOptions(cmd);
+  cmd = kafka.addKafkaSSLOptions(cmd);
+  cmd
+    .option('--kafka-new-message-topic <new-message-topic>', 'Used by consumer to consume new message for each new incoming message')
+    .option('--kafka-group-message-topic <group-message-topic>', 'Used by producer to produce new message to handle by message router')
+    .option('--kafka-send-message-topic <send-message-topic>', 'Used by producer to produce new message to send message to user')
+    .option('--kafka-ack-topic <ack-topic>', 'Used by producer to produce new message for acknowledgment');
+  return cmd.parse(argv).opts();
 }
 
 class MessageRouterMS extends ServiceBase {
-    constructor(context) {
-        super(context);
-        this.maxRetryCount = this.options.messageMaxRetries;
-        this.redirectMessageMeter = this.statsClient.meter({
-            name: 'redirectMessage/sec',
-            type: 'meter'
-        });
-        this.failedMessageMeter = this.statsClient.meter({
-            name: 'failedMessage/sec',
-            type: 'meter'
-        });
-
-        this.retryMessageMeter = this.statsClient.meter({
-            name: 'retryMessage/sec',
-            type: 'meter'
-        });
-
-        this.getServerHist = this.statsClient.metric({
-            name: 'getServer',
-            type: 'histogram',
-            measurement: 'median'
-        });
+  constructor(context) {
+    super(context);
+    this.maxRetryCount = this.options.messageMaxRetries;
+    this.redirectMessageMeter = this.statsClient.meter({
+      name: 'redirectMessage/sec',
+      type: 'meter'
+    });
+  }
+  init() {
+    const { listener } = this.context;
+    listener.onMessage = async (_, message) => {
+      this.redirectMessageMeter.mark();
+      await this.redirectMessage(message);
+    };
+  }
+  async redirectMessage(message) {
+    const { publisher, events } = this.context;
+    if (!message.META.parsed) {
+      message = formatMessage(message);
     }
-    init() {
-        const { listener, listenerEvents, publisher, events } = this.context;
-        listener.onMessage = async (topic, payload) => {
-            let message;
-            if (topic === listenerEvents['error-message-sent']) {
-                message = payload.message;
-                message.META.retry = message.META.retry || 0;
-                message.META.retry += 1;
-                if (message.META.retry > this.maxRetryCount) {
-                    this.failedMessageMeter.mark();
-                    publisher.send(events['message-sent-failed'], message);
-                    return;
-                }
-                this.retryMessageMeter.mark();
-            } else {
-                message = payload;
-            }
-            this.redirectMessageMeter.mark();
-            await this.redirectMessage(message);
-        }
+    const user = message.META.to;
 
+    if (message.META.type === 'group') {
+      const receiver = events['group-message'];
+      publisher.send(receiver, message, user);
+    } else {
+      if (message.META.action === 'ack') {
+        const receiver = events['ack'];
+        publisher.send(receiver, { items: [message] }, message.META.from);
+      } else {
+        const receiver = events['send-message'];
+        publisher.send(receiver, { items: [message] }, user);
+      }
     }
-    async redirectMessage(message) {
-        const { publisher, events } = this.context;
-        if (!message.META.parsed) {
-            message = await this.formatMessage(message);
-        }
-        const user = message.META.to;
-        let receiver;
-        if(message.META.chatType === 'group') {
-            receiver = events['group-message']
-        } else {
-            const startTime = Date.now();
-            receiver = await this.getServer(user);
-            this.getServerHist.set((Date.now() - startTime));
-        }
-        publisher.send(receiver, message, user);
-    }
+  }
 
-    async formatMessage(message) {
-        const { META: meta, payload } = message;
-        const parsedPayload = JSON.parse(payload);
-        const { to, type, chatType, ...msg } = parsedPayload;
-        msg.from = meta.from;
-        msg.to = to;
-        msg.type = type;
-        msg.chatType = chatType;
-        const formattedMessage = {
-            META: { to, type, chatType, ...meta, parsed: true },
-            payload: JSON.stringify(msg)
-        }
-        return formattedMessage;
-    }
-
-    async shutdown() {
-        const { publisher, listener } = this.context;
-        await publisher.disconnect();
-        await listener.disconnect();
-    }
-
-    async getServer(user) {
-        const { events, options } = this.context;
-        const client = initJsonClient(options.sessionServiceUrl)
-        const request = new Promise((resolve, reject) => {
-            client.send({
-                func: 'get-server',
-                user
-            });
-            client.on('response', (data) => {
-                if (data.code != 200) {
-                    reject(data);
-                    return;
-                }
-                resolve(data.result)
-            });
-            client.on('error', (err) => {
-                reject(err);
-            })
-        })
-        const server = await request;
-        return server || events['send-message-db']; // if user is not online save the message to the db
-    }
+  async shutdown() {
+    const { publisher, listener } = this.context;
+    await publisher.disconnect();
+    await listener.disconnect();
+  }
 }
 
-
 if (asMain) {
-    const argv = resolveEnvVariables(process.argv);
-    const options = parseOptions(argv);
-    initResources(options)
-        .then(async context => {
-            await new MessageRouterMS(context).run()
-        }).catch(async error => {
-            console.error('Failed to initialized Message Router MS', error);
-            process.exit(1);
-        })
+  const argv = resolveEnvVariables(process.argv);
+  const options = parseOptions(argv);
+  initResources(options)
+    .then(async (context) => {
+      await new MessageRouterMS(context).run();
+    })
+    .catch(async (error) => {
+      console.error('Failed to initialized Message Router MS', error);
+      process.exit(1);
+    });
 }
