@@ -2,7 +2,6 @@ const { ServiceBase } = require('./service-base'),
   Hapi = require('@hapi/hapi');
 
 class HttpServiceBase extends ServiceBase {
-
   constructor(context) {
     super(context);
     this.hapiServer = null;

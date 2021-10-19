@@ -21,7 +21,6 @@ async function initResource(options) {
 }
 
 class GroupMs extends HttpServiceBase {
-
   constructor(context) {
     super(context);
     this.mongoClient = context.mongoClient;
