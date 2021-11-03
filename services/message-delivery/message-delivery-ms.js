@@ -132,7 +132,7 @@ class MessageDeliveryMS extends ServiceBase {
       })
         .then((res) => res.json())
         .then(({ errors }) => {
-          const failed_messages = errors.map((x) => x.messges);
+          const failed_messages = errors.map((x) => x.messages);
           // HACK: until client implements the proper ack and
           // server has rest endpoint for message sync and ack
           // remove successfully sent messages
