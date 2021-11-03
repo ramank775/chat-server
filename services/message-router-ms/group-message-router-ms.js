@@ -8,7 +8,7 @@ async function prepareEventListFromKafkaTopics(context) {
   const { options } = context;
   const eventName = {
     'send-message': options.kafkaSendMessageTopic,
-    'ack': options.kafkaAckTopic
+    ack: options.kafkaAckTopic
   };
   context.events = eventName;
   context.listenerEvents = [options.kafkaNewGroupMessageTopic];
@@ -57,15 +57,15 @@ class GroupMessageRouterMS extends ServiceBase {
     users = users.filter((x) => x !== message.META.from);
     if (message.META.action == 'ack') {
       message.META.users = users;
-      const receiver = events['ack']
-      publisher.send(receiver, {items: [message]}, message.META.from)
+      const receiver = events['ack'];
+      publisher.send(receiver, { items: [message] }, message.META.from);
     } else {
       const messages = [];
       for (let user of users) {
         if (typeof user === 'object') {
           user = user.username;
         }
-        const msg = Object.assign({}, message)
+        const msg = Object.assign({}, message);
         // Set message META property type as single so failed message to be handled by mesasge router
         msg.META = { ...msg.META, to: user, users: undefined };
         messages.push(msg);

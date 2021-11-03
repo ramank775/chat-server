@@ -13,7 +13,7 @@ async function prepareEventListFromKafkaTopics(context) {
     'user-connection-state': kafkaUserConnectionStateTopic,
     'send-message': kafkaSendMessageTopic,
     'offline-message': kafkaOfflineMessageTopic,
-    'ack': kafkaAckTopic
+    ack: kafkaAckTopic
   };
   context.listenerEvents = [kafkaUserConnectionStateTopic, kafkaSendMessageTopic, kafkaAckTopic];
   return context;
@@ -132,16 +132,17 @@ class MessageDeliveryMS extends ServiceBase {
       })
         .then((res) => res.json())
         .then(({ errors }) => {
-          const failed_messages = errors.map(x => x.messges)
-          // HACK: until client implements the proper ack and 
+          const failed_messages = errors.map((x) => x.messages);
+          // HACK: until client implements the proper ack and
           // server has rest endpoint for message sync and ack
           // remove successfully sent messages
           this.markMessagesAsSent(messages, failed_messages);
           if (!errors.length) {
             return;
           }
-          this.sendMessage({ items: failed_messages });
-        }).catch(e => {
+          this.sendMessage({ items: failed_messages.flat() });
+        })
+        .catch((e) => {
           this.log.error('Error while sending messages', e);
         });
     });
@@ -151,7 +152,7 @@ class MessageDeliveryMS extends ServiceBase {
     const messages = await this.db.getUndeliveredMessageByUser(user);
     if (!(messages && messages.length)) return;
     this.log.info(`Processing pending message for ${user}, length : ${messages.length}`);
-    
+
     const payload = messages.map((m) => {
       let { _id: _, ...msg } = m;
       msg.META.saved = true;
@@ -170,14 +171,14 @@ class MessageDeliveryMS extends ServiceBase {
     const users = new Set();
     const offline_messages = [];
     items.forEach((message) => {
-      let { to, retry = 0, saved = false } = message.META;
+      let { to, retry = -1, saved = false } = message.META;
       // If messages is already saved don't send it to offline message again
       // even if retry count exceed
       if (retry > this.maxRetryCount && !saved) {
         offline_messages.push(message);
         return;
       }
-      message.META.retry = retry++;
+      message.META.retry = ++retry;
       const user_msgs = user_mapping[to];
       if (user_msgs) {
         user_msgs.push(message);
@@ -211,34 +212,34 @@ class MessageDeliveryMS extends ServiceBase {
   async markMessagesAsSent(messages, failed_messages) {
     const flatten_failed_msgs = failed_messages.reduce((acc, item) => {
       if (!item || !(item && item.length)) return acc;
-      const user = item[0].META.to
+      const user = item[0].META.to;
       acc[user] = item.reduce((acc, msg) => {
-        acc[msg.META.id] = msg
+        acc[msg.META.id] = msg;
         return acc;
-      }, {})
-    }, {})
+      }, {});
+      return acc;
+    }, {});
 
     const delivered_messages = messages.reduce((acc, msgs) => {
       //if(!msgs || !(msgs && msgs.length)) return acc;
       if (!msgs.length) return acc;
-      const user = msgs[0].META.to
+      const user = msgs[0].META.to;
       const failed_msgs = flatten_failed_msgs[user] || {};
-
 
       acc[user] = acc[user] || [];
       const msgIds = msgs.reduce((acc, msg) => {
         if (!failed_msgs[msg.META.id]) {
-          acc.push(msg.META.id)
+          acc.push(msg.META.id);
         }
         return acc;
-      }, [])
-      acc[user].push(...msgIds)
+      }, []);
+      acc[user].push(...msgIds);
       return acc;
-    }, {})
+    }, {});
 
     Object.entries(delivered_messages).forEach(async ([user, ids]) => {
       await this.db.markMessageDeliveredByUser(user, ids);
-    })
+    });
   }
 
   async shutdown() {
@@ -251,7 +252,6 @@ class MessageDeliveryMS extends ServiceBase {
   async getServer(user) {
     return (await this.memCache.get(user)) || null;
   }
-
 }
 
 if (asMain) {

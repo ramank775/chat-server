@@ -1,7 +1,7 @@
 var ws;
 var groups = [];
 var id = 0;
-var enableAck= true;
+var enableAck = true;
 
 function getCookie(cname) {
   var name = cname + '=';
@@ -65,28 +65,28 @@ function sendMessage(version) {
       chatId: getChatId(to),
       type: 'text',
       chatType: groups.filter((x) => x.groupId == to).length > 0 ? 'group' : 'INDIVIDUAL'
-    }
+    };
   } else {
     sMessage = {
-      "_v": 2.0,
-      "id": get_msgid(to),
-      "head": {
-        "type": groups.filter((x) => x.groupId == to).length > 0 ? 'group' : 'INDIVIDUAL',
-        "to": to,
-        "from": username,
-        "chatid": getChatId(to), // to be deperciated, added for backward comptibility only
-        "contentType": "text",
-        "action": "message"
+      _v: 2.0,
+      id: get_msgid(to),
+      head: {
+        type: groups.filter((x) => x.groupId == to).length > 0 ? 'group' : 'INDIVIDUAL',
+        to: to,
+        from: username,
+        chatid: getChatId(to), // to be deperciated, added for backward comptibility only
+        contentType: 'text',
+        action: 'message'
       },
-      "meta": {
-        "hash": "md5:hash",
-        "content_hash": "md5:hash",
-        "generate_ts": Date.now()
+      meta: {
+        hash: 'md5:hash',
+        content_hash: 'md5:hash',
+        generate_ts: Date.now()
       },
-      "body": {
-        "text": msg
+      body: {
+        text: msg
       }
-    }
+    };
   }
   ws.send(JSON.stringify(sMessage));
 }
@@ -134,17 +134,17 @@ function createGroup() {
 }
 
 function send_ack(payload) {
-  if(!enableAck) return;
+  if (!enableAck) return;
   const [username] = getUserInfo();
-  const messages = JSON.parse(payload)
+  const messages = JSON.parse(payload);
   const acks = messages.map((msg) => {
     return {
       _v: 2.0,
       id: `${msg.id}_ack`,
       meta: {
-        "hash": "md5:hash",
-        "content_hash": "md5:hash",
-        "generate_ts": Date.now() / 1000
+        hash: 'md5:hash',
+        content_hash: 'md5:hash',
+        generate_ts: Date.now() / 1000
       },
       head: {
         ...msg.head,
@@ -155,11 +155,11 @@ function send_ack(payload) {
       body: {
         ids: [msg.id]
       }
-    }
-  })
-  acks.forEach(ack => {
-    ws.send(JSON.stringify(ack))
-  })
+    };
+  });
+  acks.forEach((ack) => {
+    ws.send(JSON.stringify(ack));
+  });
   console.log('Ack sent');
 }
 
@@ -274,7 +274,7 @@ function setupUI() {
     document.getElementById('div_reg').style.display = 'none';
     document.getElementById('div_login').style.display = 'none';
     document.getElementById('div_loggedIn').style.display = 'block';
-    
+
     document.getElementById('msg_submit_v2').onclick = () => sendMessage(2);
     document.getElementById('msg_submit_v1').onclick = () => sendMessage(1);
 

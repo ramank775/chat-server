@@ -9,7 +9,7 @@ async function prepareEventListFromKafkaTopics(context) {
     'new-message': options.kafkaNewMessageTopic,
     'send-message': options.kafkaSendMessageTopic,
     'group-message': options.kafkaGroupMessageTopic,
-    'ack': options.kafkaAckTopic
+    ack: options.kafkaAckTopic
   };
   context.events = eventName;
   context.listenerEvents = [options.kafkaNewMessageTopic];

@@ -132,6 +132,7 @@ Click on the Gitpod badge it will start the fully setup development environment.
 - Mongodb
 - Nginx
 - Firebase project 
+- Redis
 
 ### Steps
 - Clone the master branch of the project
