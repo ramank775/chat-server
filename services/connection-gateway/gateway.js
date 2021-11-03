@@ -88,7 +88,7 @@ class Gateway extends HttpServiceBase {
       userEvents.onConnect(user);
       ws.on('message', function (msg) {
         const message = {
-          payload: msg,
+          payload: msg.toString(),
           META: {
             from: this.user
           }
