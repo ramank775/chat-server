@@ -140,7 +140,7 @@ class MessageDeliveryMS extends ServiceBase {
           if (!errors.length) {
             return;
           }
-          this.sendMessage({ items: failed_messages });
+          this.sendMessage({ items: failed_messages.flat() });
         })
         .catch((e) => {
           this.log.error('Error while sending messages', e);
@@ -171,14 +171,14 @@ class MessageDeliveryMS extends ServiceBase {
     const users = new Set();
     const offline_messages = [];
     items.forEach((message) => {
-      let { to, retry = 0, saved = false } = message.META;
+      let { to, retry = -1, saved = false } = message.META;
       // If messages is already saved don't send it to offline message again
       // even if retry count exceed
       if (retry > this.maxRetryCount && !saved) {
         offline_messages.push(message);
         return;
       }
-      message.META.retry = retry++;
+      message.META.retry = ++retry;
       const user_msgs = user_mapping[to];
       if (user_msgs) {
         user_msgs.push(message);
@@ -217,6 +217,7 @@ class MessageDeliveryMS extends ServiceBase {
         acc[msg.META.id] = msg;
         return acc;
       }, {});
+      return acc;
     }, {});
 
     const delivered_messages = messages.reduce((acc, msgs) => {
