@@ -151,12 +151,14 @@ class ProfileMs extends HttpServiceBase {
     });
 
     this.addRoute('/user/sync', 'POST', async (req) => {
+      const username = extractInfoFromRequest(req);
       const { users = [] } = req.payload;
       const availableUsers = await this.profileCollection.find({ username: { $in: users }, isActive: true }, { projection: { _id: 0, username: 1 } }).toArray();
       const result = {};
       availableUsers.forEach((u) => {
         result[u.username] = true;
       });
+      await this.profileCollection.updateOne({ username: username }, { $set: { syncAt: new Date() } });
       return result || {};
     });
   }
