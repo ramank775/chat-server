@@ -66,16 +66,18 @@ class GroupMs extends HttpServiceBase {
         return res.response({ status: false }).code(404);
       }
       const { members } = req.payload;
-      if (!members) {
+      if (!members || !members.length) {
         return {
           status: true
         };
       }
       const newMembers = members.map((member) => ({ username: member, role: 'user' }));
       await this.groupCollection.updateOne({ _id: group._id }, { $addToSet: { members: { $each: newMembers } } });
+      const existingMembers = group.members.map(member=> member.username);
+      const receivers = [...(new Set(existingMembers.concat(members)))]
       this.sendNotification({
         sender: user,
-        receivers: members,
+        receivers: receivers,
         groupId: groupId,
         module: 'group',
         action: 'add'
