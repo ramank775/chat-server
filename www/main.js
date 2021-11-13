@@ -48,7 +48,7 @@ function connect() {
   connect_socket();
 }
 
-function sendMessage(version) {
+function sendMessage(version, medium) {
   const [username] = getUserInfo();
   function getChatId(to) {
     const values = [username.replace('+', ''), to.replace('+', '')].sort();
@@ -88,7 +88,27 @@ function sendMessage(version) {
       }
     };
   }
-  ws.send(JSON.stringify(sMessage));
+  if(medium == 'ws') {
+    sendMessageViaSocket(sMessage)
+  } else {
+    sendMessageViaRest(sMessage)
+  }
+}
+
+function sendMessageViaSocket(message) {
+  ws.send(JSON.stringify(message));
+}
+
+function sendMessageViaRest(message) {
+  fetch('/messages', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify([JSON.stringify(message)])
+  }).then(resp => resp.text())
+  .then(console.log)
+  .catch(err => {
+    console.log(err);
+  })
 }
 
 function get_msgid(to) {
@@ -275,8 +295,11 @@ function setupUI() {
     document.getElementById('div_login').style.display = 'none';
     document.getElementById('div_loggedIn').style.display = 'block';
 
-    document.getElementById('msg_submit_v2').onclick = () => sendMessage(2);
-    document.getElementById('msg_submit_v1').onclick = () => sendMessage(1);
+    document.getElementById('msg_submit_v2_ws').onclick = () => sendMessage(2, 'ws');
+    document.getElementById('msg_submit_v1_ws').onclick = () => sendMessage(1, 'ws');
+
+    document.getElementById('msg_submit_v2_rest').onclick = () => sendMessage(2, 'rest');
+    document.getElementById('msg_submit_v1_rest').onclick = () => sendMessage(1, 'rest');
 
     connect();
     document.getElementById('create_group').onclick = createGroup;

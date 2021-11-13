@@ -2,7 +2,7 @@ const webSocker = require('ws'),
   { addStandardHttpOptions, initDefaultOptions, initDefaultResources, resolveEnvVariables } = require('../../libs/service-base'),
   { HttpServiceBase } = require('../../libs/http-service-base'),
   kafka = require('../../libs/kafka-utils'),
-  { uuidv4 } = require('../../helper'),
+  { uuidv4, extractInfoFromRequest } = require('../../helper'),
   asMain = require.main === module;
 
 async function prepareListEventFromKafkaTopic(context) {
@@ -123,6 +123,21 @@ class Gateway extends HttpServiceBase {
         errors: errors
       };
     });
+
+    this.addRoute('/messages', 'post', async (req, res) => {
+      const user = extractInfoFromRequest(req, 'user');
+      const messages = req.payload;
+      messages.forEach((message) => {
+        this.messageEvents.onNewMessage({
+          payload: message,
+          META: {
+            from: user
+          }
+        });
+      })
+      return res.response().code(201);
+    })
+
     this.enablePing();
   }
 
