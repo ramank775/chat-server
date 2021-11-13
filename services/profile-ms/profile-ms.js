@@ -38,14 +38,14 @@ async function initAccessKeyCache(context) {
     const newAuthDoc = {
       username,
       accesskey: newAccessKey,
-      updatedOn: new Date().toUTCString()
+      updatedOn: new Date()
     };
     await authCollection.updateOne(
       { username },
       {
         $set: newAuthDoc,
         $setOnInsert: {
-          addedOn: new Date().toUTCString()
+          addedOn: new Date()
         }
       },
       {
