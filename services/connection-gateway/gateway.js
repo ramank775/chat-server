@@ -10,19 +10,17 @@ const webSocker = require('ws'),
   { uuidv4, shortuuid, extractInfoFromRequest } = require('../../helper'),
   asMain = require.main === module;
 
-async function prepareListEventFromKafkaTopic(context) {
+async function prepareListEvent(context) {
   const { options } = context;
   const eventName = {
-    'user-connection-state': options.kafkaUserConnectionStateTopic,
-    'new-message': options.kafkaNewMessageTopic
+    'user-connection-state': options.userConnectionStateTopic,
+    'new-message': options.newMessageTopic
   };
   context.events = eventName;
   return context;
 }
 async function initResources(options) {
-  const context = await initDefaultResources(options)
-    .then(prepareListEventFromKafkaTopic)
-    .then(kafka.initEventProducer);
+  const context = await initDefaultResources(options).then(prepareListEvent).then(kafka.initEventProducer);
 
   return context;
 }
@@ -33,18 +31,9 @@ function parseOptions(argv) {
   cmd = kafka.addStandardKafkaOptions(cmd);
   cmd = kafka.addKafkaSSLOptions(cmd);
   cmd
-    .option(
-      '--gateway-name <app-name>',
-      'Used as gateway server idenitifer for the user connected to this server, as well as the kafka topic for send message'
-    )
-    .option(
-      '--kafka-user-connection-state-topic <user-connection-state-topic>',
-      'Used by producer to produce message when a user connected/disconnected to server'
-    )
-    .option(
-      '--kafka-new-message-topic <new-message-topic>',
-      'Used by producer to produce new message for each new incoming message'
-    );
+    .option('--gateway-name <app-name>', 'Used as gateway server idenitifer for the user connected to this server, as well as the kafka topic for send message')
+    .option('--user-connection-state-topic <user-connection-state-topic>', 'Used by producer to produce message when a user connected/disconnected to server')
+    .option('--new-message-topic <new-message-topic>', 'Used by producer to produce new message for each new incoming message');
   return cmd.parse(argv).opts();
 }
 

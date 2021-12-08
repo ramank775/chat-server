@@ -74,7 +74,7 @@ function parseOptions(argv) {
   cmd = firebaseProjectOptions(cmd);
   cmd = kafka.addStandardKafkaOptions(cmd);
   cmd = kafka.addKafkaSSLOptions(cmd);
-  cmd.option('--kafka-new-login-topic <new-login-topic>', 'New login kafka topic');
+  cmd.option('--new-login-topic <new-login-topic>', 'New login topic used to produce new login events');
   return cmd.parse(argv).opts();
 }
 
@@ -92,7 +92,7 @@ class ProfileMs extends HttpServiceBase {
     this.mongoClient = context.mongoClient;
     this.profileCollection = context.mongodbClient.collection('profile');
     this.firebaseAuth = context.firebaseAuth;
-    this.newLoginTopic = this.options.kafkaNewLoginTopic;
+    this.newLoginTopic = this.options.newLoginTopic;
     this.publisher = context.publisher;
     this.accessKeyProvider = context.accessKeyProvider;
   }

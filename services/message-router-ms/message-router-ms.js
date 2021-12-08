@@ -8,24 +8,21 @@ const kafka = require('../../libs/kafka-utils'),
   { formatMessage } = require('../../libs/message-utils'),
   asMain = require.main === module;
 
-async function prepareEventListFromKafkaTopics(context) {
+async function prepareEventList(context) {
   const { options } = context;
   const eventName = {
-    'new-message': options.kafkaNewMessageTopic,
-    'send-message': options.kafkaSendMessageTopic,
-    'group-message': options.kafkaGroupMessageTopic,
-    ack: options.kafkaAckTopic
+    'new-message': options.newMessageTopic,
+    'send-message': options.sendMessageTopic,
+    'group-message': options.groupMessageTopic,
+    ack: options.ackTopic
   };
   context.events = eventName;
-  context.listenerEvents = [options.kafkaNewMessageTopic];
+  context.listenerEvents = [options.newMessageTopic];
   return context;
 }
 
 async function initResources(options) {
-  const context = await initDefaultResources(options)
-    .then(prepareEventListFromKafkaTopics)
-    .then(kafka.initEventProducer)
-    .then(kafka.initEventListener);
+  const context = await initDefaultResources(options).then(prepareEventList).then(kafka.initEventProducer).then(kafka.initEventListener);
   return context;
 }
 
@@ -34,22 +31,10 @@ function parseOptions(argv) {
   cmd = kafka.addStandardKafkaOptions(cmd);
   cmd = kafka.addKafkaSSLOptions(cmd);
   cmd
-    .option(
-      '--kafka-new-message-topic <new-message-topic>',
-      'Used by consumer to consume new message for each new incoming message'
-    )
-    .option(
-      '--kafka-group-message-topic <group-message-topic>',
-      'Used by producer to produce new message to handle by message router'
-    )
-    .option(
-      '--kafka-send-message-topic <send-message-topic>',
-      'Used by producer to produce new message to send message to user'
-    )
-    .option(
-      '--kafka-ack-topic <ack-topic>',
-      'Used by producer to produce new message for acknowledgment'
-    );
+    .option('--new-message-topic <new-message-topic>', 'Used by consumer to consume new message for each new incoming message')
+    .option('--group-message-topic <group-message-topic>', 'Used by producer to produce new message to handle by message router')
+    .option('--send-message-topic <send-message-topic>', 'Used by producer to produce new message to send message to user')
+    .option('--ack-topic <ack-topic>', 'Used by producer to produce new message for acknowledgment');
   return cmd.parse(argv).opts();
 }
 

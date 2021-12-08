@@ -13,21 +13,16 @@ const kafka = require('../../libs/kafka-utils'),
   database = require('./database'),
   asMain = require.main === module;
 
-async function prepareEventListFromKafkaTopics(context) {
+async function prepareEventList(context) {
   const { options } = context;
-  const {
-    kafkaUserConnectionStateTopic,
-    kafkaSendMessageTopic,
-    kafkaOfflineMessageTopic,
-    kafkaAckTopic
-  } = options;
+  const { userConnectionStateTopic, sendMessageTopic, offlineMessageTopic, ackTopic } = options;
   context.events = {
-    'user-connection-state': kafkaUserConnectionStateTopic,
-    'send-message': kafkaSendMessageTopic,
-    'offline-message': kafkaOfflineMessageTopic,
-    ack: kafkaAckTopic
+    'user-connection-state': userConnectionStateTopic,
+    'send-message': sendMessageTopic,
+    'offline-message': offlineMessageTopic,
+    ack: ackTopic
   };
-  context.listenerEvents = [kafkaUserConnectionStateTopic, kafkaSendMessageTopic, kafkaAckTopic];
+  context.listenerEvents = [userConnectionStateTopic, sendMessageTopic, ackTopic];
   return context;
 }
 
@@ -35,7 +30,7 @@ async function initResources(options) {
   const context = await initDefaultResources(options)
     .then(cache.initMemCache)
     .then(database.initDatabase)
-    .then(prepareEventListFromKafkaTopics)
+    .then(prepareEventList)
     .then(disoveryService.initDiscoveryService)
     .then(kafka.initEventListener)
     .then(kafka.initEventProducer);
@@ -50,28 +45,11 @@ function parseOptions(argv) {
   cmd = cache.addMemCacheOptions(cmd);
   cmd = kafka
     .addKafkaSSLOptions(cmd)
-    .option(
-      '--kafka-user-connection-state-topic <user-connection-state-topic>',
-      'Used by consumer to consume new message when a user connected/disconnected to server'
-    )
-    .option(
-      '--kafka-send-message-topic <send-message-topic>',
-      'Used by consumer to consume new message to send to user'
-    )
-    .option(
-      '--kafka-offline-message-topic <offline-message-topic>',
-      'Used by producer to produce new message for offline'
-    )
-    .option(
-      '--kafka-ack-topic <ack-topic>',
-      'Used by producer to produce new message for acknowledgment'
-    )
-    .option(
-      '--message-max-retries <message-max-retries>',
-      'Max no of retries to deliver message (default value is 3)',
-      (value) => parseInt(value),
-      3
-    );
+    .option('--user-connection-state-topic <user-connection-state-topic>', 'Used by consumer to consume new message when a user connected/disconnected to server')
+    .option('--send-message-topic <send-message-topic>', 'Used by consumer to consume new message to send to user')
+    .option('--offline-message-topic <offline-message-topic>', 'Used by producer to produce new message for offline')
+    .option('--ack-topic <ack-topic>', 'Used by producer to produce new message for acknowledgment')
+    .option('--message-max-retries <message-max-retries>', 'Max no of retries to deliver message (default value is 3)', (value) => parseInt(value), 3);
   return cmd.parse(argv).opts();
 }
 
@@ -141,7 +119,7 @@ class MessageDeliveryMS extends ServiceBase {
 
   ackMessage(items) {
     const state_ack_msgs = items.filter(msg => msg.META.action === 'state')
-    this.onMessage({items: state_ack_msgs})
+    this.onMessage({ items: state_ack_msgs })
     const map_user_message = items.reduce((mapping, msg) => {
       const user = msg.META.from;
       if (!mapping[user]) {

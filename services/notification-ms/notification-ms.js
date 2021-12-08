@@ -9,14 +9,14 @@ const kafka = require('../../libs/kafka-utils'),
   admin = require('firebase-admin'),
   asMain = require.main === module;
 
-async function prepareEventListFromKafkaTopics(context) {
+async function prepareEventList(context) {
   const { options } = context;
   const eventName = {
-    'push-notification': options.kafkaOfflineMessageTopic,
-    'new-login': options.kafkaNewLoginTopic
+    'push-notification': options.offlineMessageTopic,
+    'new-login': options.newLoginTopic
   };
   context.events = eventName;
-  context.listenerEvents = [options.kafkaOfflineMessageTopic, options.kafkaNewLoginTopic];
+  context.listenerEvents = [options.offlineMessageTopic, options.newLoginTopic];
   return context;
 }
 
@@ -33,11 +33,7 @@ async function initFirebaseAdmin(context) {
 }
 
 async function initResources(options) {
-  const context = await initDefaultResources(options)
-    .then(prepareEventListFromKafkaTopics)
-    .then(kafka.initEventListener)
-    .then(initMongoClient)
-    .then(initFirebaseAdmin);
+  const context = await initDefaultResources(options).then(prepareEventList).then(kafka.initEventListener).then(initMongoClient).then(initFirebaseAdmin);
   return context;
 }
 
@@ -46,20 +42,10 @@ function parseOptions(argv) {
   cmd = kafka.addStandardKafkaOptions(cmd);
   cmd = kafka.addKafkaSSLOptions(cmd);
   cmd = addMongodbOptions(cmd);
-  cmd.option(
-    '--kafka-offline-message-topic <offline-message-topic>',
-    'Used by producer to produce new message to send the push notification'
-  );
-  cmd.option('--kafka-new-login-topic <new-login-topic>', 'New login kafka topic');
-  cmd.option(
-    '--firebase-admin-credential-json-path <firebaes-admin-cred-file>',
-    'Path to the firebase admin credentials file'
-  );
-  cmd.option(
-    '--offline-msg-initial <offline-msg-initial>',
-    'Initial for saved messages',
-    'persistence-message'
-  );
+  cmd.option('--offline-message-topic <offline-message-topic>', 'Used by producer to produce new message to send the push notification');
+  cmd.option('--new-login-topic <new-login-topic>', 'New login kafka topic');
+  cmd.option('--firebase-admin-credential-json-path <firebaes-admin-cred-file>', 'Path to the firebase admin credentials file');
+  cmd.option('--offline-msg-initial <offline-msg-initial>', 'Initial for saved messages', 'persistence-message');
   return cmd.parse(argv).opts();
 }
 

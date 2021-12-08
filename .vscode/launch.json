@@ -13,8 +13,8 @@
         "--debug",
         "--gateway-name=gateway-1",
         "--kafka-client-id=gateway-1",
-        "--kafka-user-connection-state-topic=${TOPIC_USER_CONNECTION_STATE}",
-        "--kafka-new-message-topic=${TOPIC_NEW_MESSAGE}",
+        "--user-connection-state-topic=${TOPIC_USER_CONNECTION_STATE}",
+        "--new-message-topic=${TOPIC_NEW_MESSAGE}",
         "--kafka-broker-list=${BROKER_LIST}",
         "--kafka-security-protocol=${KAFKA_SECURITY_PROTOCOL}",
         "--kafka-sasl-username=${KAFKA_SASL_USERNAME}",
@@ -34,10 +34,10 @@
         "--mongo-url=${MONGO_URL}",
         "--kafka-client-id=message-delivery-1",
         "--kafka-consumer-group=${CONSUMER_GROUP_MESSAGE_DELIVERY}",
-        "--kafka-user-connection-state-topic=${TOPIC_USER_CONNECTION_STATE}",
-        "--kafka-send-message-topic=${TOPIC_SEND_MESSAGE}",
-        "--kafka-ack-topic=${TOPIC_ACK_MESSAGE}",
-        "--kafka-offline-message-topic=${TOPIC_OFFLINE_MESSAGE}",
+        "--user-connection-state-topic=${TOPIC_USER_CONNECTION_STATE}",
+        "--send-message-topic=${TOPIC_SEND_MESSAGE}",
+        "--ack-topic=${TOPIC_ACK_MESSAGE}",
+        "--offline-message-topic=${TOPIC_OFFLINE_MESSAGE}",
         "--service-discovery-path=${SERVICE_DISCOVERY_PATH}",
         "--kafka-broker-list=${BROKER_LIST}",
         "--kafka-security-protocol=${KAFKA_SECURITY_PROTOCOL}",
@@ -59,9 +59,9 @@
         "--debug",
         "--kafka-client-id=message-router-1",
         "--kafka-consumer-group=${CONSUMER_GROUP_MESSAGE_ROUTER}",
-        "--kafka-send-message-topic=${TOPIC_SEND_MESSAGE}",
-        "--kafka-new-message-topic=${TOPIC_NEW_MESSAGE}",
-        "--kafka-ack-topic=${TOPIC_ACK_MESSAGE}",
+        "--send-message-topic=${TOPIC_SEND_MESSAGE}",
+        "--new-message-topic=${TOPIC_NEW_MESSAGE}",
+        "--ack-topic=${TOPIC_ACK_MESSAGE}",
         "--kafka-broker-list=${BROKER_LIST}",
         "--kafka-group-message-topic=${TOPIC_NEW_GROUP_MS}",
         "--kafka-security-protocol=${KAFKA_SECURITY_PROTOCOL}",
@@ -86,7 +86,7 @@
         "--kafka-security-protocol=${KAFKA_SECURITY_PROTOCOL}",
         "--kafka-sasl-username=${KAFKA_SASL_USERNAME}",
         "--kafka-sasl-password=${KAFKA_SASL_PASSWORD}",
-        "--kafka-new-login-topic=${TOPIC_NEW_LOGIN}"
+        "--new-login-topic=${TOPIC_NEW_LOGIN}"
       ],
       "envFile": "${workspaceFolder}/.env",
       "autoAttachChildProcesses": true
@@ -122,7 +122,7 @@
         "--json-server-port=${GROUP_MS_JSON_PORT}",
         "--kafka-client-id=group-1",
         "--kafka-broker-list=${BROKER_LIST}",
-        "--kafka-new-group-message-topic=${TOPIC_NEW_GROUP_MS}"
+        "--new-group-message-topic=${TOPIC_NEW_GROUP_MS}"
       ],
       "envFile": "${workspaceFolder}/.env",
       "autoAttachChildProcesses": true
@@ -136,13 +136,13 @@
         "--app-name=group-message-router-1",
         "--debug",
         "--kafka-client-id=group-message-router-1",
-        "--kafka-send-message-topic=${TOPIC_SEND_MESSAGE}",
+        "--send-message-topic=${TOPIC_SEND_MESSAGE}",
         "--kafka-consumer-group=${CONSUMER_GROUP_GROUP_MESSAGE_ROUTER}",
-        "--kafka-new-group-message-topic=${TOPIC_NEW_GROUP_MS}",
+        "--new-group-message-topic=${TOPIC_NEW_GROUP_MS}",
         "--kafka-ack-topic=${TOPIC_ACK_MESSAGE}",
         "--kafka-broker-list=${BROKER_LIST}",
         "--mongo-url=${MONGO_URL}",
-        "--kafka-persistence-message-topic=${TOPIC_DB_MESSAGE}"
+        "--persistence-message-topic=${TOPIC_DB_MESSAGE}"
       ],
       "envFile": "${workspaceFolder}/.env",
       "autoAttachChildProcesses": true
@@ -162,8 +162,8 @@
         "--kafka-sasl-username=${KAFKA_SASL_USERNAME}",
         "--kafka-sasl-password=${KAFKA_SASL_PASSWORD}",
         "--kafka-consumer-group=notification-ms",
-        "--kafka-new-login-topic=${TOPIC_NEW_LOGIN}",
-        "--kafka-offline-message-topic=${TOPIC_OFFLINE_MESSAGE}",
+        "--new-login-topic=${TOPIC_NEW_LOGIN}",
+        "--offline-message-topic=${TOPIC_OFFLINE_MESSAGE}",
         "--db-app-initial=${PERSISTENCE_MESSAGE_MS_INITIAL}"
       ],
       "envFile": "${workspaceFolder}/.env",

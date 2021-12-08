@@ -1,9 +1,9 @@
 const {
-    initDefaultOptions,
-    initDefaultResources,
-    addStandardHttpOptions,
-    resolveEnvVariables
-  } = require('../../libs/service-base'),
+  initDefaultOptions,
+  initDefaultResources,
+  addStandardHttpOptions,
+  resolveEnvVariables
+} = require('../../libs/service-base'),
   { HttpServiceBase } = require('../../libs/http-service-base'),
   { addMongodbOptions, initMongoClient } = require('../../libs/mongo-utils'),
   { uuidv4, shortuuid, extractInfoFromRequest } = require('../../helper'),
@@ -17,10 +17,7 @@ function parseOptions(argv) {
   cmd = addMongodbOptions(cmd);
   cmd = kafka.addStandardKafkaOptions(cmd);
   cmd = kafka.addKafkaSSLOptions(cmd);
-  cmd = cmd.option(
-    '--kafka-new-group-message-topic <new-group-message-topic>',
-    'Used by consumer to consume new group message for each new incoming message'
-  );
+  cmd = cmd.option('--new-group-message-topic <new-group-message-topic>', 'Used by consumer to consume new group message for each new incoming message');
   return cmd.parse(argv).opts();
 }
 

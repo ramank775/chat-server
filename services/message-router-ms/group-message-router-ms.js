@@ -9,23 +9,19 @@ const kafka = require('../../libs/kafka-utils'),
   { formatMessage } = require('../../libs/message-utils'),
   asMain = require.main === module;
 
-async function prepareEventListFromKafkaTopics(context) {
+async function prepareEventList(context) {
   const { options } = context;
   const eventName = {
-    'send-message': options.kafkaSendMessageTopic,
-    ack: options.kafkaAckTopic
+    'send-message': options.sendMessageTopic,
+    ack: options.ackTopic
   };
   context.events = eventName;
-  context.listenerEvents = [options.kafkaNewGroupMessageTopic];
+  context.listenerEvents = [options.newGroupMessageTopic];
   return context;
 }
 
 async function initResources(options) {
-  const context = await initDefaultResources(options)
-    .then(initMongoClient)
-    .then(prepareEventListFromKafkaTopics)
-    .then(kafka.initEventProducer)
-    .then(kafka.initEventListener);
+  const context = await initDefaultResources(options).then(initMongoClient).then(prepareEventList).then(kafka.initEventProducer).then(kafka.initEventListener);
   return context;
 }
 
@@ -35,18 +31,9 @@ function parseOptions(argv) {
   cmd = kafka.addKafkaSSLOptions(cmd);
   cmd = addMongodbOptions(cmd);
   cmd
-    .option(
-      '--kafka-new-group-message-topic <new-group-message-topic>',
-      'Used by consumer to consume new group message for each new incoming message'
-    )
-    .option(
-      '--kafka-send-message-topic <send-message-topic>',
-      'Used by producer to produce new message to send message to user'
-    )
-    .option(
-      '--kafka-ack-topic <ack-topic>',
-      'Used by producer to produce new message for acknowledgment'
-    );
+    .option('--new-group-message-topic <new-group-message-topic>', 'Used by consumer to consume new group message for each new incoming message')
+    .option('--send-message-topic <send-message-topic>', 'Used by producer to produce new message to send message to user')
+    .option('--ack-topic <ack-topic>', 'Used by producer to produce new message for acknowledgment');
 
   return cmd.parse(argv).opts();
 }
