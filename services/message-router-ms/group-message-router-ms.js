@@ -42,7 +42,7 @@ class GroupMessageRouterMS extends ServiceBase {
   init() {
     const { listener } = this.context;
     listener.onMessage = async (_, message) => {
-      await this.redirectMessage(message);
+      this.redirectMessage(message);
     };
   }
   async redirectMessage(message) {

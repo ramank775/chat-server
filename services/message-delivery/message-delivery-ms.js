@@ -70,27 +70,16 @@ class MessageDeliveryMS extends ServiceBase {
             const { action, user, server } = value;
             switch (action) {
               case 'connect':
-                {
-                  await this.memCache.set(user, server);
-                  this.sendPendingMessage(user);
-                  this.userConnectedCounter.inc(1);
-                }
+                this.onConnect(user, server)
                 break;
               case 'disconnect': {
-                const exitingServer = await this.memCache.get(user);
-                if (exitingServer == server) {
-                  await this.memCache.del(user);
-                  this.userConnectedCounter.dec(1);
-                }
+                this.onDisconnect(user, server)
               }
             }
           }
           break;
         case events['send-message']:
-          {
-            await this.db.save(value.items);
-            await this.sendMessage(value);
-          }
+          this.onMessage(value)
           break;
         case events['ack']:
           {
@@ -100,6 +89,25 @@ class MessageDeliveryMS extends ServiceBase {
           break;
       }
     };
+  }
+
+  async onConnect(user, server) {
+    await this.memCache.set(user, server);
+    this.sendPendingMessage(user);
+    this.userConnectedCounter.inc(1);
+  }
+
+  async onDisconnect(user, server) {
+    const exitingServer = await this.memCache.get(user);
+    if (exitingServer == server) {
+      await this.memCache.del(user);
+      this.userConnectedCounter.dec(1);
+    }
+  }
+
+  async onMessage(value) {
+    this.db.save(value.items);
+    await this.sendMessage(value);
   }
 
   ackMessage(items) {
@@ -117,10 +125,9 @@ class MessageDeliveryMS extends ServiceBase {
   }
 
   async sendMessage(value) {
-    const { events, publisher } = this.context;
     const { online, offline } = await this.createMessageGroup(value);
 
-    if (offline.length) publisher.send(events['offline-message'], offline);
+    if (offline.length) this.sendOfflineMessage(offline);
 
     Object.keys(online).forEach(async (key) => {
       const messages = online[key];
@@ -146,6 +153,11 @@ class MessageDeliveryMS extends ServiceBase {
           this.log.error('Error while sending messages', e);
         });
     });
+  }
+
+  async sendOfflineMessage(messages) {
+    const { events, publisher } = this.context;
+    publisher.send(events['offline-message'], messages);
   }
 
   async sendPendingMessage(user) {

@@ -93,6 +93,11 @@ function sendMessage(version, medium) {
   } else {
     sendMessageViaRest(sMessage)
   }
+  const msgSpace = document.getElementById('message');
+  const newMsgItem = document.createElement('li');
+  newMsgItem.appendChild(document.createTextNode("Send at "+ (Date.now())))
+  newMsgItem.appendChild(document.createTextNode(JSON.stringify(sMessage)));
+  msgSpace.appendChild(newMsgItem);
 }
 
 function sendMessageViaSocket(message) {
@@ -202,6 +207,7 @@ function connect_socket() {
 
       console.log(e.data);
       send_ack(e.data);
+      newMsgItem.appendChild(document.createTextNode("Receiver at "+ (Date.now())))
       newMsgItem.appendChild(document.createTextNode(e.data));
       msgSpace.appendChild(newMsgItem);
       console.log('echo from server : ' + e.data);

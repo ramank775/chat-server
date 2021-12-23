@@ -44,12 +44,12 @@ class MessageRouterMS extends ServiceBase {
   }
   init() {
     const { listener } = this.context;
-    listener.onMessage = async (_, message) => {
+    listener.onMessage = (_, message) => {
       this.redirectMessageMeter.mark();
-      await this.redirectMessage(message);
+      this.redirectMessage(message);
     };
   }
-  async redirectMessage(message) {
+  redirectMessage(message) {
     const { publisher, events } = this.context;
     if (!message.META.parsed) {
       message = formatMessage(message);
