@@ -32,9 +32,27 @@ function getUserInfo() {
   return [username, accesskey];
 }
 
-function login(username, accesskey) {
-  setCookie('user', username, 1000);
-  setCookie('accesskey', accesskey, 1000);
+async function login(username, token) {
+  return fetch('/login', {
+    method: 'POST',
+    headers: {
+      'token': token,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ username, notificationToken: 'testing-token' })
+  }).then(res => {
+    if (res.ok) {
+      return res.json()
+    }
+    throw 'Login failed'
+  })
+    .then((res) => {
+      setCookie('user', username, 1000);
+      setCookie('accesskey', res.accesskey, 1000);
+      setCookie('token', token, 1000);
+    }).catch(err => {
+      console.log(err);
+    });
 }
 
 function isLogin() {
@@ -88,14 +106,14 @@ function sendMessage(version, medium) {
       }
     };
   }
-  if(medium == 'ws') {
+  if (medium == 'ws') {
     sendMessageViaSocket(sMessage)
   } else {
     sendMessageViaRest(sMessage)
   }
   const msgSpace = document.getElementById('message');
   const newMsgItem = document.createElement('li');
-  newMsgItem.appendChild(document.createTextNode("Send at "+ (Date.now())))
+  newMsgItem.appendChild(document.createTextNode("Send at " + (Date.now())))
   newMsgItem.appendChild(document.createTextNode(JSON.stringify(sMessage)));
   msgSpace.appendChild(newMsgItem);
 }
@@ -107,13 +125,13 @@ function sendMessageViaSocket(message) {
 function sendMessageViaRest(message) {
   fetch('/messages', {
     method: 'POST',
-    headers: {'Content-Type': 'application/json'},
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify([JSON.stringify(message)])
   }).then(resp => resp.text())
-  .then(console.log)
-  .catch(err => {
-    console.log(err);
-  })
+    .then(console.log)
+    .catch(err => {
+      console.log(err);
+    })
 }
 
 function get_msgid(to) {
@@ -207,7 +225,7 @@ function connect_socket() {
 
       console.log(e.data);
       send_ack(e.data);
-      newMsgItem.appendChild(document.createTextNode("Receiver at "+ (Date.now())))
+      newMsgItem.appendChild(document.createTextNode("Receiver at " + (Date.now())))
       newMsgItem.appendChild(document.createTextNode(e.data));
       msgSpace.appendChild(newMsgItem);
       console.log('echo from server : ' + e.data);
@@ -227,77 +245,19 @@ function connect_socket() {
 
 function setupUI() {
   if (!isLogin()) {
-    document.getElementById('div_reg').style.display = 'block';
     document.getElementById('div_login').style.display = 'block';
     document.getElementById('div_loggedIn').style.display = 'none';
-    let isAvailable = false;
-    document.getElementById('reg_username').onchange = (event) => {
-      if (event.target.value && event.target.value.length > 4) {
-        fetch('/exist', {
-          method: 'post',
-          headers: new Headers({
-            'Content-Type': 'application/json'
-          }),
-          body: JSON.stringify({ username: event.target.value })
-        })
-          .then((response) => response.json())
-          .then(({ status }) => {
-            isAvailable = !status;
-            document.getElementById('reg_submit').style.display = !status ? 'block' : 'none';
-          });
-      }
-    };
-    let isRegSubmit = false;
-    document.getElementById('reg_submit').onclick = async (event) => {
-      if (!isAvailable) return;
-      let values = {
-        name: document.getElementById('reg_name').value,
-        username: document.getElementById('reg_username').value,
-        secretPhase: document.getElementById('reg_password').value
-      };
-      fetch('/register', {
-        method: 'post',
-        body: JSON.stringify(values),
-        headers: new Headers({
-          'Content-Type': 'application/json'
-        })
-      })
-        .then((res) => res.json())
-        .then((res) => {
-          login(res.username, res.accesskey);
-          setupUI();
-        });
-    };
 
     document.getElementById('login_submit').onclick = async (event) => {
       const username = document.getElementById('login_username').value;
-      const secretPhase = document.getElementById('login_password').value;
-      if (!(username && secretPhase)) {
+      if (!username) {
         return;
       }
-      login(username, 'test');
-      setupUI();
-      // fetch('/login', {
-      //     method: 'post',
-      //     body: JSON.stringify({
-      //         username,
-      //         secretPhase
-      //     }),
-      //     headers: new Headers({
-      //         'Content-Type': 'application/json'
-      //     })
-      // }).then(res => res.json())
-      //     .then(res => {
-      //         if (!res.status) {
-      //             alert('Loggin failed');
-      //             return;
-      //         }
-      //         login(res.username, res.accesskey);
-      //         setupUI();
-      //     })
+      login(username, 'test').then(() => {
+        setupUI();
+      });
     };
   } else {
-    document.getElementById('div_reg').style.display = 'none';
     document.getElementById('div_login').style.display = 'none';
     document.getElementById('div_loggedIn').style.display = 'block';
 

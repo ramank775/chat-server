@@ -92,9 +92,6 @@ class ProfileMs extends HttpServiceBase {
       const username = extractInfoFromRequest(req, 'user');
       const accesskey = extractInfoFromRequest(req, 'accesskey');
       const token = extractInfoFromRequest(req, 'token');
-      if (this.options.debug && accesskey == 'test') {
-        return res.response({}).code(200);
-      }
       const accessKeyDb = await this.accessKeyProvider.get(username);
       if (accesskey != accessKeyDb) {
         return res.response({}).code(401);
@@ -126,7 +123,7 @@ class ProfileMs extends HttpServiceBase {
         const profile = {
           username,
           uid: result.uid,
-          addedOn: new Date().toUTCString(),
+          addedOn: new Date(),
           isActive: true
         };
         await this.profileCollection.insertOne(profile);
@@ -169,6 +166,9 @@ class ProfileMs extends HttpServiceBase {
   }
 
   async verify(accesskey) {
+    if (this.options.debug && accesskey == 'test') {
+      return { uid: uuidv4() };
+    }
     const decodedToken = await this.firebaseAuth.verifyIdToken(accesskey);
     return decodedToken;
   }
