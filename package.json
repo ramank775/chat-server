@@ -1,6 +1,6 @@
 {
   "name": "chat-server",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "description": "A chat server based on the microservice architecture to ensure high availability, high throughput, horizontal scalability using Kafka",
   "main": "",
   "repository": "https://github.com/ramank775/chat-server.git",
@@ -20,6 +20,7 @@
     "moment": "^2.29.1",
     "mongodb": "^4.1.3",
     "node-fetch": "^2.6.1",
+    "short-uuid": "^4.2.0",
     "winston": "^3.3.3",
     "ws": "^8.2.3"
   },

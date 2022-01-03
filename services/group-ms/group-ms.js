@@ -1,7 +1,7 @@
 const { initDefaultOptions, initDefaultResources, addStandardHttpOptions, resolveEnvVariables } = require('../../libs/service-base'),
   { HttpServiceBase } = require('../../libs/http-service-base'),
   { addMongodbOptions, initMongoClient } = require('../../libs/mongo-utils'),
-  { uuidv4, extractInfoFromRequest } = require('../../helper'),
+  { uuidv4, shortuuid,extractInfoFromRequest } = require('../../helper'),
   { formatMessage } = require('../../libs/message-utils'),
   kafka = require('../../libs/kafka-utils'),
   asMain = require.main === module;
@@ -37,7 +37,7 @@ class GroupMs extends HttpServiceBase {
         name,
         members: [],
         profilePic,
-        addedOn: new Date().toUTCString()
+        addedOn: new Date()
       };
       if (members.indexOf(user) == -1) {
         members.push(user);
@@ -47,11 +47,13 @@ class GroupMs extends HttpServiceBase {
       });
       await this.groupCollection.insertOne(payload);
       this.sendNotification({
-        sender: user,
-        receivers: members,
+        from: user,
+        to: members,
         groupId: payload.groupId,
-        module: 'group',
-        action: 'add'
+        action: 'add',
+        body: {
+          added: payload.members
+        }
       });
       return {
         groupId: payload.groupId
@@ -76,11 +78,13 @@ class GroupMs extends HttpServiceBase {
       const existingMembers = group.members.map(member=> member.username);
       const receivers = [...(new Set(existingMembers.concat(members)))]
       this.sendNotification({
-        sender: user,
-        receivers: receivers,
+        from: user,
+        to: receivers,
         groupId: groupId,
-        module: 'group',
-        action: 'add'
+        action: 'add',
+        body: {
+          added: newMembers
+        }
       });
       return { status: true };
     });
@@ -117,11 +121,13 @@ class GroupMs extends HttpServiceBase {
         }
       }
       this.sendNotification({
-        sender: user,
-        receivers: group.members.map((u) => u.username),
+        from: user,
+        to: group.members.map((u) => u.username),
         groupId: groupId,
-        module: 'group',
-        action: 'remove'
+        action: 'remove',
+        body: {
+          removed: [member]
+        }
       });
       return {
         status: true
@@ -160,26 +166,37 @@ class GroupMs extends HttpServiceBase {
     });
   }
 
+  /**
+   * Send Group action update to all group members
+   * @param {{from: string, to: string[], groupId: string, action: string; body: unknown}} notification 
+   */
   sendNotification(notification) {
     const { kafkaNewGroupMessageTopic } = this.options;
-    const { sender, receivers, groupId, ...body } = notification;
-    const type = 'group';
-    body.from = sender;
-    body.to = groupId;
-    body.type = 'notification';
-    body.text = ''; // Added just to make app works fine TODO: remove this when current version of app is killed
-    const payload = {
-      META: {
-        to: groupId,
-        users: receivers,
-        from: sender,
-        category: 'notification',
-        chatType: type
+    const payload = JSON.stringify({
+      _v: 2.0,
+      id: shortuuid(),
+      meta: {
+        createdAt: Date.now()
       },
-      payload: JSON.stringify(body)
-    };
-    const message = formatMessage(payload);
-    this.publisher.send(kafkaNewGroupMessageTopic, message, sender);
+      head: {
+        type: 'group',
+        to: notification.groupId,
+        from: notification.from,
+        chatId: notification.groupId,
+        contentType: 'notification',
+        action: notification.action
+      },
+      body: notification.body
+    })
+    const msg = {
+      META: {
+        from: notification.from,
+        users: notification.to
+      },
+      payload: payload
+    }
+    const message = formatMessage(msg);
+    this.publisher.send(kafkaNewGroupMessageTopic, message, notification.from);
   }
   async shutdown() {
     await super.shutdown();
