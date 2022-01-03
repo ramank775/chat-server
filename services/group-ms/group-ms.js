@@ -190,7 +190,8 @@ class GroupMs extends HttpServiceBase {
     })
     const msg = {
       META: {
-        from: notification.from
+        from: notification.from,
+        users: notification.to
       },
       payload: payload
     }
