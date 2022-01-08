@@ -1,3 +1,4 @@
+const { extractInfoFromRequest, shortuuid } = require('../helper');
 const { ServiceBase } = require('./service-base'),
   Hapi = require('@hapi/hapi');
 
@@ -10,18 +11,21 @@ class HttpServiceBase extends ServiceBase {
   }
 
   async init() {
-    const { options, log } = this.context;
+    const { options, log, asyncStorage } = this.context;
     this.hapiServer = Hapi.server({
       port: options.port,
       host: options.host
     });
 
     this.hapiServer.ext('onRequest', async (req, h) => {
-      const meter = this.meterDict[req.url.pathname];
-      if (meter) meter.mark();
-      req.startTime = Date.now();
-      log.info(`new request : ${req.url}`);
-      return h.continue;
+      const track_id = extractInfoFromRequest(req, 'x-request-id') || shortuuid();
+      return asyncStorage.run(track_id, () => {
+        const meter = this.meterDict[req.url.pathname];
+        if (meter) meter.mark();
+        req.startTime = Date.now();
+        log.info(`new request : ${req.url}`);
+        return h.continue;
+      })
     });
 
     this.hapiServer.ext('onPreResponse', (req, h) => {

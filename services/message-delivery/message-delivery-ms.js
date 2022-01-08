@@ -1,3 +1,5 @@
+const { shortuuid } = require('../../helper');
+
 const kafka = require('../../libs/kafka-utils'),
   {
     ServiceBase,
@@ -152,6 +154,8 @@ class MessageDeliveryMS extends ServiceBase {
   }
 
   async sendMessage(value) {
+    const { asyncStorage } = this.context;
+    const track_id = asyncStorage.getStore() || shortuuid()
     const { online, offline } = await this.createMessageGroup(value);
 
     if (offline.length) this.sendOfflineMessage(offline);
@@ -162,7 +166,10 @@ class MessageDeliveryMS extends ServiceBase {
       fetch(`${url}/send`, {
         method: 'post',
         body: JSON.stringify({ items: messages }),
-        headers: { 'Content-Type': 'application/json' }
+        headers: {
+          'Content-Type': 'application/json',
+          'x-request-id': track_id
+        }
       })
         .then((res) => res.json())
         .then(({ errors }) => {

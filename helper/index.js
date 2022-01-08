@@ -13,7 +13,7 @@ function shortuuid() {
 }
 
 function extractInfoFromRequest(req, key = 'user', defaultValue = null) {
-  return req.headers[key] || req.state[key] || defaultValue;
+  return req.headers[key] || (req.state && req.state[key]) || defaultValue;
 }
 
 function getUTCEpoch() {

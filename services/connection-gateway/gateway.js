@@ -104,6 +104,7 @@ class Gateway extends HttpServiceBase {
     await super.init();
     const wss = new webSocker.Server({ server: this.hapiServer.listener });
     this.context.wss = wss;
+    const { asyncStorage } = this.context
     const { userEvents, messageEvents, userSocketMapping } = this;
     wss.on('connection', (ws, request) => {
       const user = this.getUserInfoFromRequest(request);
@@ -111,7 +112,10 @@ class Gateway extends HttpServiceBase {
       ws.user = user;
       userEvents.onConnect(user);
       ws.on('message', function (msg) {
-        messageEvents.onNewMessage(msg.toString(), this.user);
+        const trackId = shortuuid()
+        asyncStorage.run(trackId, () => {
+          messageEvents.onNewMessage(msg.toString(), this.user);
+        });
       });
       ws.on('close', function (code, reason) {
         userEvents.onDisconnect(this.user);
@@ -146,7 +150,7 @@ class Gateway extends HttpServiceBase {
             saved: m.saved,
             retry: m.retry
           }));
-          this.log.info(`Message delivery to user`, {latencies: latencies})
+          this.log.info(`Message delivery to user`, { latencies: latencies })
         } else {
           errors.push({
             messages,

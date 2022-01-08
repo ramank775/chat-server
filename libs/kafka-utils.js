@@ -1,5 +1,6 @@
 const fs = require('fs'),
-  { Kafka, logLevel } = require('kafkajs');
+  { Kafka, logLevel } = require('kafkajs'),
+  { shortuuid } = require('../helper');
 
 /**
  * Add standard kafka options
@@ -303,7 +304,7 @@ function getKafkaInstance(context) {
 }
 
 async function createKakfaProducer(context) {
-  const { log, options } = context;
+  const { log, options, asyncStorage } = context;
   const kafka = getKafkaInstance(context);
   const producerOptions = parseKakfaProducerOptions(options);
   const producer = kafka.producer(producerOptions);
@@ -314,20 +315,33 @@ async function createKakfaProducer(context) {
   };
 
   kafkaProducer.send = async function (topic, message, key) {
+    const track_id = asyncStorage.getStore() || shortuuid()
     try {
       const start = Date.now();
-      const response = await this._producer.send({
+      let response = await this._producer.send({
         topic: topic,
         messages: [
           {
             key: key,
             value: JSON.stringify(message),
-            acks: 1
+            acks: 1,
+            headers: {
+              track_id: track_id
+            }
           }
         ]
       });
       const elasped = Date.now() - start
-      log.info(`Sucessfully produced message`, { response, produceIn: elasped });
+      if (response.length) {
+        response = response[0]
+      }
+      log.info(`Sucessfully produced message`, {
+        topic,
+        partition: response.partition,
+        offset: response.baseOffset,
+        key,
+        produceIn: elasped
+      });
     } catch (error) {
       log.error(`Error while producing message`, { error: error });
       throw error;
@@ -347,7 +361,7 @@ async function createKakfaProducer(context) {
 }
 
 async function createKafkaConsumer(context) {
-  const { listenerEvents, options, log } = context;
+  const { listenerEvents, options, log, asyncStorage } = context;
   const kafka = getKafkaInstance(context);
   const consumerOptions = parseKakfaConsumerOptions(options);
   const consumer = kafka.consumer(consumerOptions);
@@ -394,22 +408,25 @@ async function createKafkaConsumer(context) {
       await consumer.run({
         eachMessage: ({ topic, partition, message }) => {
           const start = Date.now();
-          const data = {
-            key: message.key ? message.key.toString() : null,
-            value: JSON.parse(message.value.toString())
-          };
-          const logInfo = {
-            topic,
-            partition,
-            offset: message.offset,
-            key: data.key,
-          };
-          log.info(`new data received`, {...logInfo, ...(data.value.META || {})});
-          const sConsume = Date.now();
-          kafkaConsumer.onMessage(topic, data.value);
-          logInfo.latency = Date.now() - start;
-          logInfo.consume_latency = Date.now() - sConsume;
-          log.info('message consumed', logInfo);
+          const track_id = message.headers.track_id.toString() || shortuuid()
+          asyncStorage.run(track_id, () => {
+            const data = {
+              key: message.key ? message.key.toString() : null,
+              value: JSON.parse(message.value.toString()),
+            };
+            const logInfo = {
+              topic,
+              partition,
+              offset: message.offset,
+              key: data.key
+            };
+            log.info(`new data received`, { ...logInfo, ...(data.value.META || {}) });
+            const sConsume = Date.now();
+            kafkaConsumer.onMessage(topic, data.value);
+            logInfo.latency = Date.now() - start;
+            logInfo.consume_latency = Date.now() - sConsume;
+            log.info('message consumed', logInfo);
+          });
         }
       });
     } catch (error) {

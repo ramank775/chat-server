@@ -1,10 +1,13 @@
 const commander = require('commander'),
   logger = require('./logger'),
-  statsClient = require('./stats-client');
+  statsClient = require('./stats-client'),
+  { AsyncLocalStorage } = require('async_hooks');
 
 async function initDefaultResources(options) {
+  const asyncStorage = new AsyncLocalStorage();
   let ctx = {
-    options: options || {}
+    options: options || {},
+    asyncStorage: asyncStorage
   };
   ctx = await initLogger(ctx);
   ctx = await statsClient.initStatsClient(ctx);
@@ -12,7 +15,7 @@ async function initDefaultResources(options) {
 }
 
 async function initLogger(context) {
-  context.log = logger.init(context.options);
+  context.log = logger.init(context.options, context.asyncStorage);
   return context;
 }
 
