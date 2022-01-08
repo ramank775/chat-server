@@ -392,18 +392,28 @@ async function createKafkaConsumer(context) {
     try {
       log.info(`Running consumer`);
       await consumer.run({
-        eachMessage: ({ topic, message }) => {
+        eachMessage: ({ topic, partition, message }) => {
+          const start = Date.now();
           const data = {
             key: message.key ? message.key.toString() : null,
             value: JSON.parse(message.value.toString())
           };
-          const logInfo = { ...message, key: data.key, value: { META: data.value.META } };
-          log.info(`new data received`, logInfo);
+          const logInfo = {
+            topic,
+            partition,
+            offset: message.offset,
+            key: data.key,
+          };
+          log.info(`new data received`, {...logInfo, ...(data.value.META || {})});
+          const sConsume = Date.now();
           kafkaConsumer.onMessage(topic, data.value);
+          logInfo.latency = Date.now() - start;
+          logInfo.consume_latency = Date.now() - sConsume;
+          log.info('message consumed', logInfo);
         }
       });
     } catch (error) {
-      log.error(`Error while running consumer ${error}`, {error});
+      log.error(`Error while running consumer ${error}`, { error });
     }
   }, 500);
 
