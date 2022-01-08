@@ -1,5 +1,12 @@
+const { shortuuid } = require('../../helper');
+
 const kafka = require('../../libs/kafka-utils'),
-  { ServiceBase, initDefaultOptions, initDefaultResources, resolveEnvVariables } = require('../../libs/service-base'),
+  {
+    ServiceBase,
+    initDefaultOptions,
+    initDefaultResources,
+    resolveEnvVariables
+  } = require('../../libs/service-base'),
   fetch = require('node-fetch'),
   cache = require('../../libs/cache-utils'),
   disoveryService = require('../../libs/discovery-service-utils'),
@@ -8,7 +15,12 @@ const kafka = require('../../libs/kafka-utils'),
 
 async function prepareEventListFromKafkaTopics(context) {
   const { options } = context;
-  const { kafkaUserConnectionStateTopic, kafkaSendMessageTopic, kafkaOfflineMessageTopic, kafkaAckTopic } = options;
+  const {
+    kafkaUserConnectionStateTopic,
+    kafkaSendMessageTopic,
+    kafkaOfflineMessageTopic,
+    kafkaAckTopic
+  } = options;
   context.events = {
     'user-connection-state': kafkaUserConnectionStateTopic,
     'send-message': kafkaSendMessageTopic,
@@ -38,11 +50,28 @@ function parseOptions(argv) {
   cmd = cache.addMemCacheOptions(cmd);
   cmd = kafka
     .addKafkaSSLOptions(cmd)
-    .option('--kafka-user-connection-state-topic <user-connection-state-topic>', 'Used by consumer to consume new message when a user connected/disconnected to server')
-    .option('--kafka-send-message-topic <send-message-topic>', 'Used by consumer to consume new message to send to user')
-    .option('--kafka-offline-message-topic <offline-message-topic>', 'Used by producer to produce new message for offline')
-    .option('--kafka-ack-topic <ack-topic>', 'Used by producer to produce new message for acknowledgment')
-    .option('--message-max-retries <message-max-retries>', 'Max no of retries to deliver message (default value is 3)', (value) => parseInt(value), 3);
+    .option(
+      '--kafka-user-connection-state-topic <user-connection-state-topic>',
+      'Used by consumer to consume new message when a user connected/disconnected to server'
+    )
+    .option(
+      '--kafka-send-message-topic <send-message-topic>',
+      'Used by consumer to consume new message to send to user'
+    )
+    .option(
+      '--kafka-offline-message-topic <offline-message-topic>',
+      'Used by producer to produce new message for offline'
+    )
+    .option(
+      '--kafka-ack-topic <ack-topic>',
+      'Used by producer to produce new message for acknowledgment'
+    )
+    .option(
+      '--message-max-retries <message-max-retries>',
+      'Max no of retries to deliver message (default value is 3)',
+      (value) => parseInt(value),
+      3
+    );
   return cmd.parse(argv).opts();
 }
 
@@ -70,16 +99,16 @@ class MessageDeliveryMS extends ServiceBase {
             const { action, user, server } = value;
             switch (action) {
               case 'connect':
-                this.onConnect(user, server)
+                this.onConnect(user, server);
                 break;
               case 'disconnect': {
-                this.onDisconnect(user, server)
+                this.onDisconnect(user, server);
               }
             }
           }
           break;
         case events['send-message']:
-          this.onMessage(value)
+          this.onMessage(value);
           break;
         case events['ack']:
           {
@@ -125,6 +154,8 @@ class MessageDeliveryMS extends ServiceBase {
   }
 
   async sendMessage(value) {
+    const { asyncStorage } = this.context;
+    const track_id = asyncStorage.getStore() || shortuuid()
     const { online, offline } = await this.createMessageGroup(value);
 
     if (offline.length) this.sendOfflineMessage(offline);
@@ -135,7 +166,10 @@ class MessageDeliveryMS extends ServiceBase {
       fetch(`${url}/send`, {
         method: 'post',
         body: JSON.stringify({ items: messages }),
-        headers: { 'Content-Type': 'application/json' }
+        headers: {
+          'Content-Type': 'application/json',
+          'x-request-id': track_id
+        }
       })
         .then((res) => res.json())
         .then(({ errors }) => {

@@ -14,7 +14,9 @@ function addMongodbOptions(cmd) {
 async function initMongoClient(context) {
   const { options } = context;
   const clientCertificate = options.mongoCert ? fs.readFileSync(options.mongoCert) : null;
-  const auth = options.mongoAuth ? { username: options.mongoUser, password: options.mongoPassword } : null;
+  const auth = options.mongoAuth
+    ? { username: options.mongoUser, password: options.mongoPassword }
+    : null;
   let mongoConnectionOptions = {
     useNewUrlParser: true,
     auth,

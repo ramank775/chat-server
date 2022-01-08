@@ -1,11 +1,8 @@
-const short = require('short-uuid');
+const short = require('short-uuid'),
+  crypto = require('crypto');
 
 function uuidv4() {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
-    var r = (Math.random() * 16) | 0,
-      v = c == 'x' ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
+  return crypto.randomUUID()
 }
 
 function shortuuid() {
@@ -13,7 +10,7 @@ function shortuuid() {
 }
 
 function extractInfoFromRequest(req, key = 'user', defaultValue = null) {
-  return req.headers[key] || req.state[key] || defaultValue;
+  return req.headers[key] || (req.state && req.state[key]) || defaultValue;
 }
 
 function getUTCEpoch() {

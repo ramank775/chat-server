@@ -1,5 +1,10 @@
 const kafka = require('../../libs/kafka-utils'),
-  { ServiceBase, initDefaultOptions, initDefaultResources, resolveEnvVariables } = require('../../libs/service-base'),
+  {
+    ServiceBase,
+    initDefaultOptions,
+    initDefaultResources,
+    resolveEnvVariables
+  } = require('../../libs/service-base'),
   { addMongodbOptions, initMongoClient } = require('../../libs/mongo-utils'),
   { formatMessage } = require('../../libs/message-utils'),
   asMain = require.main === module;
@@ -16,7 +21,11 @@ async function prepareEventListFromKafkaTopics(context) {
 }
 
 async function initResources(options) {
-  const context = await initDefaultResources(options).then(initMongoClient).then(prepareEventListFromKafkaTopics).then(kafka.initEventProducer).then(kafka.initEventListener);
+  const context = await initDefaultResources(options)
+    .then(initMongoClient)
+    .then(prepareEventListFromKafkaTopics)
+    .then(kafka.initEventProducer)
+    .then(kafka.initEventListener);
   return context;
 }
 
@@ -26,9 +35,18 @@ function parseOptions(argv) {
   cmd = kafka.addKafkaSSLOptions(cmd);
   cmd = addMongodbOptions(cmd);
   cmd
-    .option('--kafka-new-group-message-topic <new-group-message-topic>', 'Used by consumer to consume new group message for each new incoming message')
-    .option('--kafka-send-message-topic <send-message-topic>', 'Used by producer to produce new message to send message to user')
-    .option('--kafka-ack-topic <ack-topic>', 'Used by producer to produce new message for acknowledgment');
+    .option(
+      '--kafka-new-group-message-topic <new-group-message-topic>',
+      'Used by consumer to consume new group message for each new incoming message'
+    )
+    .option(
+      '--kafka-send-message-topic <send-message-topic>',
+      'Used by producer to produce new message to send message to user'
+    )
+    .option(
+      '--kafka-ack-topic <ack-topic>',
+      'Used by producer to produce new message for acknowledgment'
+    );
 
   return cmd.parse(argv).opts();
 }
@@ -46,6 +64,7 @@ class GroupMessageRouterMS extends ServiceBase {
     };
   }
   async redirectMessage(message) {
+    const start = Date.now();
     const { publisher, events } = this.context;
     if (!message.META.parsed) {
       message = formatMessage(message);
@@ -73,6 +92,7 @@ class GroupMessageRouterMS extends ServiceBase {
       const receiver = events['send-message'];
       publisher.send(receiver, { items: messages });
     }
+    this.log.info('Message redirected', { sid: message.META.sid, latency: Date.now() - start });
   }
 
   async formatMessage(message) {

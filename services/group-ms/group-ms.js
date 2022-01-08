@@ -1,7 +1,12 @@
-const { initDefaultOptions, initDefaultResources, addStandardHttpOptions, resolveEnvVariables } = require('../../libs/service-base'),
+const {
+    initDefaultOptions,
+    initDefaultResources,
+    addStandardHttpOptions,
+    resolveEnvVariables
+  } = require('../../libs/service-base'),
   { HttpServiceBase } = require('../../libs/http-service-base'),
   { addMongodbOptions, initMongoClient } = require('../../libs/mongo-utils'),
-  { uuidv4, shortuuid,extractInfoFromRequest } = require('../../helper'),
+  { uuidv4, shortuuid, extractInfoFromRequest } = require('../../helper'),
   { formatMessage } = require('../../libs/message-utils'),
   kafka = require('../../libs/kafka-utils'),
   asMain = require.main === module;
@@ -12,7 +17,10 @@ function parseOptions(argv) {
   cmd = addMongodbOptions(cmd);
   cmd = kafka.addStandardKafkaOptions(cmd);
   cmd = kafka.addKafkaSSLOptions(cmd);
-  cmd = cmd.option('--kafka-new-group-message-topic <new-group-message-topic>', 'Used by consumer to consume new group message for each new incoming message');
+  cmd = cmd.option(
+    '--kafka-new-group-message-topic <new-group-message-topic>',
+    'Used by consumer to consume new group message for each new incoming message'
+  );
   return cmd.parse(argv).opts();
 }
 
@@ -74,9 +82,12 @@ class GroupMs extends HttpServiceBase {
         };
       }
       const newMembers = members.map((member) => ({ username: member, role: 'user' }));
-      await this.groupCollection.updateOne({ _id: group._id }, { $addToSet: { members: { $each: newMembers } } });
-      const existingMembers = group.members.map(member=> member.username);
-      const receivers = [...(new Set(existingMembers.concat(members)))]
+      await this.groupCollection.updateOne(
+        { _id: group._id },
+        { $addToSet: { members: { $each: newMembers } } }
+      );
+      const existingMembers = group.members.map((member) => member.username);
+      const receivers = [...new Set(existingMembers.concat(members))];
       this.sendNotification({
         from: user,
         to: receivers,
@@ -116,7 +127,10 @@ class GroupMs extends HttpServiceBase {
           const nextAdmin = group.members.find((x) => x.username !== user);
           if (nextAdmin) {
             nextAdmin.role = 'admin';
-            await this.groupCollection.updateOne({ _id: group._id, 'members.username': nextAdmin.username }, { $set: { 'members.$.role': 'admin' } });
+            await this.groupCollection.updateOne(
+              { _id: group._id, 'members.username': nextAdmin.username },
+              { $set: { 'members.$.role': 'admin' } }
+            );
           }
         }
       }
@@ -168,7 +182,7 @@ class GroupMs extends HttpServiceBase {
 
   /**
    * Send Group action update to all group members
-   * @param {{from: string, to: string[], groupId: string, action: string; body: unknown}} notification 
+   * @param {{from: string, to: string[], groupId: string, action: string; body: unknown}} notification
    */
   sendNotification(notification) {
     const { kafkaNewGroupMessageTopic } = this.options;
@@ -187,14 +201,16 @@ class GroupMs extends HttpServiceBase {
         action: notification.action
       },
       body: notification.body
-    })
+    });
     const msg = {
       META: {
         from: notification.from,
-        users: notification.to
+        users: notification.to,
+        rts: Date.now(),
+        sid: shortuuid()
       },
       payload: payload
-    }
+    };
     const message = formatMessage(msg);
     this.publisher.send(kafkaNewGroupMessageTopic, message, notification.from);
   }

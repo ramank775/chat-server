@@ -1,4 +1,9 @@
-const { initDefaultOptions, initDefaultResources, addStandardHttpOptions, resolveEnvVariables } = require('../../libs/service-base'),
+const {
+    initDefaultOptions,
+    initDefaultResources,
+    addStandardHttpOptions,
+    resolveEnvVariables
+  } = require('../../libs/service-base'),
   { HttpServiceBase } = require('../../libs/http-service-base'),
   { addMongodbOptions, initMongoClient } = require('../../libs/mongo-utils'),
   path = require('path'),
@@ -106,7 +111,11 @@ class FileMS extends HttpServiceBase {
       fileName: this.getFilename(fileName),
       contentType: contentType
     };
-    const fileRecord = { name: payload.fileName, user: userName, createdAt: new Date().toUTCString() };
+    const fileRecord = {
+      name: payload.fileName,
+      user: userName,
+      createdAt: new Date().toUTCString()
+    };
     const file = await this.fileStore.insertOne(fileRecord);
     const preSignedURL = await this.getSignedURL(payload, 'putObject');
     return {

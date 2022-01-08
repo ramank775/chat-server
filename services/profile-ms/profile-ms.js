@@ -1,4 +1,9 @@
-const { initDefaultOptions, initDefaultResources, addStandardHttpOptions, resolveEnvVariables } = require('../../libs/service-base'),
+const {
+    initDefaultOptions,
+    initDefaultResources,
+    addStandardHttpOptions,
+    resolveEnvVariables
+  } = require('../../libs/service-base'),
   { HttpServiceBase } = require('../../libs/http-service-base'),
   { addMongodbOptions, initMongoClient } = require('../../libs/mongo-utils'),
   kafka = require('../../libs/kafka-utils'),
@@ -26,7 +31,10 @@ async function initAccessKeyCache(context) {
   cache.get = async (username) => {
     const accesskey = cache[username];
     if (!accesskey) {
-      const auth = await authCollection.findOne({ username }, { projection: { _id: 0, username: 1, accesskey: 1 } });
+      const auth = await authCollection.findOne(
+        { username },
+        { projection: { _id: 0, username: 1, accesskey: 1 } }
+      );
       if (auth) {
         cache[username] = auth.accesskey;
       }
@@ -71,7 +79,11 @@ function parseOptions(argv) {
 }
 
 async function initResource(options) {
-  return await initDefaultResources(options).then(initMongoClient).then(initFirebaseAdmin).then(kafka.initEventProducer).then(initAccessKeyCache);
+  return await initDefaultResources(options)
+    .then(initMongoClient)
+    .then(initFirebaseAdmin)
+    .then(kafka.initEventProducer)
+    .then(initAccessKeyCache);
 }
 
 class ProfileMs extends HttpServiceBase {
@@ -92,9 +104,6 @@ class ProfileMs extends HttpServiceBase {
       const username = extractInfoFromRequest(req, 'user');
       const accesskey = extractInfoFromRequest(req, 'accesskey');
       const token = extractInfoFromRequest(req, 'token');
-      if (this.options.debug && accesskey == 'test') {
-        return res.response({}).code(200);
-      }
       const accessKeyDb = await this.accessKeyProvider.get(username);
       if (accesskey != accessKeyDb) {
         return res.response({}).code(401);
@@ -126,7 +135,7 @@ class ProfileMs extends HttpServiceBase {
         const profile = {
           username,
           uid: result.uid,
-          addedOn: new Date().toUTCString(),
+          addedOn: new Date(),
           isActive: true
         };
         await this.profileCollection.insertOne(profile);
@@ -146,19 +155,27 @@ class ProfileMs extends HttpServiceBase {
       if (!username) {
         return {};
       }
-      let user = await this.profileCollection.findOne({ username, isActive: true }, { projection: { _id: 0, name: 1, username: 1 } });
+      let user = await this.profileCollection.findOne(
+        { username, isActive: true },
+        { projection: { _id: 0, name: 1, username: 1 } }
+      );
       return user || {};
     });
 
     this.addRoute('/user/sync', 'POST', async (req) => {
       const username = extractInfoFromRequest(req);
       const { users = [] } = req.payload;
-      const availableUsers = await this.profileCollection.find({ username: { $in: users }, isActive: true }, { projection: { _id: 0, username: 1 } }).toArray();
+      const availableUsers = await this.profileCollection
+        .find({ username: { $in: users }, isActive: true }, { projection: { _id: 0, username: 1 } })
+        .toArray();
       const result = {};
       availableUsers.forEach((u) => {
         result[u.username] = true;
       });
-      await this.profileCollection.updateOne({ username: username }, { $set: { syncAt: new Date() } });
+      await this.profileCollection.updateOne(
+        { username: username },
+        { $set: { syncAt: new Date() } }
+      );
       return result || {};
     });
   }
@@ -169,6 +186,9 @@ class ProfileMs extends HttpServiceBase {
   }
 
   async verify(accesskey) {
+    if (this.options.debug && accesskey == 'test') {
+      return { uid: uuidv4() };
+    }
     const decodedToken = await this.firebaseAuth.verifyIdToken(accesskey);
     return decodedToken;
   }
