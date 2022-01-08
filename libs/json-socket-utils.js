@@ -4,7 +4,12 @@ const JsonServer = require('./json-tcp/json-socket-server'),
 const defaultPort = 8001;
 
 function addJsonServerOptions(cmd) {
-  return cmd.option('--json-server-port <json-port>', 'Json server port to start', (c) => parseInt(c), defaultPort);
+  return cmd.option(
+    '--json-server-port <json-port>',
+    'Json server port to start',
+    (c) => parseInt(c),
+    defaultPort
+  );
 }
 
 function initJsonServer(context) {

@@ -1,8 +1,13 @@
 const webSocker = require('ws'),
-  { addStandardHttpOptions, initDefaultOptions, initDefaultResources, resolveEnvVariables } = require('../../libs/service-base'),
+  {
+    addStandardHttpOptions,
+    initDefaultOptions,
+    initDefaultResources,
+    resolveEnvVariables
+  } = require('../../libs/service-base'),
   { HttpServiceBase } = require('../../libs/http-service-base'),
   kafka = require('../../libs/kafka-utils'),
-  { uuidv4, extractInfoFromRequest } = require('../../helper'),
+  { uuidv4, shortuuid, extractInfoFromRequest } = require('../../helper'),
   asMain = require.main === module;
 
 async function prepareListEventFromKafkaTopic(context) {
@@ -15,7 +20,9 @@ async function prepareListEventFromKafkaTopic(context) {
   return context;
 }
 async function initResources(options) {
-  const context = await initDefaultResources(options).then(prepareListEventFromKafkaTopic).then(kafka.initEventProducer);
+  const context = await initDefaultResources(options)
+    .then(prepareListEventFromKafkaTopic)
+    .then(kafka.initEventProducer);
 
   return context;
 }
@@ -26,9 +33,18 @@ function parseOptions(argv) {
   cmd = kafka.addStandardKafkaOptions(cmd);
   cmd = kafka.addKafkaSSLOptions(cmd);
   cmd
-    .option('--gateway-name <app-name>', 'Used as gateway server idenitifer for the user connected to this server, as well as the kafka topic for send message')
-    .option('--kafka-user-connection-state-topic <user-connection-state-topic>', 'Used by producer to produce message when a user connected/disconnected to server')
-    .option('--kafka-new-message-topic <new-message-topic>', 'Used by producer to produce new message for each new incoming message');
+    .option(
+      '--gateway-name <app-name>',
+      'Used as gateway server idenitifer for the user connected to this server, as well as the kafka topic for send message'
+    )
+    .option(
+      '--kafka-user-connection-state-topic <user-connection-state-topic>',
+      'Used by producer to produce message when a user connected/disconnected to server'
+    )
+    .option(
+      '--kafka-new-message-topic <new-message-topic>',
+      'Used by producer to produce new message for each new incoming message'
+    );
   return cmd.parse(argv).opts();
 }
 
@@ -67,9 +83,17 @@ class Gateway extends HttpServiceBase {
       type: 'meter'
     });
     this.messageEvents = {
-      onNewMessage: function (message) {
+      onNewMessage: function (message, from) {
         newMessageMeter.mark();
-        publishEvent(events['new-message'], message.META.from, message);
+        const event = {
+          payload: message,
+          META: {
+            from: from,
+            sid: shortuuid(),
+            rts: Date.now()
+          }
+        };
+        publishEvent(events['new-message'], from, event);
       }
     };
 
@@ -87,13 +111,7 @@ class Gateway extends HttpServiceBase {
       ws.user = user;
       userEvents.onConnect(user);
       ws.on('message', function (msg) {
-        const message = {
-          payload: msg.toString(),
-          META: {
-            from: this.user
-          }
-        };
-        messageEvents.onNewMessage(message);
+        messageEvents.onNewMessage(msg.toString(), this.user);
       });
       ws.on('close', function (code, reason) {
         userEvents.onDisconnect(this.user);
@@ -109,9 +127,26 @@ class Gateway extends HttpServiceBase {
         const to = messages[0].META.to;
         const ws = userSocketMapping[to];
         if (ws) {
-          const payloads = messages.map((msg) => msg.payload);
+          const { payloads, meta } = messages.reduce((acc, msg) => {
+            acc.payloads.push(msg.payload)
+            if (msg.META.sid) {
+              acc.meta.push(msg.META)
+            }
+            return acc;
+          }, {
+            payloads: [],
+            meta: []
+          })
           const payload = JSON.stringify(payloads);
           ws.send(payload);
+          const sentAt = Date.now();
+          const latencies = meta.map(m => ({
+            sid: m.sid,
+            latency: sentAt - m.rts,
+            saved: m.saved,
+            retry: m.retry
+          }));
+          this.log.info(`Message delivery to user`, {latencies: latencies})
         } else {
           errors.push({
             messages,
@@ -128,15 +163,10 @@ class Gateway extends HttpServiceBase {
       const user = extractInfoFromRequest(req, 'user');
       const messages = req.payload;
       messages.forEach((message) => {
-        this.messageEvents.onNewMessage({
-          payload: message,
-          META: {
-            from: user
-          }
-        });
-      })
+        this.messageEvents.onNewMessage(message, user);
+      });
       return res.response().code(201);
-    })
+    });
 
     this.enablePing();
   }

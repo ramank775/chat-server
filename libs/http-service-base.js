@@ -34,7 +34,9 @@ class HttpServiceBase extends ServiceBase {
 
     this.hapiServer.events.on('log', (event, tags) => {
       if (tags.error) {
-        log.error(`Server error : ${event.error ? event.error.message : 'unknown'}. ${event.error}`);
+        log.error(
+          `Server error : ${event.error ? event.error.message : 'unknown'}. ${event.error}`
+        );
       }
     });
 

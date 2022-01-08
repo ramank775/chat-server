@@ -95,7 +95,12 @@ class ServiceBase {
   init() {}
 
   async run() {
-    this.log.info('Starting service with options' + JSON.stringify(this.options, (key, value) => (/(Password|Secret|Key|Cert|Token)$/i.test(key) ? '*****' : value)));
+    this.log.info(
+      'Starting service with options' +
+        JSON.stringify(this.options, (key, value) =>
+          /(Password|Secret|Key|Cert|Token)$/i.test(key) ? '*****' : value
+        )
+    );
     this.init();
     this.handleError();
     return this;

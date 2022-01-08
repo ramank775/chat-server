@@ -36,21 +36,23 @@ async function login(username, token) {
   return fetch('/login', {
     method: 'POST',
     headers: {
-      'token': token,
+      token: token,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({ username, notificationToken: 'testing-token' })
-  }).then(res => {
-    if (res.ok) {
-      return res.json()
-    }
-    throw 'Login failed'
   })
+    .then((res) => {
+      if (res.ok) {
+        return res.json();
+      }
+      throw 'Login failed';
+    })
     .then((res) => {
       setCookie('user', username, 1000);
       setCookie('accesskey', res.accesskey, 1000);
       setCookie('token', token, 1000);
-    }).catch(err => {
+    })
+    .catch((err) => {
       console.log(err);
     });
 }
@@ -107,13 +109,13 @@ function sendMessage(version, medium) {
     };
   }
   if (medium == 'ws') {
-    sendMessageViaSocket(sMessage)
+    sendMessageViaSocket(sMessage);
   } else {
-    sendMessageViaRest(sMessage)
+    sendMessageViaRest(sMessage);
   }
   const msgSpace = document.getElementById('message');
   const newMsgItem = document.createElement('li');
-  newMsgItem.appendChild(document.createTextNode("Send at " + (Date.now())))
+  newMsgItem.appendChild(document.createTextNode('Send at ' + Date.now()));
   newMsgItem.appendChild(document.createTextNode(JSON.stringify(sMessage)));
   msgSpace.appendChild(newMsgItem);
 }
@@ -127,11 +129,12 @@ function sendMessageViaRest(message) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify([JSON.stringify(message)])
-  }).then(resp => resp.text())
+  })
+    .then((resp) => resp.text())
     .then(console.log)
-    .catch(err => {
+    .catch((err) => {
       console.log(err);
-    })
+    });
 }
 
 function get_msgid(to) {
@@ -225,7 +228,7 @@ function connect_socket() {
 
       console.log(e.data);
       send_ack(e.data);
-      newMsgItem.appendChild(document.createTextNode("Receiver at " + (Date.now())))
+      newMsgItem.appendChild(document.createTextNode('Receiver at ' + Date.now()));
       newMsgItem.appendChild(document.createTextNode(e.data));
       msgSpace.appendChild(newMsgItem);
       console.log('echo from server : ' + e.data);
