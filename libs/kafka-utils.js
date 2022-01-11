@@ -406,6 +406,7 @@ async function createKafkaConsumer(context) {
     try {
       log.info(`Running consumer`);
       await consumer.run({
+        partitionsConsumedConcurrently: listenerEvents.length,
         eachMessage: ({ topic, partition, message }) => {
           const start = Date.now();
           const track_id = message.headers.track_id.toString() || shortuuid()
