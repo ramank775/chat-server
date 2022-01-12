@@ -183,7 +183,7 @@ function send_ack(payload) {
   if (!enableAck) return;
   const [username] = getUserInfo();
   const messages = JSON.parse(payload);
-  const acks = messages.map((msg) => {
+  const acks = messages.filter(msg => msg.head.action == 'message').map((msg) => {
     return {
       _v: 2.0,
       id: `${msg.id}_ack`,
@@ -196,7 +196,7 @@ function send_ack(payload) {
         ...msg.head,
         to: msg.head.from,
         from: username,
-        action: 'ack'
+        action: 'state'
       },
       body: {
         ids: [msg.id]

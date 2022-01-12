@@ -140,12 +140,14 @@ class MessageDeliveryMS extends ServiceBase {
   }
 
   ackMessage(items) {
+    const state_ack_msgs = items.filter(msg => msg.META.action === 'state')
+    this.onMessage({items: state_ack_msgs})
     const map_user_message = items.reduce((mapping, msg) => {
       const user = msg.META.from;
       if (!mapping[user]) {
         mapping[user] = [];
       }
-      mapping[user] = [...msg.payload.body.ids];
+      mapping[user].push(...msg.payload.body.ids);
       return mapping;
     }, {});
     Object.entries(map_user_message).forEach(async ([user, ids]) => {
