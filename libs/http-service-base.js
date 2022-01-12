@@ -19,13 +19,12 @@ class HttpServiceBase extends ServiceBase {
 
     this.hapiServer.ext('onRequest', async (req, h) => {
       const track_id = extractInfoFromRequest(req, 'x-request-id') || shortuuid();
-      return asyncStorage.run(track_id, () => {
-        const meter = this.meterDict[req.url.pathname];
-        if (meter) meter.mark();
-        req.startTime = Date.now();
-        log.info(`new request : ${req.url}`);
-        return h.continue;
-      })
+      asyncStorage.enterWith(track_id)
+      const meter = this.meterDict[req.url.pathname];
+      if (meter) meter.mark();
+      req.startTime = Date.now();
+      log.info(`new request : ${req.url}`);
+      return h.continue;
     });
 
     this.hapiServer.ext('onPreResponse', (req, h) => {

@@ -81,7 +81,7 @@ class MessageRouterMS extends ServiceBase {
       const receiver = events['group-message'];
       publisher.send(receiver, message, user);
     } else {
-      if (message.META.action === 'ack') {
+      if (['ack', 'state'].includes(message.META.action)) {
         const receiver = events['ack'];
         publisher.send(receiver, { items: [message] }, message.META.from);
       } else {
