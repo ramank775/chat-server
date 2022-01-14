@@ -1,6 +1,6 @@
 {
   "name": "chat-server",
-  "version": "2.2.4",
+  "version": "2.2.5",
   "description": "A chat server based on the microservice architecture to ensure high availability, high throughput, horizontal scalability using Kafka",
   "main": "",
   "repository": "https://github.com/ramank775/chat-server.git",
@@ -16,7 +16,7 @@
     "commander": "^8.3.0",
     "firebase-admin": "^10.0.1",
     "ioredis": "^4.28.3",
-    "kafkajs": "^1.15.0",
+    "kafkajs": "priitkaard/kafkajs#3aeb591c2c20a9a15f4a530cff594d6baa0131bd",
     "moment": "^2.29.1",
     "mongodb": "^4.3.0",
     "node-fetch": "^2.6.1",
