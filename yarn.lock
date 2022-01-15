@@ -1666,10 +1666,9 @@ jws@^4.0.0:
     jwa "^2.0.0"
     safe-buffer "^5.0.1"
 
-kafkajs@^1.15.0:
-  version "1.15.0"
-  resolved "https://registry.yarnpkg.com/kafkajs/-/kafkajs-1.15.0.tgz#a5ada0d933edca2149177393562be6fb0875ec3a"
-  integrity sha512-yjPyEnQCkPxAuQLIJnY5dI+xnmmgXmhuOQ1GVxClG5KTOV/rJcW1qA3UfvyEJKTp/RTSqQnUR3HJsKFvHyTpNg==
+kafkajs@priitkaard/kafkajs#3aeb591c2c20a9a15f4a530cff594d6baa0131bd:
+  version "1.16.0"
+  resolved "https://codeload.github.com/priitkaard/kafkajs/tar.gz/3aeb591c2c20a9a15f4a530cff594d6baa0131bd"
 
 kuler@^2.0.0:
   version "2.0.0"
