@@ -17,32 +17,32 @@
   "dependencies": {
     "@hapi/hapi": "^20.2.1",
     "@pm2/io": "^5.0.0",
-    "aws-sdk": "^2.1055.0",
-    "commander": "^8.3.0",
-    "firebase-admin": "^10.0.1",
-    "ioredis": "^4.28.3",
+    "aws-sdk": "^2.1069.0",
+    "commander": "^9.0.0",
+    "firebase-admin": "^10.0.2",
+    "ioredis": "^4.28.5",
     "kafkajs": "priitkaard/kafkajs#3aeb591c2c20a9a15f4a530cff594d6baa0131bd",
     "moment": "^2.29.1",
-    "mongodb": "^4.3.0",
-    "node-fetch": "^2.6.1",
+    "mongodb": "^4.3.1",
+    "node-fetch": "^2.6.6",
     "short-uuid": "^4.2.0",
-    "winston": "^3.4.0",
-    "ws": "^8.4.0"
+    "winston": "^3.5.1",
+    "ws": "^8.4.2"
   },
   "devDependencies": {
-    "eslint": "^8.8.0",
     "@babel/core": "^7.17.0",
     "@babel/eslint-parser": "^7.17.0",
     "@babel/preset-env": "7.16.11",
-    "eslint-config-prettier": "^8.3.0",
+    "eslint": "^8.8.0",
     "eslint-config-airbnb": "^19.0.4",
-    "eslint-plugin-prettier": "^4.0.0",
-    "eslint-plugin-node": "^11.1.0",
-    "eslint-plugin-jsx-a11y": "^6.5.1",
-    "eslint-plugin-react": "^7.28.0",
+    "eslint-config-prettier": "^8.3.0",
     "eslint-plugin-import": "^2.25.4",
+    "eslint-plugin-jsx-a11y": "^6.5.1",
+    "eslint-plugin-node": "^11.1.0",
+    "eslint-plugin-prettier": "^4.0.0",
+    "eslint-plugin-react": "^7.28.0",
     "eslint-plugin-react-hooks": "^4.3.0",
-    "prettier": "2.5.1",
-    "husky": "^7.0.4"
+    "husky": "^7.0.4",
+    "prettier": "2.5.1"
   }
 }
