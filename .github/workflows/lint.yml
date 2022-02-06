@@ -1,0 +1,19 @@
+name: "Linting"
+
+on:
+  push:
+  pull_request:
+    # The branches below must be a subset of the branches above
+    branches: [master]
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      # Initializes the CodeQL tools for scanning.
+      - name: Run liniting
+        run: npm run lint
