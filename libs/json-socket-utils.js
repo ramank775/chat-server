@@ -1,5 +1,5 @@
-const JsonServer = require('./json-tcp/json-socket-server'),
-  JsonClient = require('./json-tcp/json-socket-client');
+const JsonServer = require('./json-tcp/json-socket-server');
+const JsonClient = require('./json-tcp/json-socket-client');
 
 const defaultPort = 8001;
 

@@ -1,6 +1,6 @@
+const { ServiceBase } = require('./service-base');
+const Hapi = require('@hapi/hapi');
 const { extractInfoFromRequest, shortuuid } = require('../helper');
-const { ServiceBase } = require('./service-base'),
-  Hapi = require('@hapi/hapi');
 
 class HttpServiceBase extends ServiceBase {
   constructor(context) {

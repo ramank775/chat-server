@@ -1,5 +1,5 @@
-const winston = require('winston'),
-  moment = require('moment');
+const winston = require('winston');
+const moment = require('moment');
 
 const LEVEL = Symbol.for('level');
 const MESSAGE = Symbol.for('message');

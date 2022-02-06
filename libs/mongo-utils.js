@@ -1,5 +1,5 @@
-const mongodb = require('mongodb'),
-  fs = require('fs');
+const mongodb = require('mongodb');
+const fs = require('fs');
 
 function addMongodbOptions(cmd) {
   return cmd

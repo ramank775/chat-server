@@ -1,17 +1,12 @@
-const {
-    initDefaultOptions,
-    initDefaultResources,
-    addStandardHttpOptions,
-    resolveEnvVariables
-  } = require('../../libs/service-base'),
-  { HttpServiceBase } = require('../../libs/http-service-base'),
-  { addMongodbOptions, initMongoClient } = require('../../libs/mongo-utils'),
-  path = require('path'),
-  { uuidv4, extractInfoFromRequest } = require('../../helper'),
-  AWS = require('aws-sdk'),
-  { ObjectId } = require('mongodb'),
-  { getContentTypeByExt } = require('../../libs/content-type-utils'),
-  asMain = require.main === module;
+const { initDefaultOptions, initDefaultResources, addStandardHttpOptions, resolveEnvVariables } = require('../../libs/service-base');
+const { HttpServiceBase } = require('../../libs/http-service-base');
+const { addMongodbOptions, initMongoClient } = require('../../libs/mongo-utils');
+const path = require('path');
+const { uuidv4, extractInfoFromRequest } = require('../../helper');
+const AWS = require('aws-sdk');
+const { ObjectId } = require('mongodb');
+const { getContentTypeByExt } = require('../../libs/content-type-utils');
+const asMain = require.main === module;
 
 function parseOptions(argv) {
   let cmd = initDefaultOptions();
@@ -22,7 +17,9 @@ function parseOptions(argv) {
 }
 
 async function initResource(options) {
-  return await initDefaultResources(options).then(initMongoClient).then(initFileService);
+  return await initDefaultResources(options)
+    .then(initMongoClient)
+    .then(initFileService);
 }
 
 function addFileServiceOptions(cmd) {

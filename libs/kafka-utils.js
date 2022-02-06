@@ -1,6 +1,6 @@
-const fs = require('fs'),
-  { Kafka, logLevel } = require('kafkajs'),
-  { shortuuid } = require('../helper');
+const fs = require('fs');
+const { Kafka, logLevel } = require('kafkajs');
+const { shortuuid } = require('../helper');
 
 /**
  * Add standard kafka options

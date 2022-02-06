@@ -1,15 +1,10 @@
-const {
-    initDefaultOptions,
-    initDefaultResources,
-    addStandardHttpOptions,
-    resolveEnvVariables
-  } = require('../../libs/service-base'),
-  { HttpServiceBase } = require('../../libs/http-service-base'),
-  { addMongodbOptions, initMongoClient } = require('../../libs/mongo-utils'),
-  kafka = require('../../libs/kafka-utils'),
-  { uuidv4, extractInfoFromRequest } = require('../../helper'),
-  admin = require('firebase-admin'),
-  asMain = require.main === module;
+const { initDefaultOptions, initDefaultResources, addStandardHttpOptions, resolveEnvVariables } = require('../../libs/service-base');
+const { HttpServiceBase } = require('../../libs/http-service-base');
+const { addMongodbOptions, initMongoClient } = require('../../libs/mongo-utils');
+const kafka = require('../../libs/kafka-utils');
+const { uuidv4, extractInfoFromRequest } = require('../../helper');
+const admin = require('firebase-admin');
+const asMain = require.main === module;
 
 function firebaseProjectOptions(cmd) {
   return cmd.option('--firebase-project-id <firebaseProjectId>', 'Firebase Project Id');

@@ -1,13 +1,8 @@
-const kafka = require('../../libs/kafka-utils'),
-  {
-    ServiceBase,
-    initDefaultOptions,
-    initDefaultResources,
-    resolveEnvVariables
-  } = require('../../libs/service-base'),
-  { addMongodbOptions, initMongoClient } = require('../../libs/mongo-utils'),
-  admin = require('firebase-admin'),
-  asMain = require.main === module;
+const kafka = require('../../libs/kafka-utils');
+const { ServiceBase, initDefaultOptions, initDefaultResources, resolveEnvVariables } = require('../../libs/service-base');
+const { addMongodbOptions, initMongoClient } = require('../../libs/mongo-utils');
+const admin = require('firebase-admin');
+const asMain = require.main === module;
 
 async function prepareEventList(context) {
   const { options } = context;
@@ -33,7 +28,11 @@ async function initFirebaseAdmin(context) {
 }
 
 async function initResources(options) {
-  const context = await initDefaultResources(options).then(prepareEventList).then(kafka.initEventListener).then(initMongoClient).then(initFirebaseAdmin);
+  const context = await initDefaultResources(options)
+    .then(prepareEventList)
+    .then(kafka.initEventListener)
+    .then(initMongoClient)
+    .then(initFirebaseAdmin);
   return context;
 }
 

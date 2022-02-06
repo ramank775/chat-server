@@ -1,7 +1,7 @@
-const commander = require('commander'),
-  logger = require('./logger'),
-  statsClient = require('./stats-client'),
-  { AsyncLocalStorage } = require('async_hooks');
+const commander = require('commander');
+const logger = require('./logger');
+const statsClient = require('./stats-client');
+const { AsyncLocalStorage } = require('async_hooks');
 
 async function initDefaultResources(options) {
   const asyncStorage = new AsyncLocalStorage();
@@ -95,14 +95,14 @@ class ServiceBase {
     this.statsClient = context.statsClient;
   }
 
-  init() {}
+  init() { }
 
   async run() {
     this.log.info(
       'Starting service with options' +
-        JSON.stringify(this.options, (key, value) =>
-          /(Password|Secret|Key|Cert|Token)$/i.test(key) ? '*****' : value
-        )
+      JSON.stringify(this.options, (key, value) =>
+        /(Password|Secret|Key|Cert|Token)$/i.test(key) ? '*****' : value
+      )
     );
     this.init();
     this.handleError();
@@ -125,7 +125,7 @@ class ServiceBase {
     process.on('SIGINT', () => this._shutdown());
   }
 
-  async shutdown() {}
+  async shutdown() { }
 
   async _shutdown() {
     this.log.info('Shutting down service');

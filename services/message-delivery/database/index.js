@@ -1,10 +1,10 @@
-const { addMongodbOptions, initMongoClient } = require('../../../libs/mongo-utils'),
-  mongo = require('mongodb'),
-  moment = require('moment');
+const { addMongodbOptions, initMongoClient } = require('../../../libs/mongo-utils');
+const mongo = require('mongodb');
+const moment = require('moment');
 
 
 class MongodDbService {
-  
+
   _client;
   /**
    * @type {mongo.Collection}
@@ -27,7 +27,7 @@ class MongodDbService {
   }
 
   async getUndeliveredMessageByUser(user_id) {
-    const messages = this._collection.find({ 'META.to': user_id }, {projection: {META: 1, payload: 1}});
+    const messages = this._collection.find({ 'META.to': user_id }, { projection: { META: 1, payload: 1 } });
     return await messages.toArray()
   }
 
@@ -37,7 +37,7 @@ class MongodDbService {
     );
   }
 
-  async close () {
+  async close() {
     await this._client.close()
   }
 }
@@ -48,8 +48,8 @@ function addDatabaseOptions(cmd) {
 }
 
 async function initDatabase(context) {
-  const dbContext = await initMongoClient({options: context.options})
-  context.db = new MongodDbService({client: dbContext.mongoClient});
+  const dbContext = await initMongoClient({ options: context.options })
+  context.db = new MongodDbService({ client: dbContext.mongoClient });
   return context;
 }
 

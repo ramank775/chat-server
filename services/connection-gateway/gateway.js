@@ -1,14 +1,9 @@
-const webSocker = require('ws'),
-  {
-    addStandardHttpOptions,
-    initDefaultOptions,
-    initDefaultResources,
-    resolveEnvVariables
-  } = require('../../libs/service-base'),
-  { HttpServiceBase } = require('../../libs/http-service-base'),
-  kafka = require('../../libs/kafka-utils'),
-  { uuidv4, shortuuid, extractInfoFromRequest } = require('../../helper'),
-  asMain = require.main === module;
+const webSocker = require('ws');
+const { addStandardHttpOptions, initDefaultOptions, initDefaultResources, resolveEnvVariables } = require('../../libs/service-base')
+const { HttpServiceBase } = require('../../libs/http-service-base')
+const kafka = require('../../libs/kafka-utils')
+const { uuidv4, extractInfoFromRequest } = require('../../helper')
+const asMain = require.main === module;
 
 async function prepareListEvent(context) {
   const { options } = context;
@@ -20,7 +15,9 @@ async function prepareListEvent(context) {
   return context;
 }
 async function initResources(options) {
-  const context = await initDefaultResources(options).then(prepareListEvent).then(kafka.initEventProducer);
+  const context = await initDefaultResources(options)
+    .then(prepareListEvent)
+    .then(kafka.initEventProducer);
 
   return context;
 }
@@ -159,30 +156,13 @@ class Gateway extends HttpServiceBase {
         this.messageEvents.onNewMessage(message, user);
       });
       return res.response().code(201);
-    });
-
-    this.enablePing();
-  }
-
-  // TODO: Let client handles the pings, it offload server load
-  enablePing() {
-    const { userSocketMapping } = this;
-    this.pingTimer = setInterval(() => {
-      Object.keys(userSocketMapping).forEach((user) => {
-        userSocketMapping[user].ping();
-      });
-    }, 50 * 1000);
-  }
-
-  disablePing() {
-    clearInterval(this.pingTimer);
+    })
   }
 
   async shutdown() {
     const { publisher, listener } = this.context;
     publisher.disconnect();
     listener.disconnect();
-    this.disablePing();
   }
 
   getUserInfoFromRequest(request) {

@@ -1,13 +1,8 @@
-const kafka = require('../../libs/kafka-utils'),
-  {
-    ServiceBase,
-    initDefaultOptions,
-    initDefaultResources,
-    resolveEnvVariables
-  } = require('../../libs/service-base'),
-  { addMongodbOptions, initMongoClient } = require('../../libs/mongo-utils'),
-  { formatMessage } = require('../../libs/message-utils'),
-  asMain = require.main === module;
+const kafka = require('../../libs/kafka-utils');
+const { ServiceBase, initDefaultOptions, initDefaultResources, resolveEnvVariables } = require('../../libs/service-base');
+const { addMongodbOptions, initMongoClient } = require('../../libs/mongo-utils');
+const { formatMessage } = require('../../libs/message-utils');
+const asMain = require.main === module;
 
 async function prepareEventList(context) {
   const { options } = context;
@@ -21,7 +16,11 @@ async function prepareEventList(context) {
 }
 
 async function initResources(options) {
-  const context = await initDefaultResources(options).then(initMongoClient).then(prepareEventList).then(kafka.initEventProducer).then(kafka.initEventListener);
+  const context = await initDefaultResources(options)
+    .then(initMongoClient)
+    .then(prepareEventList)
+    .then(kafka.initEventProducer)
+    .then(kafka.initEventListener);
   return context;
 }
 

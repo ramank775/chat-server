@@ -1,15 +1,10 @@
-const {
-  initDefaultOptions,
-  initDefaultResources,
-  addStandardHttpOptions,
-  resolveEnvVariables
-} = require('../../libs/service-base'),
-  { HttpServiceBase } = require('../../libs/http-service-base'),
-  { addMongodbOptions, initMongoClient } = require('../../libs/mongo-utils'),
-  { uuidv4, shortuuid, extractInfoFromRequest } = require('../../helper'),
-  { formatMessage } = require('../../libs/message-utils'),
-  kafka = require('../../libs/kafka-utils'),
-  asMain = require.main === module;
+const { initDefaultOptions, initDefaultResources, addStandardHttpOptions, resolveEnvVariables } = require('../../libs/service-base');
+const { HttpServiceBase } = require('../../libs/http-service-base');
+const { addMongodbOptions, initMongoClient } = require('../../libs/mongo-utils');
+const { uuidv4, shortuuid, extractInfoFromRequest } = require('../../helper');
+const { formatMessage } = require('../../libs/message-utils');
+const kafka = require('../../libs/kafka-utils');
+const asMain = require.main === module;
 
 function parseOptions(argv) {
   let cmd = initDefaultOptions();
@@ -22,7 +17,9 @@ function parseOptions(argv) {
 }
 
 async function initResource(options) {
-  return await initDefaultResources(options).then(initMongoClient).then(kafka.initEventProducer);
+  return await initDefaultResources(options)
+    .then(initMongoClient)
+    .then(kafka.initEventProducer);
 }
 
 class GroupMs extends HttpServiceBase {

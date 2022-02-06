@@ -1,17 +1,11 @@
-const { shortuuid } = require('../../helper');
-
-const kafka = require('../../libs/kafka-utils'),
-  {
-    ServiceBase,
-    initDefaultOptions,
-    initDefaultResources,
-    resolveEnvVariables
-  } = require('../../libs/service-base'),
-  fetch = require('node-fetch'),
-  cache = require('../../libs/cache-utils'),
-  disoveryService = require('../../libs/discovery-service-utils'),
-  database = require('./database'),
-  asMain = require.main === module;
+const kafka = require('../../libs/kafka-utils');
+const { ServiceBase, initDefaultOptions, initDefaultResources, resolveEnvVariables } = require('../../libs/service-base');
+const fetch = require('node-fetch');
+const cache = require('../../libs/cache-utils');
+const disoveryService = require('../../libs/discovery-service-utils');
+const database = require('./database');
+const { shortuuid } = require('../../helper')
+const asMain = require.main === module;
 
 async function prepareEventList(context) {
   const { options } = context;
