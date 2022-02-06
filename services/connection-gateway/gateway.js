@@ -1,8 +1,14 @@
 const webSocker = require('ws');
-const { addStandardHttpOptions, initDefaultOptions, initDefaultResources, resolveEnvVariables } = require('../../libs/service-base')
-const { HttpServiceBase } = require('../../libs/http-service-base')
-const kafka = require('../../libs/kafka-utils')
-const { uuidv4, extractInfoFromRequest } = require('../../helper')
+const {
+  addStandardHttpOptions,
+  initDefaultOptions,
+  initDefaultResources,
+  resolveEnvVariables
+} = require('../../libs/service-base');
+const { HttpServiceBase } = require('../../libs/http-service-base');
+const kafka = require('../../libs/kafka-utils');
+const { uuidv4, shortuuid, extractInfoFromRequest } = require('../../helper');
+
 const asMain = require.main === module;
 
 async function prepareListEvent(context) {
@@ -28,16 +34,42 @@ function parseOptions(argv) {
   cmd = kafka.addStandardKafkaOptions(cmd);
   cmd = kafka.addKafkaSSLOptions(cmd);
   cmd
-    .option('--gateway-name <app-name>', 'Used as gateway server idenitifer for the user connected to this server, as well as the kafka topic for send message')
-    .option('--user-connection-state-topic <user-connection-state-topic>', 'Used by producer to produce message when a user connected/disconnected to server')
-    .option('--new-message-topic <new-message-topic>', 'Used by producer to produce new message for each new incoming message');
+    .option(
+      '--gateway-name <app-name>',
+      'Used as gateway server idenitifer for the user connected to this server, as well as the kafka topic for send message'
+    )
+    .option(
+      '--user-connection-state-topic <user-connection-state-topic>',
+      'Used by producer to produce message when a user connected/disconnected to server'
+    )
+    .option(
+      '--new-message-topic <new-message-topic>',
+      'Used by producer to produce new message for each new incoming message'
+    );
   return cmd.parse(argv).opts();
+}
+
+/**
+ * Helper function to parser cookie from Raw request
+ */
+function getUserInfoFromRequest(request) {
+  const { user } = request.headers;
+  if (user) return user;
+  const rc = request.headers.cookie;
+  const cookies = {};
+  if (rc) {
+    rc.split(';').forEach((cookie) => {
+      const parts = cookie.split('=');
+      cookies[parts.shift().trim()] = decodeURI(parts.join('='));
+    });
+  }
+  return cookies.user || uuidv4();
 }
 
 class Gateway extends HttpServiceBase {
   constructor(context) {
     super(context);
-    const publisher = this.context.publisher;
+    const { publisher } = this.context;
     const { events } = this.context;
     const serverName = this.options.gatewayName;
     const publishEvent = (event, user, eventArgs) => {
@@ -47,19 +79,19 @@ class Gateway extends HttpServiceBase {
       name: 'userConnected'
     });
     this.userEvents = {
-      onConnect: function (user) {
+      onConnect(user) {
         userConnectedCounter.inc(1);
         publishEvent(events['user-connection-state'], user, {
           action: 'connect',
-          user: user,
+          user,
           server: serverName
         });
       },
-      onDisconnect: function (user) {
+      onDisconnect(user) {
         userConnectedCounter.dec(1);
         publishEvent(events['user-connection-state'], user, {
           action: 'disconnect',
-          user: user,
+          user,
           server: serverName
         });
       }
@@ -69,12 +101,12 @@ class Gateway extends HttpServiceBase {
       type: 'meter'
     });
     this.messageEvents = {
-      onNewMessage: function (message, from) {
+      onNewMessage(message, from) {
         newMessageMeter.mark();
         const event = {
           payload: message,
           META: {
-            from: from,
+            from,
             sid: shortuuid(),
             rts: Date.now()
           }
@@ -84,59 +116,62 @@ class Gateway extends HttpServiceBase {
     };
 
     this.userSocketMapping = {};
-    this.pingTimer;
   }
+
   async init() {
     await super.init();
     const wss = new webSocker.Server({ server: this.hapiServer.listener });
     this.context.wss = wss;
-    const { asyncStorage } = this.context
+    const { asyncStorage } = this.context;
     const { userEvents, messageEvents, userSocketMapping } = this;
     wss.on('connection', (ws, request) => {
-      const user = this.getUserInfoFromRequest(request);
+      const user = getUserInfoFromRequest(request);
       userSocketMapping[user] = ws;
       ws.user = user;
       userEvents.onConnect(user);
-      ws.on('message', function (msg) {
-        const trackId = shortuuid()
+      ws.on('message', function onMessage(msg) {
+        const trackId = shortuuid();
         asyncStorage.run(trackId, () => {
           messageEvents.onNewMessage(msg.toString(), this.user);
         });
       });
-      ws.on('close', function (code, reason) {
+      ws.on('close', function onClose(_code, _reason) {
         userEvents.onDisconnect(this.user);
         delete userSocketMapping[this.user];
       });
     });
 
-    this.addRoute('/send', 'post', async (req, res) => {
+    this.addRoute('/send', 'post', async (req, _res) => {
       const items = req.payload.items || [];
       const errors = [];
       items.forEach((messages) => {
         if (!messages.length) return;
-        const to = messages[0].META.to;
+        const { to } = messages[0].META;
         const ws = userSocketMapping[to];
         if (ws) {
-          const { payloads, meta } = messages.reduce((acc, msg) => {
-            acc.payloads.push(msg.payload)
-            if (msg.META.sid) {
-              acc.meta.push(msg.META)
+          const { payloads, meta } = messages.reduce(
+            (acc, msg) => {
+              acc.payloads.push(msg.payload);
+              if (msg.META.sid) {
+                acc.meta.push(msg.META);
+              }
+              return acc;
+            },
+            {
+              payloads: [],
+              meta: []
             }
-            return acc;
-          }, {
-            payloads: [],
-            meta: []
-          })
+          );
           const payload = JSON.stringify(payloads);
           ws.send(payload);
           const sentAt = Date.now();
-          const latencies = meta.map(m => ({
+          const latencies = meta.map((m) => ({
             sid: m.sid,
             latency: sentAt - m.rts,
             saved: m.saved,
             retry: m.retry
           }));
-          this.log.info(`Message delivery to user`, { latencies: latencies })
+          this.log.info(`Message delivery to user`, { latencies });
         } else {
           errors.push({
             messages,
@@ -145,7 +180,7 @@ class Gateway extends HttpServiceBase {
         }
       });
       return {
-        errors: errors
+        errors
       };
     });
 
@@ -156,7 +191,7 @@ class Gateway extends HttpServiceBase {
         this.messageEvents.onNewMessage(message, user);
       });
       return res.response().code(201);
-    })
+    });
   }
 
   async shutdown() {
@@ -165,18 +200,6 @@ class Gateway extends HttpServiceBase {
     listener.disconnect();
   }
 
-  getUserInfoFromRequest(request) {
-    let user = request.headers.user;
-    if (user) return user;
-    const rc = request.headers.cookie;
-    const cookies = {};
-    rc &
-      rc.split(';').forEach((cookie) => {
-        var parts = cookie.split('=');
-        cookies[parts.shift().trim()] = decodeURI(parts.join('='));
-      });
-    return cookies['user'] || uuidv4();
-  }
 }
 
 if (asMain) {
@@ -187,6 +210,7 @@ if (asMain) {
       await new Gateway(context).run();
     })
     .catch(async (error) => {
+      // eslint-disable-next-line no-console
       console.error('Failed to initialized Gateway server', error);
       process.exit(1);
     });

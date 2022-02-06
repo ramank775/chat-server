@@ -1,5 +1,5 @@
-const JsonSocket = require('./json-socket');
 const events = require('events');
+const JsonSocket = require('./json-socket');
 
 class JsonClient extends events.EventEmitter {
   constructor(host, port) {

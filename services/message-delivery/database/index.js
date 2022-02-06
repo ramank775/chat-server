@@ -1,18 +1,18 @@
-const { addMongodbOptions, initMongoClient } = require('../../../libs/mongo-utils');
-const mongo = require('mongodb');
 const moment = require('moment');
-
+const { addMongodbOptions, initMongoClient } = require('../../../libs/mongo-utils');
 
 class MongodDbService {
 
   _client;
+
   /**
-   * @type {mongo.Collection}
+   * @type {import('mongodb').Collection}
    */
   _collection;
+
   /**
    * 
-   * @param {{client: mongo.MongoClient}} options 
+   * @param {{client: import('mongodb').MongoClient}} options 
    */
   constructor(options) {
     this._client = options.client;
@@ -22,18 +22,18 @@ class MongodDbService {
 
   async save(messages) {
     const expireAt = moment().add(30, 'days').toDate()
-    const msgs = messages.map(msg => ({ ...msg, expireAt: expireAt }))
+    const msgs = messages.map(msg => ({ ...msg, expireAt }))
     await this._collection.insertMany(msgs)
   }
 
-  async getUndeliveredMessageByUser(user_id) {
-    const messages = this._collection.find({ 'META.to': user_id }, { projection: { META: 1, payload: 1 } });
+  async getUndeliveredMessageByUser(userId) {
+    const messages = this._collection.find({ 'META.to': userId }, { projection: { META: 1, payload: 1 } });
     return await messages.toArray()
   }
 
-  async markMessageDeliveredByUser(user_id, messages) {
+  async markMessageDeliveredByUser(userId, messages) {
     await this._collection.deleteMany(
-      { 'META.to': user_id, 'META.id': { $in: messages } }
+      { 'META.to': userId, 'META.id': { $in: messages } }
     );
   }
 

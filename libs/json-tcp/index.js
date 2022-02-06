@@ -1,5 +1,5 @@
-const JsonServer = require('./json-tcp/json-socket-server');
-const JsonClient = require('./json-tcp/json-socket-client');
+const JsonServer = require('./json-socket-server');
+const JsonClient = require('./json-socket-client');
 
 const defaultPort = 8001;
 
@@ -7,7 +7,7 @@ function addJsonServerOptions(cmd) {
   return cmd.option(
     '--json-server-port <json-port>',
     'Json server port to start',
-    (c) => parseInt(c),
+    (c) => Number(c),
     defaultPort
   );
 }
@@ -21,9 +21,10 @@ function initJsonServer(context) {
 
 function initJsonClient(url) {
   if (!url) return null;
+  // eslint-disable-next-line prefer-const
   let [host, port] = url.split(':', 2);
   if (port) {
-    port = parseInt(port);
+    port = Number(port);
   } else {
     port = defaultPort;
   }

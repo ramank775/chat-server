@@ -2,14 +2,13 @@
   "parser": "@babel/eslint-parser",
   "extends": [
     "airbnb",
-    "prettier",
-    "plugin:node/recommended"
+    "prettier"
   ],
   "plugins": [
     "prettier"
   ],
   "env": {
-    "node": true,
+    "browser": true,
     "es2021": true
   },
   "parserOptions": {

@@ -1,7 +1,13 @@
 const kafka = require('../../libs/kafka-utils');
-const { ServiceBase, initDefaultOptions, initDefaultResources, resolveEnvVariables } = require('../../libs/service-base');
+const {
+  ServiceBase,
+  initDefaultOptions,
+  initDefaultResources,
+  resolveEnvVariables
+} = require('../../libs/service-base');
 const { addMongodbOptions, initMongoClient } = require('../../libs/mongo-utils');
 const { formatMessage } = require('../../libs/message-utils');
+
 const asMain = require.main === module;
 
 async function prepareEventList(context) {
@@ -30,9 +36,18 @@ function parseOptions(argv) {
   cmd = kafka.addKafkaSSLOptions(cmd);
   cmd = addMongodbOptions(cmd);
   cmd
-    .option('--new-group-message-topic <new-group-message-topic>', 'Used by consumer to consume new group message for each new incoming message')
-    .option('--send-message-topic <send-message-topic>', 'Used by producer to produce new message to send message to user')
-    .option('--ack-topic <ack-topic>', 'Used by producer to produce new message for acknowledgment');
+    .option(
+      '--new-group-message-topic <new-group-message-topic>',
+      'Used by consumer to consume new group message for each new incoming message'
+    )
+    .option(
+      '--send-message-topic <send-message-topic>',
+      'Used by producer to produce new message to send message to user'
+    )
+    .option(
+      '--ack-topic <ack-topic>',
+      'Used by producer to produce new message for acknowledgment'
+    );
 
   return cmd.parse(argv).opts();
 }
@@ -43,112 +58,44 @@ class GroupMessageRouterMS extends ServiceBase {
     this.mongoClient = context.mongoClient;
     this.groupCollection = context.mongodbClient.collection('groups');
   }
+
   init() {
     const { listener } = this.context;
     listener.onMessage = async (_, message) => {
       this.redirectMessage(message);
     };
   }
+
   async redirectMessage(message) {
     const start = Date.now();
     const { publisher, events } = this.context;
     if (!message.META.parsed) {
       message = formatMessage(message);
     }
-    let users = message.META.users;
+    let { users } = message.META;
     if (!users) {
       users = await this.getGroupUsers(message.META.to, message.META.from);
     }
     users = users.filter((x) => x !== message.META.from);
-    if (message.META.action == 'ack') {
+    if (message.META.action === 'ack') {
       message.META.users = users;
-      const receiver = events['ack'];
+      const receiver = events.ack;
       publisher.send(receiver, { items: [message] }, message.META.from);
     } else {
-      const messages = [];
-      for (let user of users) {
+      const messages = users.map((user) => {
         if (typeof user === 'object') {
           user = user.username;
         }
-        const msg = Object.assign({}, message);
+        const msg = { ...message };
         // Set message META property type as single so failed message to be handled by mesasge router
         msg.META = { ...msg.META, to: user, users: undefined };
-        messages.push(msg);
-      }
+        return msg;
+      })
+
       const receiver = events['send-message'];
       publisher.send(receiver, { items: messages });
     }
     this.log.info('Message redirected', { sid: message.META.sid, latency: Date.now() - start });
-  }
-
-  async formatMessage(message) {
-    const { META, payload } = message;
-    const parsedPayload = JSON.parse(payload);
-    const msg = {
-      _v: parsedPayload._v || 1.0
-    };
-
-    if (msg._v >= 2.0) {
-      const { id, head, meta, body } = parsedPayload;
-      head.from = META.from;
-      msg.head = head;
-      msg.id = id;
-      msg.body = body;
-      msg.body.ts = getUTCEpoch();
-
-      Object.assign(META, meta);
-      META.to = head.to;
-      META.id = id;
-      META.type = head.type;
-      META.contentType = head.contentType;
-
-      // Add legacy keys for backward compatibility
-      // TODO: remove this in next stable build
-      msg.from = META.from;
-      msg.to = head.to;
-      msg.msgId = id;
-      msg.type = head.contentType;
-      msg.chatId = head.chatId; // to be deperciated, added for backward comptibility only
-      msg.text = body.text;
-      msg.module = head.type;
-      msg.action = head.action;
-      msg.chatType = head.type;
-    } else {
-      const { to, type, chatType, ..._msg } = parsedPayload;
-      Object.assign(msg, _msg);
-      msg.from = META.from;
-      msg.to = to;
-      msg.type = type;
-      msg.chatType = chatType;
-
-      // Add new format keys
-      msg.id = msg.msgId;
-      msg.head = {
-        type: chatType || msg.module,
-        to: to,
-        from: META.from,
-        chatid: msg.chatId,
-        contentType: msg.type,
-        action: msg.action || 'message'
-      };
-      msg.body = {
-        text: _msg.text,
-        ts: getUTCEpoch()
-      };
-
-      Object.assign(META, {
-        to: to,
-        id: msg.id,
-        type: chatType,
-        contentType: type
-      });
-    }
-
-    const formattedMessage = {
-      META: { ...META, parsed: true },
-      payload: msg
-    };
-    return formattedMessage;
   }
 
   async shutdown() {
@@ -173,6 +120,7 @@ if (asMain) {
       await new GroupMessageRouterMS(context).run();
     })
     .catch(async (error) => {
+      // eslint-disable-next-line no-console
       console.error('Failed to initialized Group Message Router MS', error);
       process.exit(1);
     });

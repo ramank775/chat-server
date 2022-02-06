@@ -1,7 +1,13 @@
-const kafka = require('../../libs/kafka-utils');
-const { ServiceBase, initDefaultOptions, initDefaultResources, resolveEnvVariables } = require('../../libs/service-base');
-const { addMongodbOptions, initMongoClient } = require('../../libs/mongo-utils');
 const admin = require('firebase-admin');
+const kafka = require('../../libs/kafka-utils');
+const {
+  ServiceBase,
+  initDefaultOptions,
+  initDefaultResources,
+  resolveEnvVariables
+} = require('../../libs/service-base');
+const { addMongodbOptions, initMongoClient } = require('../../libs/mongo-utils');
+
 const asMain = require.main === module;
 
 async function prepareEventList(context) {
@@ -18,6 +24,7 @@ async function prepareEventList(context) {
 async function initFirebaseAdmin(context) {
   const { options } = context;
   const { firebaseAdminCredentialJsonPath } = options;
+  /* eslint-disable-next-line import/no-dynamic-require, global-require */
   const serviceAccount = require(firebaseAdminCredentialJsonPath);
   const app = admin.initializeApp({
     credential: admin.credential.cert(serviceAccount)
@@ -41,10 +48,20 @@ function parseOptions(argv) {
   cmd = kafka.addStandardKafkaOptions(cmd);
   cmd = kafka.addKafkaSSLOptions(cmd);
   cmd = addMongodbOptions(cmd);
-  cmd.option('--offline-message-topic <offline-message-topic>', 'Used by producer to produce new message to send the push notification');
+  cmd.option(
+    '--offline-message-topic <offline-message-topic>',
+    'Used by producer to produce new message to send the push notification'
+  );
   cmd.option('--new-login-topic <new-login-topic>', 'New login kafka topic');
-  cmd.option('--firebase-admin-credential-json-path <firebaes-admin-cred-file>', 'Path to the firebase admin credentials file');
-  cmd.option('--offline-msg-initial <offline-msg-initial>', 'Initial for saved messages', 'persistence-message');
+  cmd.option(
+    '--firebase-admin-credential-json-path <firebaes-admin-cred-file>',
+    'Path to the firebase admin credentials file'
+  );
+  cmd.option(
+    '--offline-msg-initial <offline-msg-initial>',
+    'Initial for saved messages',
+    'persistence-message'
+  );
   return cmd.parse(argv).opts();
 }
 
@@ -65,11 +82,11 @@ class NotificationMS extends ServiceBase {
       type: 'meter'
     });
   }
+
   init() {
     const {
       listener,
-      events,
-      options: { offlineMsgInitial }
+      events
     } = this.context;
     listener.onMessage = async (event, message) => {
       switch (event) {
@@ -100,7 +117,7 @@ class NotificationMS extends ServiceBase {
             } else {
               messages = [message];
             }
-            const map_user_messages = messages.reduce((mapping, msg) => {
+            const userMessages = messages.reduce((mapping, msg) => {
               const user = msg.META.to;
               if (!mapping[user]) {
                 mapping[user] = [];
@@ -108,8 +125,8 @@ class NotificationMS extends ServiceBase {
               mapping[user].push(msg);
               return mapping;
             }, {});
-            Object.entries(map_user_messages).forEach(async ([to, msgs]) => {
-              msgs = msgs.filter((msg) => msg.META.type != 'notification');
+            Object.entries(userMessages).forEach(async ([to, msgs]) => {
+              msgs = msgs.filter((msg) => msg.META.type !== 'notification');
               const payloads = msgs.map((msg) => msg.payload);
               const record = await this.notificationTokensCollection.findOne(
                 { username: to },
@@ -137,6 +154,8 @@ class NotificationMS extends ServiceBase {
             });
           }
           break;
+        default:
+          throw new Error("Unknown event type");
       }
     };
   }
@@ -156,6 +175,7 @@ if (asMain) {
       await new NotificationMS(context).run();
     })
     .catch(async (error) => {
+      // eslint-disable-next-line no-console
       console.error('Failed to initialized Notification MS', error);
       process.exit(1);
     });

@@ -1,6 +1,12 @@
 const kafka = require('../../libs/kafka-utils');
-const { ServiceBase, initDefaultOptions, initDefaultResources, resolveEnvVariables } = require('../../libs/service-base');
+const {
+  ServiceBase,
+  initDefaultOptions,
+  initDefaultResources,
+  resolveEnvVariables
+} = require('../../libs/service-base');
 const { formatMessage } = require('../../libs/message-utils');
+
 const asMain = require.main === module;
 
 async function prepareEventList(context) {
@@ -29,10 +35,22 @@ function parseOptions(argv) {
   cmd = kafka.addStandardKafkaOptions(cmd);
   cmd = kafka.addKafkaSSLOptions(cmd);
   cmd
-    .option('--new-message-topic <new-message-topic>', 'Used by consumer to consume new message for each new incoming message')
-    .option('--group-message-topic <group-message-topic>', 'Used by producer to produce new message to handle by message router')
-    .option('--send-message-topic <send-message-topic>', 'Used by producer to produce new message to send message to user')
-    .option('--ack-topic <ack-topic>', 'Used by producer to produce new message for acknowledgment');
+    .option(
+      '--new-message-topic <new-message-topic>',
+      'Used by consumer to consume new message for each new incoming message'
+    )
+    .option(
+      '--group-message-topic <group-message-topic>',
+      'Used by producer to produce new message to handle by message router'
+    )
+    .option(
+      '--send-message-topic <send-message-topic>',
+      'Used by producer to produce new message to send message to user'
+    )
+    .option(
+      '--ack-topic <ack-topic>',
+      'Used by producer to produce new message for acknowledgment'
+    );
   return cmd.parse(argv).opts();
 }
 
@@ -45,6 +63,7 @@ class MessageRouterMS extends ServiceBase {
       type: 'meter'
     });
   }
+
   init() {
     const { listener } = this.context;
     listener.onMessage = (_, message) => {
@@ -52,6 +71,7 @@ class MessageRouterMS extends ServiceBase {
       this.redirectMessage(message);
     };
   }
+
   redirectMessage(message) {
     const start = Date.now();
     const { publisher, events } = this.context;
@@ -63,14 +83,12 @@ class MessageRouterMS extends ServiceBase {
     if (message.META.type === 'group') {
       const receiver = events['group-message'];
       publisher.send(receiver, message, user);
+    } else if (['ack', 'state'].includes(message.META.action)) {
+      const receiver = events.ack;
+      publisher.send(receiver, { items: [message] }, message.META.from);
     } else {
-      if (['ack', 'state'].includes(message.META.action)) {
-        const receiver = events['ack'];
-        publisher.send(receiver, { items: [message] }, message.META.from);
-      } else {
-        const receiver = events['send-message'];
-        publisher.send(receiver, { items: [message] }, user);
-      }
+      const receiver = events['send-message'];
+      publisher.send(receiver, { items: [message] }, user);
     }
     this.log.info('Message redirected', { sid: message.META.sid, latency: Date.now() - start });
   }
@@ -90,6 +108,7 @@ if (asMain) {
       await new MessageRouterMS(context).run();
     })
     .catch(async (error) => {
+      // eslint-disable-next-line no-console
       console.error('Failed to initialized Message Router MS', error);
       process.exit(1);
     });

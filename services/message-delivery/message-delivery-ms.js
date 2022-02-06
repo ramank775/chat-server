@@ -1,10 +1,16 @@
-const kafka = require('../../libs/kafka-utils');
-const { ServiceBase, initDefaultOptions, initDefaultResources, resolveEnvVariables } = require('../../libs/service-base');
 const fetch = require('node-fetch');
-const cache = require('../../libs/cache-utils');
+const kafka = require('../../libs/kafka-utils');
+const {
+  ServiceBase,
+  initDefaultOptions,
+  initDefaultResources,
+  resolveEnvVariables
+} = require('../../libs/service-base');
+const cache = require('../../libs/cache');
 const disoveryService = require('../../libs/discovery-service-utils');
 const database = require('./database');
-const { shortuuid } = require('../../helper')
+const { shortuuid } = require('../../helper');
+
 const asMain = require.main === module;
 
 async function prepareEventList(context) {
@@ -39,11 +45,25 @@ function parseOptions(argv) {
   cmd = cache.addMemCacheOptions(cmd);
   cmd = kafka
     .addKafkaSSLOptions(cmd)
-    .option('--user-connection-state-topic <user-connection-state-topic>', 'Used by consumer to consume new message when a user connected/disconnected to server')
-    .option('--send-message-topic <send-message-topic>', 'Used by consumer to consume new message to send to user')
-    .option('--offline-message-topic <offline-message-topic>', 'Used by producer to produce new message for offline')
+    .option(
+      '--user-connection-state-topic <user-connection-state-topic>',
+      'Used by consumer to consume new message when a user connected/disconnected to server'
+    )
+    .option(
+      '--send-message-topic <send-message-topic>',
+      'Used by consumer to consume new message to send to user'
+    )
+    .option(
+      '--offline-message-topic <offline-message-topic>',
+      'Used by producer to produce new message for offline'
+    )
     .option('--ack-topic <ack-topic>', 'Used by producer to produce new message for acknowledgment')
-    .option('--message-max-retries <message-max-retries>', 'Max no of retries to deliver message (default value is 3)', (value) => parseInt(value), 3);
+    .option(
+      '--message-max-retries <message-max-retries>',
+      'Max no of retries to deliver message (default value is 3)',
+      (value) => Number(value),
+      3
+    );
   return cmd.parse(argv).opts();
 }
 
@@ -62,6 +82,7 @@ class MessageDeliveryMS extends ServiceBase {
       type: 'meter'
     });
   }
+
   init() {
     const { listener, events } = this.context;
     listener.onMessage = async (event, value) => {
@@ -73,21 +94,25 @@ class MessageDeliveryMS extends ServiceBase {
               case 'connect':
                 this.onConnect(user, server);
                 break;
-              case 'disconnect': {
+              case 'disconnect':
                 this.onDisconnect(user, server);
-              }
+                break;
+              default:
+                throw new Error('Unkown action');
             }
           }
           break;
         case events['send-message']:
           this.onMessage(value);
           break;
-        case events['ack']:
+        case events.ack:
           {
             const { items } = value;
             this.ackMessage(items);
           }
           break;
+        default:
+          throw new Error(`Unknown event ${event}`);
       }
     };
   }
@@ -100,7 +125,7 @@ class MessageDeliveryMS extends ServiceBase {
 
   async onDisconnect(user, server) {
     const exitingServer = await this.memCache.get(user);
-    if (exitingServer == server) {
+    if (exitingServer === server) {
       await this.memCache.del(user);
       this.userConnectedCounter.dec(1);
     }
@@ -112,9 +137,9 @@ class MessageDeliveryMS extends ServiceBase {
   }
 
   ackMessage(items) {
-    const state_ack_msgs = items.filter(msg => msg.META.action === 'state')
-    this.onMessage({ items: state_ack_msgs })
-    const map_user_message = items.reduce((mapping, msg) => {
+    const stateAckMsgs = items.filter((msg) => msg.META.action === 'state');
+    this.onMessage({ items: stateAckMsgs });
+    const userMessages = items.reduce((mapping, msg) => {
       const user = msg.META.from;
       if (!mapping[user]) {
         mapping[user] = [];
@@ -122,14 +147,14 @@ class MessageDeliveryMS extends ServiceBase {
       mapping[user].push(...msg.payload.body.ids);
       return mapping;
     }, {});
-    Object.entries(map_user_message).forEach(async ([user, ids]) => {
+    Object.entries(userMessages).forEach(async ([user, ids]) => {
       await this.db.markMessageDeliveredByUser(user, ids);
     });
   }
 
   async sendMessage(value) {
     const { asyncStorage } = this.context;
-    const track_id = asyncStorage.getStore() || shortuuid()
+    const trackId = asyncStorage.getStore() || shortuuid();
     const { online, offline } = await this.createMessageGroup(value);
 
     if (offline.length) this.sendOfflineMessage(offline);
@@ -142,20 +167,20 @@ class MessageDeliveryMS extends ServiceBase {
         body: JSON.stringify({ items: messages }),
         headers: {
           'Content-Type': 'application/json',
-          'x-request-id': track_id
+          'x-request-id': trackId
         }
       })
         .then((res) => res.json())
         .then(({ errors }) => {
-          const failed_messages = errors.map((x) => x.messages);
+          const failedMessages = errors.map((x) => x.messages);
           // HACK: until client implements the proper ack and
           // server has rest endpoint for message sync and ack
           // remove successfully sent messages
-          this.markMessagesAsSent(messages, failed_messages);
+          this.markMessagesAsSent(messages, failedMessages);
           if (!errors.length) {
             return;
           }
-          this.sendMessage({ items: failed_messages.flat() });
+          this.sendMessage({ items: failedMessages.flat() });
         })
         .catch((e) => {
           this.log.error('Error while sending messages', e);
@@ -174,7 +199,7 @@ class MessageDeliveryMS extends ServiceBase {
     this.log.info(`Processing pending message for ${user}, length : ${messages.length}`);
 
     const payload = messages.map((m) => {
-      let { _id: _, ...msg } = m;
+      const { _id: _, ...msg } = m;
       msg.META.saved = true;
       return msg;
     });
@@ -186,78 +211,78 @@ class MessageDeliveryMS extends ServiceBase {
 
   async createMessageGroup(value) {
     const { items } = value;
-    const server_mapping = {};
-    const user_mapping = {};
+    const serverMapping = {};
+    const userMapping = {};
     const users = new Set();
-    const offline_messages = [];
+    const offlineMessages = [];
     items.forEach((message) => {
-      let { to, retry = -1, saved = false } = message.META;
+      const { to, retry = -1, saved = false } = message.META;
       // If messages is already saved don't send it to offline message again
       // even if retry count exceed
       if (retry > this.maxRetryCount && !saved) {
-        offline_messages.push(message);
+        offlineMessages.push(message);
         return;
       }
-      message.META.retry = ++retry;
-      const user_msgs = user_mapping[to];
-      if (user_msgs) {
-        user_msgs.push(message);
+      message.META.retry = retry + 1;
+      const userMsgs = userMapping[to];
+      if (userMsgs) {
+        userMsgs.push(message);
       } else {
         users.add(to);
-        user_mapping[to] = [message];
+        userMapping[to] = [message];
       }
     });
-
-    for (const u of users) {
-      const server = await this.getServer(u);
+    const userServers = await this.getServer(users);
+    users.forEach(user => {
+      const server = userServers[user];
       if (!server) {
         // If messages is already saved don't send it to offline message again
-        const msgs = user_mapping[u].filter((m) => !m.saved);
-        offline_messages.push(...msgs);
+        const msgs = userMapping[user].filter((m) => !m.saved);
+        offlineMessages.push(...msgs);
       } else {
-        const item = server_mapping[server];
+        const item = serverMapping[server];
         if (item) {
-          item.push(user_mapping[u]);
+          item.push(userMapping[user]);
         } else {
-          server_mapping[server] = [user_mapping[u]];
+          serverMapping[server] = [userMapping[user]];
         }
       }
-    }
+    })
     return {
-      online: server_mapping,
-      offline: offline_messages
+      online: serverMapping,
+      offline: offlineMessages
     };
   }
 
-  async markMessagesAsSent(messages, failed_messages) {
-    const flatten_failed_msgs = failed_messages.reduce((acc, item) => {
+  async markMessagesAsSent(messages, failedMessages) {
+    const flattenFailedMsgs = failedMessages.reduce((acc, item) => {
       if (!item || !(item && item.length)) return acc;
       const user = item[0].META.to;
-      acc[user] = item.reduce((acc, msg) => {
-        acc[msg.META.id] = msg;
-        return acc;
+      acc[user] = item.reduce((userMessages, msg) => {
+        userMessages[msg.META.id] = msg;
+        return userMessages;
       }, {});
       return acc;
     }, {});
 
-    const delivered_messages = messages.reduce((acc, msgs) => {
-      //if(!msgs || !(msgs && msgs.length)) return acc;
+    const deliveredMessages = messages.reduce((acc, msgs) => {
+      // if(!msgs || !(msgs && msgs.length)) return acc;
       if (!msgs.length) return acc;
       const user = msgs[0].META.to;
-      const failed_msgs = flatten_failed_msgs[user] || {};
+      const failedMsgs = flattenFailedMsgs[user] || {};
 
       acc[user] = acc[user] || [];
-      const msgIds = msgs.reduce((acc, msg) => {
-        if (!failed_msgs[msg.META.id]) {
-          acc.push(msg.META.id);
+      const msgIds = msgs.reduce((ids, msg) => {
+        if (!failedMsgs[msg.META.id]) {
+          ids.push(msg.META.id);
         }
-        return acc;
+        return ids;
       }, []);
       acc[user].push(...msgIds);
       return acc;
     }, {});
 
-    Object.entries(delivered_messages).forEach(async ([user, ids]) => {
+    Object.entries(deliveredMessages).forEach(async ([user, ids]) => {
       await this.db.markMessageDeliveredByUser(user, ids);
     });
   }
@@ -269,8 +294,13 @@ class MessageDeliveryMS extends ServiceBase {
     await this.db.close();
   }
 
-  async getServer(user) {
-    return (await this.memCache.get(user)) || null;
+  async getServer(users) {
+    const servers = await this.memCache.getAll(users);
+    const result = {}
+    for (let idx = 0; idx < users.length; idx += 1) {
+      result[users[idx]] = servers[idx];
+    }
+    return result;
   }
 }
 
@@ -282,6 +312,7 @@ if (asMain) {
       await new MessageDeliveryMS(context).run();
     })
     .catch(async (error) => {
+      // eslint-disable-next-line no-console
       console.error('Failed to initialized Message delivery MS', error);
       process.exit(1);
     });
