@@ -1,5 +1,5 @@
 const admin = require('firebase-admin');
-const kafka = require('../../libs/kafka-utils');
+const eventStore = require('../../libs/event-store');
 const {
   ServiceBase,
   initDefaultOptions,
@@ -37,7 +37,7 @@ async function initFirebaseAdmin(context) {
 async function initResources(options) {
   const context = await initDefaultResources(options)
     .then(prepareEventList)
-    .then(kafka.initEventListener)
+    .then(eventStore.initializeEventStore({ consumer: true }))
     .then(initMongoClient)
     .then(initFirebaseAdmin);
   return context;
@@ -45,8 +45,7 @@ async function initResources(options) {
 
 function parseOptions(argv) {
   let cmd = initDefaultOptions();
-  cmd = kafka.addStandardKafkaOptions(cmd);
-  cmd = kafka.addKafkaSSLOptions(cmd);
+  cmd = eventStore.addEventStoreOptions(cmd);
   cmd = addMongodbOptions(cmd);
   cmd.option(
     '--offline-message-topic <offline-message-topic>',
@@ -81,14 +80,14 @@ class NotificationMS extends ServiceBase {
       name: 'failedNotification/sec',
       type: 'meter'
     });
+    /** @type {import('../../libs/event-store/iEventStore').IEventStore} */
+    this.eventStore = this.context.eventStore;
+    this.events = this.context.events;
   }
 
   init() {
-    const {
-      listener,
-      events
-    } = this.context;
-    listener.onMessage = async (event, message) => {
+    const {events} = this;
+    this.eventStore.on = async (event, message) => {
       switch (event) {
         case events['new-login']:
           {
@@ -161,8 +160,7 @@ class NotificationMS extends ServiceBase {
   }
 
   async shutdown() {
-    const { listener } = this.context;
-    await listener.disconnect();
+    await this.eventStore.dispose();
     await this.context.mongoClient.close();
   }
 }

@@ -8,7 +8,7 @@ const { HttpServiceBase } = require('../../libs/http-service-base');
 const { addMongodbOptions, initMongoClient } = require('../../libs/mongo-utils');
 const { uuidv4, shortuuid, extractInfoFromRequest } = require('../../helper');
 const { formatMessage } = require('../../libs/message-utils');
-const kafka = require('../../libs/kafka-utils');
+const eventStore = require('../../libs/event-store');
 
 const asMain = require.main === module;
 
@@ -16,8 +16,7 @@ function parseOptions(argv) {
   let cmd = initDefaultOptions();
   cmd = addStandardHttpOptions(cmd);
   cmd = addMongodbOptions(cmd);
-  cmd = kafka.addStandardKafkaOptions(cmd);
-  cmd = kafka.addKafkaSSLOptions(cmd);
+  cmd = eventStore.addEventStoreOptions(cmd);
   cmd = cmd.option(
     '--new-group-message-topic <new-group-message-topic>',
     'Used by consumer to consume new group message for each new incoming message'
@@ -26,7 +25,9 @@ function parseOptions(argv) {
 }
 
 async function initResource(options) {
-  return await initDefaultResources(options).then(initMongoClient).then(kafka.initEventProducer);
+  return await initDefaultResources(options)
+    .then(initMongoClient)
+    .then(eventStore.initializeEventStore({ producer: true }));
 }
 
 class GroupMs extends HttpServiceBase {
@@ -34,7 +35,8 @@ class GroupMs extends HttpServiceBase {
     super(context);
     this.mongoClient = context.mongoClient;
     this.groupCollection = context.mongodbClient.collection('groups');
-    this.publisher = this.context.publisher;
+    /** @type {import('../../libs/event-store/iEventStore').IEventStore} */
+    this.eventStore = this.context.eventStore;
   }
 
   async init() {
@@ -214,13 +216,13 @@ class GroupMs extends HttpServiceBase {
       payload
     };
     const message = formatMessage(msg);
-    this.publisher.send(kafkaNewGroupMessageTopic, message, notification.from);
+    this.eventStore.emit(kafkaNewGroupMessageTopic, message, notification.from);
   }
 
   async shutdown() {
     await super.shutdown();
     await this.context.mongoClient.close();
-    await this.publisher.disconnect();
+    await this.eventStore.dispose();
   }
 }
 

@@ -1,5 +1,5 @@
 const fetch = require('node-fetch');
-const kafka = require('../../libs/kafka-utils');
+const eventStore = require('../../libs/event-store');
 const {
   ServiceBase,
   initDefaultOptions,
@@ -32,23 +32,20 @@ async function initResources(options) {
     .then(database.initDatabase)
     .then(prepareEventList)
     .then(disoveryService.initDiscoveryService)
-    .then(kafka.initEventListener)
-    .then(kafka.initEventProducer);
+    .then(eventStore.initializeEventStore({ producer: true, consumer: true }));
   return context;
 }
 
 function parseOptions(argv) {
   let cmd = initDefaultOptions();
-  cmd = kafka.addStandardKafkaOptions(cmd);
+  cmd = eventStore.addEventStoreOptions(cmd);
   cmd = database.addDatabaseOptions(cmd);
   cmd = disoveryService.addDiscoveryServiceOptions(cmd);
   cmd = cache.addMemCacheOptions(cmd);
-  cmd = kafka
-    .addKafkaSSLOptions(cmd)
-    .option(
-      '--user-connection-state-topic <user-connection-state-topic>',
-      'Used by consumer to consume new message when a user connected/disconnected to server'
-    )
+  cmd = cmd.option(
+    '--user-connection-state-topic <user-connection-state-topic>',
+    'Used by consumer to consume new message when a user connected/disconnected to server'
+  )
     .option(
       '--send-message-topic <send-message-topic>',
       'Used by consumer to consume new message to send to user'
@@ -74,6 +71,9 @@ class MessageDeliveryMS extends ServiceBase {
     this.discoveryService = context.discoveryService;
     this.maxRetryCount = this.options.messageMaxRetries;
     this.db = context.db;
+    /** @type {import('../../libs/event-store/iEventStore').IEventStore} */
+    this.eventStore = this.context.eventStore;
+    this.events = this.context.events;
     this.userConnectedCounter = this.statsClient.counter({
       name: 'userconnected'
     });
@@ -84,8 +84,8 @@ class MessageDeliveryMS extends ServiceBase {
   }
 
   init() {
-    const { listener, events } = this.context;
-    listener.onMessage = async (event, value) => {
+    const {events} = this;
+    this.eventStore.on = async (event, value) => {
       switch (event) {
         case events['user-connection-state']:
           {
@@ -189,8 +189,7 @@ class MessageDeliveryMS extends ServiceBase {
   }
 
   async sendOfflineMessage(messages) {
-    const { events, publisher } = this.context;
-    publisher.send(events['offline-message'], messages);
+    this.eventStore.emit(this.events['offline-message'], messages);
   }
 
   async sendPendingMessage(user) {
@@ -288,9 +287,7 @@ class MessageDeliveryMS extends ServiceBase {
   }
 
   async shutdown() {
-    const { publisher, listener } = this.context;
-    await publisher.disconnect();
-    await listener.disconnect();
+    await this.eventStore.dispose();
     await this.db.close();
   }
 

@@ -7,7 +7,7 @@ const {
 } = require('../../libs/service-base');
 const { HttpServiceBase } = require('../../libs/http-service-base');
 const { addMongodbOptions, initMongoClient } = require('../../libs/mongo-utils');
-const kafka = require('../../libs/kafka-utils');
+const eventStore = require('../../libs/event-store');
 const { uuidv4, extractInfoFromRequest } = require('../../helper');
 
 const asMain = require.main === module;
@@ -73,8 +73,7 @@ function parseOptions(argv) {
   cmd = addStandardHttpOptions(cmd);
   cmd = addMongodbOptions(cmd);
   cmd = firebaseProjectOptions(cmd);
-  cmd = kafka.addStandardKafkaOptions(cmd);
-  cmd = kafka.addKafkaSSLOptions(cmd);
+  cmd = eventStore.addEventStoreOptions(cmd);
   cmd.option(
     '--new-login-topic <new-login-topic>',
     'New login topic used to produce new login events'
@@ -86,7 +85,7 @@ async function initResource(options) {
   return await initDefaultResources(options)
     .then(initMongoClient)
     .then(initFirebaseAdmin)
-    .then(kafka.initEventProducer)
+    .then(eventStore.initializeEventStore({ producer: true }))
     .then(initAccessKeyCache);
 }
 
@@ -97,7 +96,8 @@ class ProfileMs extends HttpServiceBase {
     this.profileCollection = context.mongodbClient.collection('profile');
     this.firebaseAuth = context.firebaseAuth;
     this.newLoginTopic = this.options.newLoginTopic;
-    this.publisher = context.publisher;
+    /** @type {import('../../libs/event-store/iEventStore').IEventStore} */
+    this.eventStore = context.eventStore;
     this.accessKeyProvider = context.accessKeyProvider;
   }
 
@@ -145,7 +145,7 @@ class ProfileMs extends HttpServiceBase {
         await this.profileCollection.insertOne(profile);
       }
       const accesskey = await this.accessKeyProvider.create(username);
-      this.publisher.send(this.newLoginTopic, payload, username);
+      this.eventStore.emit(this.newLoginTopic, payload, username);
       return {
         status: true,
         username,

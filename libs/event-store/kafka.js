@@ -1,6 +1,7 @@
 const fs = require('fs');
 const { Kafka, logLevel } = require('kafkajs');
-const { shortuuid } = require('../helper');
+const { shortuuid } = require('../../helper');
+const { IEventStore } = require('./iEventStore');
 
 /**
  * Add standard kafka options
@@ -277,54 +278,168 @@ function toLogLevel(level) {
       return logLevel.INFO
   }
 }
+
 /**
- * Get kafka instance
- * @param {Object} context
- * @return {Kafka}
+ * Add kafka broker options
+ * @param {commander} cmd
  */
-function getKafkaInstance(context) {
-  const { log: logger, options } = context;
-  let { kafka } = context;
-  if (!kafka) {
-    const kafkaOptions = parseKafkaOptions(options);
-    kafka = new Kafka({
-      ...kafkaOptions,
-      logLevel: toLogLevel(logger.level === 'debug' ? 'info' : logger.level),
-      logCreator: (_level) => ({ _namespace, level, _label, log }) => {
-        const { message, ...extra } = log;
-        logger.log({
-          level: toWinstonLogLevel(level),
-          message,
-          extra
-        });
-      }
-    });
-  }
-  context.kafka = kafka;
-  return kafka;
+function initOptions(cmd) {
+  cmd = addStandardKafkaOptions(cmd);
+  cmd = addKafkaSSLOptions(cmd);
+  return cmd;
 }
 
-async function createKakfaProducer(context) {
-  const { log, options, asyncStorage } = context;
-  const kafka = getKafkaInstance(context);
-  const producerOptions = parseKakfaProducerOptions(options);
-  const producer = kafka.producer(producerOptions);
-  log.info('connecting kafka producer');
-  await producer.connect();
-  const kafkaProducer = {
-    _producer: producer
-  };
+class KafkaEventStore extends IEventStore {
+  /** @type {import('../logger').Logger} */
+  #logger;
 
-  kafkaProducer.send = async function send(topic, message, key) {
-    const trackId = asyncStorage.getStore() || shortuuid();
+  #options = {};
+
+  /** @type {Kafka} */
+  #kafka;
+
+  /** @type {import('node:async_hooks').AsyncLocalStorage} */
+  #asyncStorage;
+
+  /** @type {import('kafkajs').Producer} */
+  #producer;
+
+  /** @type {import('kafkajs').Consumer} */
+  #consumer;
+
+  #isDisconnect = false;
+
+  /** @type { string[] } */
+  #listenerEvents
+
+  constructor(context) {
+    super();
+    this.#options = context.options;
+    this.#logger = context.log;
+    this.#listenerEvents = context.listenerEvents;
+  }
+
+  /**
+   * Get kafka instance
+   * @param {Object} context
+   * @return {Kafka}
+   */
+  #getKafkaInstance() {
+    if (!this.#kafka) {
+      const options = parseKafkaOptions(this.#options);
+      this.#kafka = new Kafka({
+        ...options,
+        logLevel: toLogLevel(this.#logger.level === 'debug' ? 'info' : this.#logger.level),
+        logCreator: (_level) => ({ _namespace, level, _label, log }) => {
+          const { message, ...extra } = log;
+          this.#logger.log({
+            level: toWinstonLogLevel(level),
+            message,
+            extra
+          });
+        }
+      });
+    }
+    return this.#kafka;
+  }
+
+  async #createKakfaProducer() {
+    const kafka = this.#getKafkaInstance();
+    const producerOptions = parseKakfaProducerOptions(this.#options);
+    this.#producer = kafka.producer(producerOptions);
+    this.#logger.info('connecting kafka producer');
+    await this.#producer.connect();
+    return this.#producer;
+  }
+
+  async #createKafkaConsumer() {
+    const kafka = this.#getKafkaInstance();
+    const consumerOptions = parseKakfaConsumerOptions(this.#options);
+    this.#consumer = kafka.consumer(consumerOptions);
+
+    try {
+      this.#logger.info('Connecting consumer.');
+      await this.#consumer.connect();
+      this.#logger.info('Consumer connected sucessfully.');
+    } catch (error) {
+      this.#logger.error(`Error while connecting consumer. ${error}`);
+      throw error;
+    }
+
+    try {
+      this.#logger.info(`Subscribing consumer to topics ${this.#listenerEvents}`);
+      const subscribePromise = this.#listenerEvents.map(event => this.#consumer.subscribe({ topic: event }));
+      await Promise.all(subscribePromise);
+      this.#logger.info(`Consumer subscribe to topics successfully`);
+    } catch (error) {
+      this.#logger.error(`Error while subscribing to the topics ${error}`);
+      throw error;
+    }
+    setTimeout(async () => {
+      try {
+        this.#logger.info(`Running consumer`);
+        await this.#consumer.run({
+          partitionsConsumedConcurrently: this.#listenerEvents.length,
+          eachMessage: ({ topic, partition, message }) => {
+            const start = Date.now();
+            const trackId = message.headers.track_id.toString() || shortuuid();
+            this.#asyncStorage.run(trackId, () => {
+              const data = {
+                key: message.key ? message.key.toString() : null,
+                value: JSON.parse(message.value.toString())
+              };
+              const logInfo = {
+                topic,
+                partition,
+                offset: message.offset,
+                key: data.key
+              };
+              this.#logger.info(`new data received`, { ...logInfo, ...(data.value.META || {}) });
+              const sConsume = Date.now();
+              this.on(topic, data.value);
+              logInfo.latency = Date.now() - start;
+              logInfo.consume_latency = Date.now() - sConsume;
+              this.#logger.info('message consumed', logInfo);
+            });
+          }
+        });
+      } catch (error) {
+        this.#logger.error(`Error while running consumer ${error}`, { error });
+      }
+    }, 500);
+
+    return this.#consumer;
+  }
+
+  /**
+   * Initialize kafka event store
+   * @param {import('./iEventStore').InitOptions} options 
+   */
+  async init(options) {
+    if (options.producer) {
+      await this.#createKakfaProducer();
+    }
+    if (options.consumer) {
+      await this.#createKafkaConsumer();
+    }
+  }
+
+  /**
+   * Emit an new event to event store
+   * @param {string} event Name of the event
+   * @param {*} args Event arguments
+   * @param {string} key
+   */
+  async emit(event, args, key) {
+    const trackId = this.#asyncStorage.getStore() || shortuuid();
     try {
       const start = Date.now();
-      let response = await this._producer.send({
-        topic,
+      const [response] = await this.#producer.send({
+        event,
         messages: [
           {
             key,
-            value: JSON.stringify(message),
+            value: JSON.stringify(args),
             acks: 1,
             headers: {
               track_id: trackId
@@ -333,121 +448,50 @@ async function createKakfaProducer(context) {
         ]
       });
       const elasped = Date.now() - start;
-      if (response.length) {
-        response = response[0];
-      }
-      log.info(`Sucessfully produced message`, {
-        topic,
+      this.#logger.info(`Sucessfully produced message`, {
+        event,
         partition: response.partition,
         offset: response.baseOffset,
         key,
         produceIn: elasped
       });
     } catch (error) {
-      log.error(`Error while producing message`, { error });
+      this.#logger.error(`Error while producing message`, { error });
       throw error;
     }
-  };
+  }
 
-  kafkaProducer.disconnect = async function disconnect() {
-    log.info('Disconnecting kafka producer');
-    try {
-      await this._producer.disconnect();
-      log.info('Producer disconnected');
-    } catch (err) {
-      log.error(`Producer failed to disconnect ${err}`);
-    }
-  };
-  return kafkaProducer;
-}
-
-async function createKafkaConsumer(context) {
-  const { listenerEvents, options, log, asyncStorage } = context;
-  const kafka = getKafkaInstance(context);
-  const consumerOptions = parseKakfaConsumerOptions(options);
-  const consumer = kafka.consumer(consumerOptions);
-  const kafkaConsumer = {
-    _consumer: consumer,
-    isDisconnected: false,
-    onMessage: () => { },
-    async disconnect() {
-      this.isDisconnected = true;
+  async dispose() {
+    super.dispose();
+    if (this.#producer) {
+      this.#logger.info('Disconnecting kafka producer');
       try {
-        log.info('Disconnecting kafka producer');
-        await this._consumer.disconnect();
-        log.info('Producer disconnected');
-      } catch (error) {
-        log.error(`Consumer failed to disconnect ${error}`, error);
+        await this.#producer.disconnect();
+        this.#logger.info('Producer disconnected');
+      } catch (err) {
+        this.#logger.error(`Producer failed to disconnect ${err}`);
       }
     }
-  };
-  try {
-    log.info('Connecting consumer.');
-    await consumer.connect();
-    log.info('Consumer connected sucessfully.');
-  } catch (error) {
-    log.error(`Error while connecting consumer. ${error}`);
-    throw error;
-  }
-
-  try {
-    log.info(`Subscribing consumer to topics ${listenerEvents}`);
-    const subscribePromise = listenerEvents.map(event => consumer.subscribe({ topic: event }));
-    await Promise.all(subscribePromise);
-    log.info(`Consumer subscribe to topics successfully`);
-  } catch (error) {
-    log.error(`Error while subscribing to the topics ${error}`);
-    throw error;
-  }
-  setTimeout(async () => {
-    try {
-      log.info(`Running consumer`);
-      await consumer.run({
-        partitionsConsumedConcurrently: listenerEvents.length,
-        eachMessage: ({ topic, partition, message }) => {
-          const start = Date.now();
-          const trackId = message.headers.track_id.toString() || shortuuid();
-          asyncStorage.run(trackId, () => {
-            const data = {
-              key: message.key ? message.key.toString() : null,
-              value: JSON.parse(message.value.toString())
-            };
-            const logInfo = {
-              topic,
-              partition,
-              offset: message.offset,
-              key: data.key
-            };
-            log.info(`new data received`, { ...logInfo, ...(data.value.META || {}) });
-            const sConsume = Date.now();
-            kafkaConsumer.onMessage(topic, data.value);
-            logInfo.latency = Date.now() - start;
-            logInfo.consume_latency = Date.now() - sConsume;
-            log.info('message consumed', logInfo);
-          });
-        }
-      });
-    } catch (error) {
-      log.error(`Error while running consumer ${error}`, { error });
+    if (this.#consumer) {
+      this.#isDisconnect = true;
+      try {
+        this.#logger.info('Disconnecting kafka producer');
+        await this.#consumer.disconnect();
+        this.#logger.info('Consumer disconnected');
+      } catch (error) {
+        this.#logger.error(`Consumer failed to disconnect ${error}`, error);
+      }
     }
-  }, 500);
-
-  return kafkaConsumer;
+  }
 }
 
-async function initEventProducer(context) {
-  context.publisher = await createKakfaProducer(context);
-  return context;
+async function initialize(context, options) {
+  const store = new KafkaEventStore(context);
+  await store.init(options);
+  return store;
 }
-
-async function initEventListener(context) {
-  context.listener = await createKafkaConsumer(context);
-  return context;
-}
-
 module.exports = {
-  addStandardKafkaOptions,
-  addKafkaSSLOptions,
-  initEventProducer,
-  initEventListener
+  code: 'kafka',
+  initOptions,
+  initialize
 };

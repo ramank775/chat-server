@@ -6,7 +6,7 @@ const {
   resolveEnvVariables
 } = require('../../libs/service-base');
 const { HttpServiceBase } = require('../../libs/http-service-base');
-const kafka = require('../../libs/kafka-utils');
+const EventStore = require('../../libs/event-store');
 const { uuidv4, shortuuid, extractInfoFromRequest } = require('../../helper');
 
 const asMain = require.main === module;
@@ -23,7 +23,7 @@ async function prepareListEvent(context) {
 async function initResources(options) {
   const context = await initDefaultResources(options)
     .then(prepareListEvent)
-    .then(kafka.initEventProducer);
+    .then(EventStore.initializeEventStore({ producer: true }));
 
   return context;
 }
@@ -31,8 +31,7 @@ async function initResources(options) {
 function parseOptions(argv) {
   let cmd = initDefaultOptions();
   cmd = addStandardHttpOptions(cmd);
-  cmd = kafka.addStandardKafkaOptions(cmd);
-  cmd = kafka.addKafkaSSLOptions(cmd);
+  cmd = EventStore.addEventStoreOptions(cmd);
   cmd
     .option(
       '--gateway-name <app-name>',
@@ -69,11 +68,14 @@ function getUserInfoFromRequest(request) {
 class Gateway extends HttpServiceBase {
   constructor(context) {
     super(context);
-    const { publisher } = this.context;
-    const { events } = this.context;
+    /** @type {{eventStore: import('../../libs/event-store/iEventStore').IEventStore}} */
+    const {
+      eventStore,
+      events
+    } = this.context;
     const serverName = this.options.gatewayName;
     const publishEvent = (event, user, eventArgs) => {
-      publisher.send(event, eventArgs, user);
+      eventStore.emit(event, eventArgs, user);
     };
     const userConnectedCounter = this.statsClient.counter({
       name: 'userConnected'
@@ -195,9 +197,10 @@ class Gateway extends HttpServiceBase {
   }
 
   async shutdown() {
-    const { publisher, listener } = this.context;
-    publisher.disconnect();
-    listener.disconnect();
+    await super.shutdown()
+    const { eventStore } = this.context;
+    await eventStore.dispose()
+
   }
 
 }

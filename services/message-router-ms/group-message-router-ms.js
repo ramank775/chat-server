@@ -1,4 +1,4 @@
-const kafka = require('../../libs/kafka-utils');
+const eventStore = require('../../libs/event-store');
 const {
   ServiceBase,
   initDefaultOptions,
@@ -25,15 +25,13 @@ async function initResources(options) {
   const context = await initDefaultResources(options)
     .then(initMongoClient)
     .then(prepareEventList)
-    .then(kafka.initEventProducer)
-    .then(kafka.initEventListener);
+    .then(eventStore.initializeEventStore({ producer: true, consumer: true }));
   return context;
 }
 
 function parseOptions(argv) {
   let cmd = initDefaultOptions();
-  cmd = kafka.addStandardKafkaOptions(cmd);
-  cmd = kafka.addKafkaSSLOptions(cmd);
+  cmd = eventStore.addEventStoreOptions(cmd);
   cmd = addMongodbOptions(cmd);
   cmd
     .option(
@@ -57,18 +55,19 @@ class GroupMessageRouterMS extends ServiceBase {
     super(context);
     this.mongoClient = context.mongoClient;
     this.groupCollection = context.mongodbClient.collection('groups');
+    /** @type {import('../../libs/event-store/iEventStore').IEventStore} */
+    this.eventStore = context.eventStore;
+    this.events = context.events;
   }
 
   init() {
-    const { listener } = this.context;
-    listener.onMessage = async (_, message) => {
+    this.eventStore.on = async (_, message) => {
       this.redirectMessage(message);
     };
   }
 
   async redirectMessage(message) {
     const start = Date.now();
-    const { publisher, events } = this.context;
     if (!message.META.parsed) {
       message = formatMessage(message);
     }
@@ -79,8 +78,7 @@ class GroupMessageRouterMS extends ServiceBase {
     users = users.filter((x) => x !== message.META.from);
     if (message.META.action === 'ack') {
       message.META.users = users;
-      const receiver = events.ack;
-      publisher.send(receiver, { items: [message] }, message.META.from);
+      this.eventStore.emit(this.events.ack, { items: [message] }, message.META.from);
     } else {
       const messages = users.map((user) => {
         if (typeof user === 'object') {
@@ -90,18 +88,14 @@ class GroupMessageRouterMS extends ServiceBase {
         // Set message META property type as single so failed message to be handled by mesasge router
         msg.META = { ...msg.META, to: user, users: undefined };
         return msg;
-      })
-
-      const receiver = events['send-message'];
-      publisher.send(receiver, { items: messages });
+      });
+      this.eventStore.emit(this.events['send-message'], { items: messages });
     }
     this.log.info('Message redirected', { sid: message.META.sid, latency: Date.now() - start });
   }
 
   async shutdown() {
-    const { publisher, listener } = this.context;
-    await publisher.disconnect();
-    await listener.disconnect();
+    await this.eventStore.dispose();
     await this.context.mongoClient.close();
   }
 

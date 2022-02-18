@@ -1,34 +1,16 @@
-/**
- * @callback Produce
- * @param {string} topic
- * @param {*} message
- * @param {string|undefined} key
- */
-/**
- * @typedef IProducer
- * @property {Produce} produce
- */
+const { IEventStore } = require('./iEventStore')
+const Kafka = require('./kafka');
 
-/**
- * @typedef IConsumer
- * @function onMessage
- */
-
-/**
- * @typedef IEventStore
- * @property {IProducer} producer
- * @property {} consumer
- * @callback disconnect
- */
-
-const EVENT_STORE = [];
+const EVENT_STORE = [
+  Kafka
+];
 
 /**
  * Add command line options for event store
  * @param {import('commander').Command} cmd
  * @returns {import('commander').Command}
  */
-function addEventStoreOptions(cmd) {
+function addOptions(cmd) {
   cmd = cmd.option('--event-store <event-source>', 'Which event store to use (Kafka)', 'kafka');
   EVENT_STORE.forEach((store) => {
     if (store.initOptions) {
@@ -56,31 +38,21 @@ function getEventStoreImpl(context) {
 }
 
 /**
- * Initialize event store
- * @param {{options: { eventStore: string, [key: string]: any}, [key: string]: *}} context
+ * Initialize Eventstore
+ * @param {import('./iEventStore').InitOptions} options 
+ * @returns 
  */
-async function initEventStoreProducer(context) {
-  const store = getEventStoreImpl(context);
-  const producer = store.initProducer(context);
-  const eventStore = context.eventStore || {};
-  eventStore.producer = producer;
-  context.eventStore = eventStore;
-  return context;
-}
-
-/**
- * Initialize event store
- * @param {{options: { eventStore: string, [key: string]: any}, [key: string]: *}} context
- */
-async function initEventStoreConsumer(context) {
-  const store = getEventStoreImpl(context);
-  const consumer = store.initConsumer(context);
-  context.consumer = consumer;
-  return context;
+function initialize(options) {
+  return async (context) => {
+    const impl = getEventStoreImpl(context)
+    const store = await impl.initialize(context, options)
+    context.eventStore = store;
+    return context;
+  }
 }
 
 module.exports = {
-  addEventStoreOptions,
-  initEventStoreProducer,
-  initEventStoreConsumer
+  IEventStore,
+  addEventStoreOptions: addOptions,
+  initializeEventStore: initialize
 }
