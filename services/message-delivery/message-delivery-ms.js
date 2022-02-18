@@ -231,7 +231,7 @@ class MessageDeliveryMS extends ServiceBase {
         userMapping[to] = [message];
       }
     });
-    const userServers = await this.getServer(users);
+    const userServers = await this.getServer([...users]);
     users.forEach(user => {
       const server = userServers[user];
       if (!server) {

@@ -317,6 +317,7 @@ class KafkaEventStore extends IEventStore {
     this.#options = context.options;
     this.#logger = context.log;
     this.#listenerEvents = context.listenerEvents;
+    this.#asyncStorage = context.asyncStorage;
   }
 
   /**
@@ -435,17 +436,17 @@ class KafkaEventStore extends IEventStore {
     try {
       const start = Date.now();
       const [response] = await this.#producer.send({
-        event,
+        topic: event,
         messages: [
           {
             key,
             value: JSON.stringify(args),
-            acks: 1,
             headers: {
               track_id: trackId
             }
           }
-        ]
+        ],
+        acks: 1,
       });
       const elasped = Date.now() - start;
       this.#logger.info(`Sucessfully produced message`, {

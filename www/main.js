@@ -8,7 +8,7 @@ let id = 0;
 */
 // eslint-disable-next-line prefer-const
 let enableAck = true;
-
+let timer = null;
 function getCookie(cname) {
   const name = `${cname}=`;
   const decodedCookie = decodeURIComponent(document.cookie);
@@ -238,10 +238,17 @@ function connectSocket() {
     ws.onclose = function onclose() {
       console.log('onclose');
       document.getElementById('status').innerText = 'Disconnected';
+      clearInterval(timer);
+      timer= null;
     };
     ws.onerror = function onerror() {
       console.log('onerror');
+      clearInterval(timer);
+      timer= null;
     };
+    timer = setInterval(() => {
+      ws.ping();
+    },30000)
   } else {
     console.log('WebSocket object is not supported in your browser');
   }
