@@ -65,8 +65,8 @@
         "--send-message-topic=${TOPIC_SEND_MESSAGE}",
         "--new-message-topic=${TOPIC_NEW_MESSAGE}",
         "--ack-topic=${TOPIC_ACK_MESSAGE}",
+        "--group-message-topic=${TOPIC_NEW_GROUP_MS}",
         "--kafka-broker-list=${BROKER_LIST}",
-        "--kafka-group-message-topic=${TOPIC_NEW_GROUP_MS}",
         "--kafka-security-protocol=${KAFKA_SECURITY_PROTOCOL}",
         "--kafka-sasl-username=${KAFKA_SASL_USERNAME}",
         "--kafka-sasl-password=${KAFKA_SASL_PASSWORD}"

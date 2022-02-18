@@ -189,7 +189,7 @@ class GroupMs extends HttpServiceBase {
    * @param {{from: string, to: string[], groupId: string, action: string; body: unknown}} notification
    */
   sendNotification(notification) {
-    const { kafkaNewGroupMessageTopic } = this.options;
+    const { newGroupMessageTopic } = this.options;
     const payload = JSON.stringify({
       _v: 2.0,
       id: shortuuid(),
@@ -216,7 +216,7 @@ class GroupMs extends HttpServiceBase {
       payload
     };
     const message = formatMessage(msg);
-    this.eventStore.emit(kafkaNewGroupMessageTopic, message, notification.from);
+    this.eventStore.emit(newGroupMessageTopic, message, notification.from);
   }
 
   async shutdown() {

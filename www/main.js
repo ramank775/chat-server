@@ -247,7 +247,7 @@ function connectSocket() {
       timer= null;
     };
     timer = setInterval(() => {
-      ws.ping();
+      ws.send(0x9);
     },30000)
   } else {
     console.log('WebSocket object is not supported in your browser');
