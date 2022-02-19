@@ -1,6 +1,6 @@
 
 image:
-  file: .gitpod.Dockerfile
+  file: .gitpod/Dockerfile
 
 ports:
   - port: 8080
@@ -10,16 +10,18 @@ tasks:
   - init: yarn install
   - name: Kafka 
     command: > 
-      chmod +x deployment/dev/scripts/init-kafka.bash &&
+      chmod +x deployment/scripts/init-kafka.bash &&
       cp .env.tmpl .env &&
       KAFKA_HOME=/kafka &&
-      ./deployment/dev/scripts/init-kafka.bash $KAFKA_HOME .env
+      ./deployment/scripts/init-kafka.bash $KAFKA_HOME .env
   - name: Nginx
     command: nginx
   - name: mongodb
     command: mkdir -p /workspace/data && mongod --dbpath /workspace/data
   - name: redis
     command:  redis-server 
+  - name: firebase
+    command: cd ./deployment/config/firebase && cp service.json.example service.json
 
 vscode:
   extensions:

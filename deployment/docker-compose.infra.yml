@@ -1,0 +1,101 @@
+version: "3.9"
+
+networks:
+  vartalap:
+
+services:
+
+  nginx:
+    ports:
+      - "8080:8080"
+    networks:
+      - vartalap
+    logging:
+      options:
+        max-size: "100m"
+
+  redis:
+    image: redis:6.2
+    logging:
+      options:
+        max-size: "50m"
+    networks:
+      - vartalap
+
+  gateway:
+    networks:
+      - vartalap
+    logging:
+      options:
+        max-size: "100m"
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+
+  message-delivery:
+    image: ramank775/chatserver:${CHAT_SERVER_TAG}
+    networks:
+      - vartalap
+    logging:
+      options:
+        max-size: "100m"
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+
+  message_router:
+    networks:
+      - vartalap
+    logging:
+      options:
+        max-size: "100m"
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+
+  profile:
+    networks:
+      - vartalap
+    logging:
+      options:
+        max-size: "100m"
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+
+  group:
+    networks:
+      - vartalap
+    logging:
+      options:
+        max-size: "100m"
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+
+  group_message_router:
+    networks:
+      - vartalap
+    logging:
+      options:
+        max-size: "100m"
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+
+  notification:
+    networks:
+      - vartalap
+    logging:
+      options:
+        max-size: "100m"
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure

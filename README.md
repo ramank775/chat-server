@@ -153,12 +153,12 @@ Click on the Gitpod badge it will start the fully setup development environment.
     ```
 - Initialize Kafka 
     ```
-    cd deployment/dev/scripts
+    cd deployment/scripts
     ./init-kafka.bash ${KAFKA_INSTALLATION_DIRECTORY} .env
     ```
 - Open project in vscode
 - Start the required microservice from `RUN and DEBUG` option
-- (Optional) Start nginx using the configuration [deployment/dev/config/nginx.config](./deployment/dev/config/nginx.config)
+- (Optional) Start nginx using the configuration [deployment/config/nginx.config](./deployment/config/nginx.config)
 
 
 

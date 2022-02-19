@@ -2,7 +2,7 @@
 .vscode
 node_modules
 deployment
-!deployment/dev/config/load.nginx.conf
+!deployment/config/load.nginx.conf
 docs
 www
 .env*
