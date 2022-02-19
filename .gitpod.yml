@@ -8,10 +8,9 @@ ports:
 
 tasks:
   - init: yarn install
-  - name: Kafka 
+  - name: Kafka
+    init: chmod +x deployment/scripts/*.bash && ./deployment/scripts/setup.bash 
     command: > 
-      chmod +x deployment/scripts/init-kafka.bash &&
-      cp .env.tmpl .env &&
       KAFKA_HOME=/kafka &&
       ./deployment/scripts/init-kafka.bash $KAFKA_HOME .env
   - name: Nginx
@@ -20,8 +19,7 @@ tasks:
     command: mkdir -p /workspace/data && mongod --dbpath /workspace/data
   - name: redis
     command:  redis-server 
-  - name: firebase
-    command: cd ./deployment/config/firebase && cp service.json.example service.json
+
 
 vscode:
   extensions:
