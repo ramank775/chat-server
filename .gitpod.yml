@@ -15,7 +15,7 @@ tasks:
       KAFKA_HOME=/kafka &&
       ./deployment/scripts/init-kafka.bash $KAFKA_HOME .env
   - name: Nginx
-    command: NGINX_DOCROOT="${GITPOD_REPO_ROOT}/www" && nginx
+    command: export NGINX_DOCROOT="${GITPOD_REPO_ROOT}/www" && nginx
   - name: mongodb
     command: mkdir -p /workspace/data && mongod --dbpath /workspace/data
   - name: redis
