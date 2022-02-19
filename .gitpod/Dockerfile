@@ -9,4 +9,3 @@ RUN wget https://downloads.apache.org/kafka/3.0.0/kafka_2.13-3.0.0.tgz  && \
     sudo mv kafka_2.13-3.0.0 /kafka && \
     rm kafka_2.13-3.0.0.tgz
 
-ENV NGINX_DOCROOT="${GITPOD_REPO_ROOT}/www"
