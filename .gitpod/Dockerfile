@@ -1,6 +1,6 @@
 FROM gitpod/workspace-mongodb
 
-COPY ./load.nginx.conf /etc/nginx/nginx.conf
+COPY .gitpod/load.nginx.conf /etc/nginx/nginx.conf
 
 RUN sudo apt-get update && sudo apt-get install redis-server -y
 
