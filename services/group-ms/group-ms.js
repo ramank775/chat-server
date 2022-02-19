@@ -1,31 +1,33 @@
 const {
-    initDefaultOptions,
-    initDefaultResources,
-    addStandardHttpOptions,
-    resolveEnvVariables
-  } = require('../../libs/service-base'),
-  { HttpServiceBase } = require('../../libs/http-service-base'),
-  { addMongodbOptions, initMongoClient } = require('../../libs/mongo-utils'),
-  { uuidv4, shortuuid, extractInfoFromRequest } = require('../../helper'),
-  { formatMessage } = require('../../libs/message-utils'),
-  kafka = require('../../libs/kafka-utils'),
-  asMain = require.main === module;
+  initDefaultOptions,
+  initDefaultResources,
+  addStandardHttpOptions,
+  resolveEnvVariables
+} = require('../../libs/service-base');
+const { HttpServiceBase } = require('../../libs/http-service-base');
+const { addMongodbOptions, initMongoClient } = require('../../libs/mongo-utils');
+const { uuidv4, shortuuid, extractInfoFromRequest } = require('../../helper');
+const { formatMessage } = require('../../libs/message-utils');
+const eventStore = require('../../libs/event-store');
+
+const asMain = require.main === module;
 
 function parseOptions(argv) {
   let cmd = initDefaultOptions();
   cmd = addStandardHttpOptions(cmd);
   cmd = addMongodbOptions(cmd);
-  cmd = kafka.addStandardKafkaOptions(cmd);
-  cmd = kafka.addKafkaSSLOptions(cmd);
+  cmd = eventStore.addEventStoreOptions(cmd);
   cmd = cmd.option(
-    '--kafka-new-group-message-topic <new-group-message-topic>',
+    '--new-group-message-topic <new-group-message-topic>',
     'Used by consumer to consume new group message for each new incoming message'
   );
   return cmd.parse(argv).opts();
 }
 
 async function initResource(options) {
-  return await initDefaultResources(options).then(initMongoClient).then(kafka.initEventProducer);
+  return await initDefaultResources(options)
+    .then(initMongoClient)
+    .then(eventStore.initializeEventStore({ producer: true }));
 }
 
 class GroupMs extends HttpServiceBase {
@@ -33,8 +35,10 @@ class GroupMs extends HttpServiceBase {
     super(context);
     this.mongoClient = context.mongoClient;
     this.groupCollection = context.mongodbClient.collection('groups');
-    this.publisher = this.context.publisher;
+    /** @type {import('../../libs/event-store/iEventStore').IEventStore} */
+    this.eventStore = this.context.eventStore;
   }
+
   async init() {
     await super.init();
     this.addRoute('/create', 'POST', async (req, _) => {
@@ -47,7 +51,7 @@ class GroupMs extends HttpServiceBase {
         profilePic,
         addedOn: new Date()
       };
-      if (members.indexOf(user) == -1) {
+      if (!members.includes(user)) {
         members.push(user);
       }
       members.forEach((member) => {
@@ -91,7 +95,7 @@ class GroupMs extends HttpServiceBase {
       this.sendNotification({
         from: user,
         to: receivers,
-        groupId: groupId,
+        groupId,
         action: 'add',
         body: {
           added: newMembers
@@ -137,7 +141,7 @@ class GroupMs extends HttpServiceBase {
       this.sendNotification({
         from: user,
         to: group.members.map((u) => u.username),
-        groupId: groupId,
+        groupId,
         action: 'remove',
         body: {
           removed: [member]
@@ -185,7 +189,7 @@ class GroupMs extends HttpServiceBase {
    * @param {{from: string, to: string[], groupId: string, action: string; body: unknown}} notification
    */
   sendNotification(notification) {
-    const { kafkaNewGroupMessageTopic } = this.options;
+    const { newGroupMessageTopic } = this.options;
     const payload = JSON.stringify({
       _v: 2.0,
       id: shortuuid(),
@@ -209,15 +213,16 @@ class GroupMs extends HttpServiceBase {
         rts: Date.now(),
         sid: shortuuid()
       },
-      payload: payload
+      payload
     };
     const message = formatMessage(msg);
-    this.publisher.send(kafkaNewGroupMessageTopic, message, notification.from);
+    this.eventStore.emit(newGroupMessageTopic, message, notification.from);
   }
+
   async shutdown() {
     await super.shutdown();
     await this.context.mongoClient.close();
-    await this.publisher.disconnect();
+    await this.eventStore.dispose();
   }
 }
 
@@ -229,6 +234,7 @@ if (asMain) {
       await new GroupMs(context).run();
     })
     .catch(async (error) => {
+      // eslint-disable-next-line no-console
       console.error('Failed to initialized Group MS', error);
       process.exit(1);
     });

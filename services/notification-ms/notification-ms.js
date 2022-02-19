@@ -1,28 +1,30 @@
-const kafka = require('../../libs/kafka-utils'),
-  {
-    ServiceBase,
-    initDefaultOptions,
-    initDefaultResources,
-    resolveEnvVariables
-  } = require('../../libs/service-base'),
-  { addMongodbOptions, initMongoClient } = require('../../libs/mongo-utils'),
-  admin = require('firebase-admin'),
-  asMain = require.main === module;
+const admin = require('firebase-admin');
+const eventStore = require('../../libs/event-store');
+const {
+  ServiceBase,
+  initDefaultOptions,
+  initDefaultResources,
+  resolveEnvVariables
+} = require('../../libs/service-base');
+const { addMongodbOptions, initMongoClient } = require('../../libs/mongo-utils');
 
-async function prepareEventListFromKafkaTopics(context) {
+const asMain = require.main === module;
+
+async function prepareEventList(context) {
   const { options } = context;
   const eventName = {
-    'push-notification': options.kafkaOfflineMessageTopic,
-    'new-login': options.kafkaNewLoginTopic
+    'push-notification': options.offlineMessageTopic,
+    'new-login': options.newLoginTopic
   };
   context.events = eventName;
-  context.listenerEvents = [options.kafkaOfflineMessageTopic, options.kafkaNewLoginTopic];
+  context.listenerEvents = [options.offlineMessageTopic, options.newLoginTopic];
   return context;
 }
 
 async function initFirebaseAdmin(context) {
   const { options } = context;
   const { firebaseAdminCredentialJsonPath } = options;
+  /* eslint-disable-next-line import/no-dynamic-require, global-require */
   const serviceAccount = require(firebaseAdminCredentialJsonPath);
   const app = admin.initializeApp({
     credential: admin.credential.cert(serviceAccount)
@@ -34,8 +36,8 @@ async function initFirebaseAdmin(context) {
 
 async function initResources(options) {
   const context = await initDefaultResources(options)
-    .then(prepareEventListFromKafkaTopics)
-    .then(kafka.initEventListener)
+    .then(prepareEventList)
+    .then(eventStore.initializeEventStore({ consumer: true }))
     .then(initMongoClient)
     .then(initFirebaseAdmin);
   return context;
@@ -43,14 +45,13 @@ async function initResources(options) {
 
 function parseOptions(argv) {
   let cmd = initDefaultOptions();
-  cmd = kafka.addStandardKafkaOptions(cmd);
-  cmd = kafka.addKafkaSSLOptions(cmd);
+  cmd = eventStore.addEventStoreOptions(cmd);
   cmd = addMongodbOptions(cmd);
   cmd.option(
-    '--kafka-offline-message-topic <offline-message-topic>',
+    '--offline-message-topic <offline-message-topic>',
     'Used by producer to produce new message to send the push notification'
   );
-  cmd.option('--kafka-new-login-topic <new-login-topic>', 'New login kafka topic');
+  cmd.option('--new-login-topic <new-login-topic>', 'New login kafka topic');
   cmd.option(
     '--firebase-admin-credential-json-path <firebaes-admin-cred-file>',
     'Path to the firebase admin credentials file'
@@ -79,14 +80,14 @@ class NotificationMS extends ServiceBase {
       name: 'failedNotification/sec',
       type: 'meter'
     });
+    /** @type {import('../../libs/event-store/iEventStore').IEventStore} */
+    this.eventStore = this.context.eventStore;
+    this.events = this.context.events;
   }
+
   init() {
-    const {
-      listener,
-      events,
-      options: { offlineMsgInitial }
-    } = this.context;
-    listener.onMessage = async (event, message) => {
+    const {events} = this;
+    this.eventStore.on = async (event, message) => {
       switch (event) {
         case events['new-login']:
           {
@@ -115,7 +116,7 @@ class NotificationMS extends ServiceBase {
             } else {
               messages = [message];
             }
-            const map_user_messages = messages.reduce((mapping, msg) => {
+            const userMessages = messages.reduce((mapping, msg) => {
               const user = msg.META.to;
               if (!mapping[user]) {
                 mapping[user] = [];
@@ -123,8 +124,8 @@ class NotificationMS extends ServiceBase {
               mapping[user].push(msg);
               return mapping;
             }, {});
-            Object.entries(map_user_messages).forEach(async ([to, msgs]) => {
-              msgs = msgs.filter((msg) => msg.META.type != 'notification');
+            Object.entries(userMessages).forEach(async ([to, msgs]) => {
+              msgs = msgs.filter((msg) => msg.META.type !== 'notification');
               const payloads = msgs.map((msg) => msg.payload);
               const record = await this.notificationTokensCollection.findOne(
                 { username: to },
@@ -152,13 +153,14 @@ class NotificationMS extends ServiceBase {
             });
           }
           break;
+        default:
+          throw new Error("Unknown event type");
       }
     };
   }
 
   async shutdown() {
-    const { listener } = this.context;
-    await listener.disconnect();
+    await this.eventStore.dispose();
     await this.context.mongoClient.close();
   }
 }
@@ -171,6 +173,7 @@ if (asMain) {
       await new NotificationMS(context).run();
     })
     .catch(async (error) => {
+      // eslint-disable-next-line no-console
       console.error('Failed to initialized Notification MS', error);
       process.exit(1);
     });

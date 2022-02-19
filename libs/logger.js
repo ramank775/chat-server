@@ -1,5 +1,5 @@
-const winston = require('winston'),
-  moment = require('moment');
+const winston = require('winston');
+const moment = require('moment');
 
 const LEVEL = Symbol.for('level');
 const MESSAGE = Symbol.for('message');
@@ -13,10 +13,11 @@ winston.configure({
       colorize: process.stdout.isTTY,
       handleExceptions: true,
       humanReadableUnhandledException: true,
-      log: function (info, callback) {
+      log(info, callback) {
         setImmediate(() => this.emit('logged', info));
 
         if (this.stderrLevels[info[LEVEL]]) {
+          // eslint-disable-next-line no-console
           console.error(info[MESSAGE]);
 
           if (callback) {
@@ -25,6 +26,7 @@ winston.configure({
           return;
         }
 
+        // eslint-disable-next-line no-console
         console.log(info[MESSAGE]);
 
         if (callback) {
@@ -35,27 +37,28 @@ winston.configure({
   ]
 });
 
-isDebugEnabled = function () {
-  let l = this.level + '';
+function isDebugEnabled() {
+  const l = `${this.level}`;
   return l.toLowerCase() === 'debug';
 };
 
-winston.init = function (options, asyncStorage) {
+winston.init = function init(options, asyncStorage) {
   const formatter = winston.format((info) => {
-    let result = Object.assign({}, info);
+    const result = { ...info };
     result.pid = process.pid;
     result.appName = options.appName;
     result.timeMillis = Date.now();
-    result.track_id = asyncStorage.getStore()
+    result.track_id = asyncStorage.getStore();
     return result;
   });
   const configure = {};
 
   if (options.debug) {
-    configure['log'] = function (info, callback) {
+    configure.log = function log(info, callback) {
       setImmediate(() => this.emit('logged', info));
 
       if (this.stderrLevels[info[LEVEL]]) {
+        // eslint-disable-next-line no-console
         console.error(info[MESSAGE]);
 
         if (callback) {
@@ -64,6 +67,7 @@ winston.init = function (options, asyncStorage) {
         return;
       }
 
+      // eslint-disable-next-line no-console
       console.log(info[MESSAGE]);
 
       if (callback) {

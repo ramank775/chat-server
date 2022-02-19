@@ -1,5 +1,5 @@
-const mongodb = require('mongodb'),
-  fs = require('fs');
+const mongodb = require('mongodb');
+const fs = require('fs');
 
 function addMongodbOptions(cmd) {
   return cmd
@@ -17,7 +17,7 @@ async function initMongoClient(context) {
   const auth = options.mongoAuth
     ? { username: options.mongoUser, password: options.mongoPassword }
     : null;
-  let mongoConnectionOptions = {
+  const mongoConnectionOptions = {
     useNewUrlParser: true,
     auth,
     sslCert: clientCertificate,
@@ -26,7 +26,7 @@ async function initMongoClient(context) {
   };
   let url = options.mongoUrl;
   if (options.mongoSslEnable) {
-    url += (url.indexOf('?') > -1 ? '&' : '?') + 'ssl=true';
+    url += `${url.indexOf('?') > -1 ? '&' : '?'  }ssl=true`;
   }
 
   const mongoClient = await mongodb.MongoClient.connect(url, mongoConnectionOptions);

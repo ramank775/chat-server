@@ -1,23 +1,28 @@
-const commander = require('commander'),
-  logger = require('./logger'),
-  statsClient = require('./stats-client'),
-  { AsyncLocalStorage } = require('async_hooks');
+const commander = require('commander');
+const http = require('http');
+const https = require('https');
+const fs = require('fs');
+const { AsyncLocalStorage } = require('async_hooks');
+const logger = require('./logger');
+const statsClient = require('./stats-client');
+
+async function initLogger(context) {
+  context.log = logger.init(context.options, context.asyncStorage);
+  return context;
+}
 
 async function initDefaultResources(options) {
   const asyncStorage = new AsyncLocalStorage();
   let ctx = {
     options: options || {},
-    asyncStorage: asyncStorage
+    asyncStorage
   };
   ctx = await initLogger(ctx);
   ctx = await statsClient.initStatsClient(ctx);
   return ctx;
 }
 
-async function initLogger(context) {
-  context.log = logger.init(context.options, context.asyncStorage);
-  return context;
-}
+
 
 function initDefaultOptions() {
   const cmd = new commander.Command('my name').allowUnknownOption();
@@ -34,7 +39,7 @@ function initDefaultOptions() {
 
 function addStandardHttpOptions(cmd) {
   cmd
-    .option('--port <port>', 'Http port (default 8000)', (c) => parseInt(c), 8000)
+    .option('--port <port>', 'Http port (default 8000)', (c) => Number(c), 8000)
     .option('--host <host>', 'Http Server Host (default 127.0.0.1)', '127.0.0.1')
     .option('--ssl-cert <ssl-cert>', 'SSL public certificate')
     .option('--ssl-key <ssl-key>', 'SSL private key');
@@ -48,8 +53,7 @@ async function initHttpServer(context) {
   const isHttps = sslCert && sslKey;
   if (isHttps) {
     log.info(`Creating an https server on port ${port}`);
-    const https = require('https');
-    const fs = require('fs');
+
     const key = fs.readFileSync(sslKey);
     const cert = fs.readFileSync(sslCert);
     server = https.createServer({
@@ -58,7 +62,6 @@ async function initHttpServer(context) {
     });
   } else {
     log.info(`Creating an http server on port ${port}`);
-    const http = require('http');
     server = http.createServer();
   }
   const serverPromise = new Promise((resolve, reject) => {
@@ -78,7 +81,7 @@ async function initHttpServer(context) {
 }
 
 function resolveEnvVariables(options) {
-  for (let index = 0; index < options.length; index++) {
+  for (let index = 0; index < options.length; index += 1) {
     if (typeof options[index] === 'string') {
       options[index] = options[index].replace(/\${([A-Z0-9_]*)}/gi, (_, n) => process.env[n]);
     }
@@ -95,14 +98,14 @@ class ServiceBase {
     this.statsClient = context.statsClient;
   }
 
-  init() {}
+  // eslint-disable-next-line class-methods-use-this
+  init() { }
 
   async run() {
     this.log.info(
-      'Starting service with options' +
-        JSON.stringify(this.options, (key, value) =>
-          /(Password|Secret|Key|Cert|Token)$/i.test(key) ? '*****' : value
-        )
+      `Starting service with options${JSON.stringify(this.options, (key, value) =>
+        /(Password|Secret|Key|Cert|Token)$/i.test(key) ? '*****' : value
+      )}`
     );
     this.init();
     this.handleError();
@@ -110,7 +113,7 @@ class ServiceBase {
   }
 
   handleError() {
-    process.on('unhandledRejection', (reason, promise) => {
+    process.on('unhandledRejection', (reason, _promise) => {
       this.log.error(`unhandledRejection: Reason:`, reason, {});
       if (reason.stack) {
         this.log.error(`unhandledRejection: Stack:`, reason.stack, {});
@@ -125,7 +128,8 @@ class ServiceBase {
     process.on('SIGINT', () => this._shutdown());
   }
 
-  async shutdown() {}
+  /* eslint-disable-next-line class-methods-use-this, no-empty-function */
+  async shutdown() { }
 
   async _shutdown() {
     this.log.info('Shutting down service');

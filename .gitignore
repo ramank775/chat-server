@@ -115,5 +115,8 @@ dist
 .yarn/install-state.gz
 .pnp.*
 
+# Redis dump file
+*.rdb
+
 kafka
 *.local.*

@@ -1,29 +1,19 @@
+const path = require('path');
+const AWS = require('aws-sdk');
+const { ObjectId } = require('mongodb');
 const {
-    initDefaultOptions,
-    initDefaultResources,
-    addStandardHttpOptions,
-    resolveEnvVariables
-  } = require('../../libs/service-base'),
-  { HttpServiceBase } = require('../../libs/http-service-base'),
-  { addMongodbOptions, initMongoClient } = require('../../libs/mongo-utils'),
-  path = require('path'),
-  { uuidv4, extractInfoFromRequest } = require('../../helper'),
-  AWS = require('aws-sdk'),
-  { ObjectId } = require('mongodb'),
-  { getContentTypeByExt } = require('../../libs/content-type-utils'),
-  asMain = require.main === module;
+  initDefaultOptions,
+  initDefaultResources,
+  addStandardHttpOptions,
+  resolveEnvVariables
+} = require('../../libs/service-base');
+const { HttpServiceBase } = require('../../libs/http-service-base');
+const { addMongodbOptions, initMongoClient } = require('../../libs/mongo-utils');
+const { getFilename, extractInfoFromRequest } = require('../../helper');
+const { getContentTypeByExt } = require('../../libs/content-type-utils');
 
-function parseOptions(argv) {
-  let cmd = initDefaultOptions();
-  cmd = addStandardHttpOptions(cmd);
-  cmd = addMongodbOptions(cmd);
-  cmd = addFileServiceOptions(cmd);
-  return cmd.parse(argv).opts();
-}
+const asMain = require.main === module;
 
-async function initResource(options) {
-  return await initDefaultResources(options).then(initMongoClient).then(initFileService);
-}
 
 function addFileServiceOptions(cmd) {
   cmd.option('--base-upload-dir <upload-dir>', 'base directory for upload', 'uploads');
@@ -49,6 +39,20 @@ async function initFileService(context) {
   return context;
 }
 
+function parseOptions(argv) {
+  let cmd = initDefaultOptions();
+  cmd = addStandardHttpOptions(cmd);
+  cmd = addMongodbOptions(cmd);
+  cmd = addFileServiceOptions(cmd);
+  return cmd.parse(argv).opts();
+}
+
+async function initResource(options) {
+  return await initDefaultResources(options).then(initMongoClient).then(initFileService);
+}
+
+
+
 class FileMS extends HttpServiceBase {
   constructor(context) {
     super(context);
@@ -60,10 +64,10 @@ class FileMS extends HttpServiceBase {
   async init() {
     await super.init();
     this.addRoute('/signed_url', 'POST', async (req, h) => {
-      const type = req.payload.type;
-      if (type == 'download') {
+      const { type } = req.payload;
+      if (type === 'download') {
         return await this.getDownloadURL(req, h);
-      } else if (type == 'upload') {
+      } if (type === 'upload') {
         return await this.getUploadURL(req, h);
       }
       return h.send({ error: 'Bad request' }).status(400);
@@ -74,7 +78,7 @@ class FileMS extends HttpServiceBase {
   async updateFileUploadStatus(req, h) {
     const { fileName, status } = req.payload;
     const user = extractInfoFromRequest(req, 'user');
-    const file = await this.fileStore.findOne({ _id: fileName, user: user });
+    const file = await this.fileStore.findOne({ _id: fileName, user });
     if (!file) {
       return h.send({ error: 'file not found' }).status(404);
     }
@@ -103,20 +107,20 @@ class FileMS extends HttpServiceBase {
     return { url: preSignedURL };
   }
 
-  async getUploadURL(req, h) {
+  async getUploadURL(req, _h) {
     const userName = extractInfoFromRequest(req, 'user');
     const { fileName } = req.payload;
     const contentType = getContentTypeByExt(path.extname(fileName));
     const payload = {
-      fileName: this.getFilename(fileName),
-      contentType: contentType
+      fileName: getFilename(fileName),
+      contentType
     };
     const fileRecord = {
       name: payload.fileName,
       user: userName,
       createdAt: new Date().toUTCString()
     };
-    const file = await this.fileStore.insertOne(fileRecord);
+    await this.fileStore.insertOne(fileRecord);
     const preSignedURL = await this.getSignedURL(payload, 'putObject');
     return {
       url: preSignedURL,
@@ -130,23 +134,15 @@ class FileMS extends HttpServiceBase {
       Key: payload.fileName,
       Expires: this.options.urlExpireTime
     };
-    if (operation == 'putObject') {
+    if (operation === 'putObject') {
       params.ContentType = payload.contentType;
     }
-    try {
-      const preSignedURL = await this.fileService.getSignedUrl(operation, params);
-      this.log.info(preSignedURL);
-      return preSignedURL;
-    } catch (error) {
-      throw error;
-    }
+    const preSignedURL = await this.fileService.getSignedUrl(operation, params);
+    this.log.info(preSignedURL);
+    return preSignedURL;
   }
 
-  getFilename(file) {
-    const ext = path.extname(file);
-    const filename = path.basename(file, ext);
-    return `${filename}.${uuidv4()}${ext}`;
-  }
+
 
   async shutdown() {
     await super.shutdown();
@@ -162,6 +158,7 @@ if (asMain) {
       await new FileMS(context).run();
     })
     .catch(async (error) => {
+      // eslint-disable-next-line no-console
       console.error('Failed to initialized Image MS', error);
       process.exit(1);
     });

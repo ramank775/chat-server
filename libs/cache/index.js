@@ -1,46 +1,5 @@
-const Redis = require('ioredis');
-
-class LocalCache {
-  _cache = {};
-  async get(key) {
-    return this._cache[key];
-  }
-
-  async set(key, value) {
-    this._cache[key] = value;
-  }
-
-  async del(key) {
-    delete this._cache[key];
-  }
-}
-
-class RedisCache {
-  /**
-   * @type {Redis.Redis}
-   */
-  _redis;
-  /**
-   * Create redis cache instance
-   * @param {{redisEndpoint: string}} options 
-   */
-  constructor(options) {
-    this._redis = new Redis(options.redisEndpoint)
-  }
-
-  async get(key) {
-    return await this._redis.get(key)
-  }
-
-  async set(key, value) {
-    await this._redis.set(key, value);
-  }
-
-  async del(key) {
-    await this._redis.del(key)
-  }
-
-}
+const { LocalCache } = require('./local-cache');
+const { RedisCache } = require('./redis-cache');
 
 function addMemCacheOptions(cmd) {
   cmd = cmd

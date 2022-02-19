@@ -45,7 +45,7 @@ function formatMessage(message) {
     msg.id = msg.msgId;
     msg.head = {
       type: chatType || msg.module,
-      to: to,
+      to,
       from: META.from,
       chatid: msg.chatId,
       contentType: msg.type,
@@ -57,7 +57,7 @@ function formatMessage(message) {
     };
 
     Object.assign(META, {
-      to: to,
+      to,
       id: msg.id,
       type: chatType,
       contentType: type,

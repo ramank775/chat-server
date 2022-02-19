@@ -1,6 +1,6 @@
 const net = require('net');
-const JsonSocket = require('./json-socket');
 const events = require('events');
+const JsonSocket = require('./json-socket');
 
 class JsonServer extends events.EventEmitter {
   constructor(port) {
@@ -21,6 +21,7 @@ class JsonServer extends events.EventEmitter {
     });
     this.socket.listen(port);
   }
+
   async disconnect() {
     this.socket.close();
   }

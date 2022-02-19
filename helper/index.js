@@ -1,8 +1,9 @@
-const short = require('short-uuid'),
-  crypto = require('crypto');
+const short = require('short-uuid');
+const crypto = require('crypto');
+const path = require('path');
 
 function uuidv4() {
-  return crypto.randomUUID()
+  return crypto.randomUUID();
 }
 
 function shortuuid() {
@@ -20,9 +21,16 @@ function getUTCEpoch() {
   return utcSecondsSinceEpoch;
 }
 
+function getFilename(file) {
+  const ext = path.extname(file);
+  const filename = path.basename(file, ext);
+  return `${filename}.${uuidv4()}${ext}`;
+}
+
 module.exports = {
   uuidv4,
   extractInfoFromRequest,
   getUTCEpoch,
-  shortuuid
+  shortuuid,
+  getFilename,
 };

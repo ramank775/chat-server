@@ -29,7 +29,7 @@ class JsonSocket extends Duplex {
       @private
       @type {Socket}
      */
-    this._socket;
+    this._socket = null;
 
     // wrap the socket
     if (socket) this._wrapSocket(socket);
@@ -81,13 +81,13 @@ class JsonSocket extends Duplex {
     while (!this._readingPaused) {
       // First step is reading the 32-bit integer from the socket
       // and if there is not a value, we simply abort processing
-      let lenBuf = this._socket.read(4);
+      const lenBuf = this._socket.read(4);
       if (!lenBuf) return;
 
       // Now that we have a length buffer we can convert it
       // into a number by reading the UInt32BE value
       // from the buffer.
-      let len = lenBuf.readUInt32BE();
+      const len = lenBuf.readUInt32BE();
 
       // ensure that we don't exceed the max size of 256KiB
       if (len > 2 ** 18) {
@@ -96,7 +96,7 @@ class JsonSocket extends Duplex {
       }
 
       // With the length, we can then consume the rest of the body.
-      let body = this._socket.read(len);
+      const body = this._socket.read(len);
 
       // If we did not have enough data on the wire to read the body
       // we will wait for the body to arrive and push the length
@@ -117,7 +117,7 @@ class JsonSocket extends Duplex {
 
       // Push the data into the read buffer and capture whether
       // we are hitting the back pressure limits
-      let pushOk = this.push(json);
+      const pushOk = this.push(json);
 
       // When the push fails, we need to pause the ability to read
       // messages because the consumer is getting backed up.
@@ -141,9 +141,9 @@ class JsonSocket extends Duplex {
     the object and pushing the data to the underlying socket.
    */
   _write(obj, encoding, cb) {
-    let json = JSON.stringify(obj);
-    let jsonBytes = Buffer.byteLength(json);
-    let buffer = Buffer.alloc(4 + jsonBytes);
+    const json = JSON.stringify(obj);
+    const jsonBytes = Buffer.byteLength(json);
+    const buffer = Buffer.alloc(4 + jsonBytes);
     buffer.writeUInt32BE(jsonBytes);
     buffer.write(json, 4);
     this._socket.write(buffer, cb);

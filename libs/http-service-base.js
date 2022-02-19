@@ -1,6 +1,6 @@
+const Hapi = require('@hapi/hapi');
+const { ServiceBase } = require('./service-base');
 const { extractInfoFromRequest, shortuuid } = require('../helper');
-const { ServiceBase } = require('./service-base'),
-  Hapi = require('@hapi/hapi');
 
 class HttpServiceBase extends ServiceBase {
   constructor(context) {
@@ -18,8 +18,8 @@ class HttpServiceBase extends ServiceBase {
     });
 
     this.hapiServer.ext('onRequest', async (req, h) => {
-      const track_id = extractInfoFromRequest(req, 'x-request-id') || shortuuid();
-      asyncStorage.enterWith(track_id)
+      const trackId = extractInfoFromRequest(req, 'x-request-id') || shortuuid();
+      asyncStorage.enterWith(trackId);
       const meter = this.meterDict[req.url.pathname];
       if (meter) meter.mark();
       req.startTime = Date.now();
@@ -43,9 +43,7 @@ class HttpServiceBase extends ServiceBase {
       }
     });
 
-    this.addRoute('/alive', 'GET', () => {
-      return 'OK';
-    });
+    this.addRoute('/alive', 'GET', () => 'OK');
   }
 
   addRoute(uri, method, handler, options = {}) {
@@ -59,10 +57,10 @@ class HttpServiceBase extends ServiceBase {
       measurement: 'median'
     });
     this.hapiServer.route({
-      method: method,
+      method,
       path: uri,
-      handler: handler,
-      options: options
+      handler,
+      options
     });
   }
 

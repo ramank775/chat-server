@@ -1,15 +1,16 @@
+const admin = require('firebase-admin');
 const {
-    initDefaultOptions,
-    initDefaultResources,
-    addStandardHttpOptions,
-    resolveEnvVariables
-  } = require('../../libs/service-base'),
-  { HttpServiceBase } = require('../../libs/http-service-base'),
-  { addMongodbOptions, initMongoClient } = require('../../libs/mongo-utils'),
-  kafka = require('../../libs/kafka-utils'),
-  { uuidv4, extractInfoFromRequest } = require('../../helper'),
-  admin = require('firebase-admin'),
-  asMain = require.main === module;
+  initDefaultOptions,
+  initDefaultResources,
+  addStandardHttpOptions,
+  resolveEnvVariables
+} = require('../../libs/service-base');
+const { HttpServiceBase } = require('../../libs/http-service-base');
+const { addMongodbOptions, initMongoClient } = require('../../libs/mongo-utils');
+const eventStore = require('../../libs/event-store');
+const { uuidv4, extractInfoFromRequest } = require('../../helper');
+
+const asMain = require.main === module;
 
 function firebaseProjectOptions(cmd) {
   return cmd.option('--firebase-project-id <firebaseProjectId>', 'Firebase Project Id');
@@ -72,9 +73,11 @@ function parseOptions(argv) {
   cmd = addStandardHttpOptions(cmd);
   cmd = addMongodbOptions(cmd);
   cmd = firebaseProjectOptions(cmd);
-  cmd = kafka.addStandardKafkaOptions(cmd);
-  cmd = kafka.addKafkaSSLOptions(cmd);
-  cmd.option('--kafka-new-login-topic <new-login-topic>', 'New login kafka topic');
+  cmd = eventStore.addEventStoreOptions(cmd);
+  cmd.option(
+    '--new-login-topic <new-login-topic>',
+    'New login topic used to produce new login events'
+  );
   return cmd.parse(argv).opts();
 }
 
@@ -82,7 +85,7 @@ async function initResource(options) {
   return await initDefaultResources(options)
     .then(initMongoClient)
     .then(initFirebaseAdmin)
-    .then(kafka.initEventProducer)
+    .then(eventStore.initializeEventStore({ producer: true }))
     .then(initAccessKeyCache);
 }
 
@@ -92,8 +95,9 @@ class ProfileMs extends HttpServiceBase {
     this.mongoClient = context.mongoClient;
     this.profileCollection = context.mongodbClient.collection('profile');
     this.firebaseAuth = context.firebaseAuth;
-    this.newLoginTopic = this.options.kafkaNewLoginTopic;
-    this.publisher = context.publisher;
+    this.newLoginTopic = this.options.newLoginTopic;
+    /** @type {import('../../libs/event-store/iEventStore').IEventStore} */
+    this.eventStore = context.eventStore;
     this.accessKeyProvider = context.accessKeyProvider;
   }
 
@@ -105,7 +109,7 @@ class ProfileMs extends HttpServiceBase {
       const accesskey = extractInfoFromRequest(req, 'accesskey');
       const token = extractInfoFromRequest(req, 'token');
       const accessKeyDb = await this.accessKeyProvider.get(username);
-      if (accesskey != accessKeyDb) {
+      if (accesskey !== accessKeyDb) {
         return res.response({}).code(401);
       }
       try {
@@ -141,7 +145,7 @@ class ProfileMs extends HttpServiceBase {
         await this.profileCollection.insertOne(profile);
       }
       const accesskey = await this.accessKeyProvider.create(username);
-      this.publisher.send(this.newLoginTopic, payload, username);
+      this.eventStore.emit(this.newLoginTopic, payload, username);
       return {
         status: true,
         username,
@@ -155,7 +159,7 @@ class ProfileMs extends HttpServiceBase {
       if (!username) {
         return {};
       }
-      let user = await this.profileCollection.findOne(
+      const user = await this.profileCollection.findOne(
         { username, isActive: true },
         { projection: { _id: 0, name: 1, username: 1 } }
       );
@@ -173,7 +177,7 @@ class ProfileMs extends HttpServiceBase {
         result[u.username] = true;
       });
       await this.profileCollection.updateOne(
-        { username: username },
+        { username },
         { $set: { syncAt: new Date() } }
       );
       return result || {};
@@ -186,7 +190,7 @@ class ProfileMs extends HttpServiceBase {
   }
 
   async verify(accesskey) {
-    if (this.options.debug && accesskey == 'test') {
+    if (this.options.debug && accesskey === 'test') {
       return { uid: uuidv4() };
     }
     const decodedToken = await this.firebaseAuth.verifyIdToken(accesskey);
@@ -207,6 +211,7 @@ if (asMain) {
       await new ProfileMs(context).run();
     })
     .catch(async (error) => {
+      // eslint-disable-next-line no-console
       console.error('Failed to initialized Profile MS', error);
       process.exit(1);
     });
