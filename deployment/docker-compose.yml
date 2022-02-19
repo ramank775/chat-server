@@ -21,7 +21,7 @@ services:
   message_router:
     image: ramank775/chatserver:${CHAT_SERVER_TAG}
     entrypoint: node
-    command: /app/services/message-router-ms/message-router-ms.js --app-name=message-router-1 --send-message-topic=${TOPIC_SEND_MESSAGE} --new-message-topic=${TOPIC_NEW_MESSAGE} --ack-topic=${TOPIC_ACK_MESSAGE} --group-message-topic=${TOPIC_NEW_GROUP_MS}--event-store=kafka --kafka-client-id=message-router-1 --kafka-consumer-group=${CONSUMER_GROUP_MESSAGE_ROUTER} --kafka-broker-list=${BROKER_LIST} --kafka-security-protocol=${KAFKA_SECURITY_PROTOCOL} --kafka-sasl-username=${KAFKA_SASL_USERNAME} --kafka-sasl-password=${KAFKA_SASL_PASSWORD}
+    command: /app/services/message-router-ms/message-router-ms.js --app-name=message-router-1 --send-message-topic=${TOPIC_SEND_MESSAGE} --new-message-topic=${TOPIC_NEW_MESSAGE} --ack-topic=${TOPIC_ACK_MESSAGE} --group-message-topic=${TOPIC_NEW_GROUP_MS} --event-store=kafka --kafka-client-id=message-router-1 --kafka-consumer-group=${CONSUMER_GROUP_MESSAGE_ROUTER} --kafka-broker-list=${BROKER_LIST} --kafka-security-protocol=${KAFKA_SECURITY_PROTOCOL} --kafka-sasl-username=${KAFKA_SASL_USERNAME} --kafka-sasl-password=${KAFKA_SASL_PASSWORD}
 
   profile:
     image: ramank775/chatserver:${CHAT_SERVER_TAG}
