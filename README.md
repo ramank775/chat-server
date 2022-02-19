@@ -107,14 +107,16 @@ A chat server based on the microservice architecture to ensure high availability
 
 | Name |  Description |
 | ---- |  ----------- |
-| deployment | Deployment scripts, configurations for dev as well as prod |
+| .github | Configuration files related to github like workflows, funding |
+| .gipod | Configuration files for gitpod dev enviroment setup |
+| .husky | git hooks configuration via [husky](https://typicode.github.io/husky) |
+| deployment | Deployment scripts |
 | docs | Docs related to the project |
 | helper | Common utility functions |
 | libs | Project specific libs like base class for microservice, resource configuration and initialization |
 | services | Microservice |
 | www | Web based testing interface |
 | .env.tmpl | Environment template file |
-| .gitpod.Dockerfile | Docker file for gitpod setup |
 | .gitpod.yml | Gitpod configuration file |
 | LICENSE | Project License file (MIT) |
 | package.json | Node project configuration file |
@@ -158,10 +160,13 @@ Click on the Gitpod badge it will start the fully setup development environment.
     ```
 - Open project in vscode
 - Start the required microservice from `RUN and DEBUG` option
-- (Optional) Start nginx using the configuration [deployment/config/nginx.config](./deployment/config/nginx.config)
+- (Optional) Start nginx using the configuration [deployment/config/nginx.config](./deployment/config/nginx.dev.config)
 
 
 
+
+## Deployment
+For deployment guide refer to [deployment/README.md](./deployment/README.md).
 # Resources
 To follow the update keep a eye on vartalap blogs on [blog.one9x.org](https://blog.one9x.org)
 Some of the relevent blogs are:
