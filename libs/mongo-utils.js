@@ -1,4 +1,4 @@
-const mongodb = require('mongodb');
+const { MongoClient } = require('mongodb');
 const fs = require('fs');
 
 function addMongodbOptions(cmd) {
@@ -11,13 +11,12 @@ function addMongodbOptions(cmd) {
     .option('--mongo-cert <cert-path>', 'Mongod client certificate path');
 }
 
-async function initMongoClient(context) {
-  const { options } = context;
+function prepareMongoOptions(options) {
   const clientCertificate = options.mongoCert ? fs.readFileSync(options.mongoCert) : null;
   const auth = options.mongoAuth
     ? { username: options.mongoUser, password: options.mongoPassword }
     : null;
-  const mongoConnectionOptions = {
+  const dbOptions = {
     useNewUrlParser: true,
     auth,
     sslCert: clientCertificate,
@@ -26,13 +25,15 @@ async function initMongoClient(context) {
   };
   let url = options.mongoUrl;
   if (options.mongoSslEnable) {
-    url += `${url.indexOf('?') > -1 ? '&' : '?'  }ssl=true`;
+    url += `${url.indexOf('?') > -1 ? '&' : '?'}ssl=true`;
   }
+  return { url, options: dbOptions };
+}
 
-  const mongoClient = await mongodb.MongoClient.connect(url, mongoConnectionOptions);
-  context.mongoClient = mongoClient;
-  context.mongodbClient = mongoClient.db();
-  return context;
+function initMongoClient(context) {
+  const { url, options } = prepareMongoOptions(context.options);
+  const mongoClient = new MongoClient(url, options);
+  return mongoClient;
 }
 
 module.exports = {

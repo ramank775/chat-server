@@ -1,12 +1,12 @@
-const admin = require('firebase-admin');
-const eventStore = require('../../libs/event-store');
 const {
   ServiceBase,
   initDefaultOptions,
   initDefaultResources,
   resolveEnvVariables
 } = require('../../libs/service-base');
-const { addMongodbOptions, initMongoClient } = require('../../libs/mongo-utils');
+const eventStore = require('../../libs/event-store');
+const { addDatabaseOptions, initializeDatabase } = require('./database');
+const { addPNSOptions, initializePNS } = require('./pns');
 
 const asMain = require.main === module;
 
@@ -21,41 +21,26 @@ async function prepareEventList(context) {
   return context;
 }
 
-async function initFirebaseAdmin(context) {
-  const { options } = context;
-  const { firebaseAdminCredentialJsonPath } = options;
-  /* eslint-disable-next-line import/no-dynamic-require, global-require */
-  const serviceAccount = require(firebaseAdminCredentialJsonPath);
-  const app = admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount)
-  });
-  context.firebaseApp = app;
-  context.firebaseMessaging = app.messaging();
-  return context;
-}
 
 async function initResources(options) {
   const context = await initDefaultResources(options)
     .then(prepareEventList)
     .then(eventStore.initializeEventStore({ consumer: true }))
-    .then(initMongoClient)
-    .then(initFirebaseAdmin);
+    .then(initializeDatabase)
+    .then(initializePNS);
   return context;
 }
 
 function parseOptions(argv) {
   let cmd = initDefaultOptions();
   cmd = eventStore.addEventStoreOptions(cmd);
-  cmd = addMongodbOptions(cmd);
+  cmd = addDatabaseOptions(cmd);
+  cmd = addPNSOptions(cmd);
   cmd.option(
     '--offline-message-topic <offline-message-topic>',
     'Used by producer to produce new message to send the push notification'
   );
   cmd.option('--new-login-topic <new-login-topic>', 'New login kafka topic');
-  cmd.option(
-    '--firebase-admin-credential-json-path <firebaes-admin-cred-file>',
-    'Path to the firebase admin credentials file'
-  );
   cmd.option(
     '--offline-msg-initial <offline-msg-initial>',
     'Initial for saved messages',
@@ -67,9 +52,12 @@ function parseOptions(argv) {
 class NotificationMS extends ServiceBase {
   constructor(context) {
     super(context);
-    this.mongoClient = context.mongoClient;
-    this.notificationTokensCollection = context.mongodbClient.collection('notification_tokens');
-    this.firebaseMessaging = context.firebaseMessaging;
+
+    /** @type {import('./database/notification-db').INotificationDB} */
+    this.notifDB = context.notificationDB;
+
+    /** @type {import('./pns/pn-service').IPushNotificationService} */
+    this.pns = context.pns;
 
     this.notificationMeter = this.statsClient.meter({
       name: 'notificationMeter/sec',
@@ -86,26 +74,16 @@ class NotificationMS extends ServiceBase {
   }
 
   init() {
-    const {events} = this;
+    const { events } = this;
     this.eventStore.on = async (event, message) => {
       switch (event) {
         case events['new-login']:
           {
-            const { username, notificationToken } = message;
-            await this.notificationTokensCollection.updateOne(
-              { username },
-              {
-                $set: {
-                  notificationToken
-                },
-                $setOnInsert: {
-                  username
-                }
-              },
-              {
-                upsert: true
-              }
-            );
+            const { username, notificationToken, deviceId = 'default' } = message;
+            await this.notifDB.upsertToken(username, {
+              deviceId,
+              token: notificationToken
+            });
           }
           break;
         case events['push-notification']:
@@ -127,28 +105,14 @@ class NotificationMS extends ServiceBase {
             Object.entries(userMessages).forEach(async ([to, msgs]) => {
               msgs = msgs.filter((msg) => msg.META.type !== 'notification');
               const payloads = msgs.map((msg) => msg.payload);
-              const record = await this.notificationTokensCollection.findOne(
-                { username: to },
-                { projection: { _id: 0, notificationToken: 1 } }
-              );
+              const record = await this.notifDB.getToken(to, { deviceId: 'default' });
               if (record) {
                 this.notificationMeter.mark();
                 const { notificationToken } = record;
-                const chatPayload = {
-                  data: {
-                    message: JSON.stringify(payloads)
-                  }
-                };
-                const options = {
-                  priority: 'high',
-                  timeToLive: 60 * 60 * 24
-                };
-                this.firebaseMessaging
-                  .sendToDevice(notificationToken, chatPayload, options)
-                  .catch((err) => {
-                    this.failedNotificationMeter.mark();
-                    this.log.error(`Error while sending push notification ${err}`, err);
-                  });
+                this.pns.push(notificationToken, payloads).catch((err) => {
+                  this.failedNotificationMeter.mark();
+                  this.log.error(`Error while sending push notification ${err}`, err);
+                });
               }
             });
           }
@@ -161,7 +125,7 @@ class NotificationMS extends ServiceBase {
 
   async shutdown() {
     await this.eventStore.dispose();
-    await this.context.mongoClient.close();
+    await this.notifDB.dispose();
   }
 }
 
