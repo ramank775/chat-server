@@ -1,5 +1,5 @@
-const { INotificationDB } = require('./notification-db');
-const mongodb = require('./mongo-notification-db')
+const { IFileMetadataDB } = require('./file-metadata-db');
+const mongodb = require('./mongo-file-db')
 
 const DATABASE_IMPL = [
   mongodb
@@ -11,7 +11,7 @@ const DATABASE_IMPL = [
  * @returns {import('commander').Command}
  */
 function addOptions(cmd) {
-  cmd = cmd.option('--notification-db <notification-db>', 'Which database implementation to use (mongo)', 'mongo');
+  cmd = cmd.option('--file-metadata-db <file-metadata-db>', 'Which database implementation to use (mongo)', 'mongo');
   DATABASE_IMPL.forEach(impl => {
     cmd = impl.addOptions(cmd)
   })
@@ -21,16 +21,16 @@ function addOptions(cmd) {
 /**
  * @private
  * Get the database implementation as per the context options
- * @param {{options: {notificationDb: string}}} context
+ * @param {{options: {fileMetadataDb: string}}} context
  * @returns
  */
 function getDatabaseImpl(context) {
   const {
-    options: { notificationDb }
+    options: { fileMetadataDb }
   } = context;
-  const store = DATABASE_IMPL.find((s) => s.code === notificationDb);
+  const store = DATABASE_IMPL.find((s) => s.code === fileMetadataDb);
   if (!store) {
-    throw new Error(`${notificationDb} is not a registered database implementation for notification database`);
+    throw new Error(`${fileMetadataDb} is not a registered database implementation for Group database`);
   }
   return store;
 }
@@ -43,13 +43,13 @@ async function initialize(context) {
   const impl = getDatabaseImpl(context)
   const db = new impl.Implementation(context);
   await db.init();
-  context.notificationDB = db;
+  context.fileMetadataDB = db;
   return context;
 }
 
 
 module.exports = {
-  INotificationDB,
+  IFileMetadataDB,
   addDatabaseOptions: addOptions,
   initializeDatabase: initialize
 }

@@ -50,6 +50,7 @@ class MockAuthProvider extends IAuthProvider {
     }
     accessKeys.add(newAccessKey);
     this.#cache.set(username, accessKeys);
+    return newAccessKey
   }
 
   /**

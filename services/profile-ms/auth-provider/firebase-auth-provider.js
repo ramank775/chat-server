@@ -44,6 +44,7 @@ class FirebaseAuthProvider extends IAuthProvider {
     if (exits) {
       accessKeys.add(accesskey);
       this.#cache.set(username, accessKeys);
+      return;
     }
 
     throw new UnAuthorizedError();
@@ -74,6 +75,7 @@ class FirebaseAuthProvider extends IAuthProvider {
     }
     accessKeys.add(newAccessKey);
     this.#cache.set(username, accessKeys);
+    return newAccessKey;
   }
 
   /**

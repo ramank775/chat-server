@@ -1,59 +1,55 @@
-const moment = require('moment');
-const { addMongodbOptions, initMongoClient } = require('../../../libs/mongo-utils');
+const { IMessageDB } = require('./message-db');
+const mongodb = require('./mongo-message-db')
 
-class MongodDbService {
+const DATABASE_IMPL = [
+  mongodb
+]
 
-  _client;
-
-  /**
-   * @type {import('mongodb').Collection}
-   */
-  _collection;
-
-  /**
-   * 
-   * @param {{client: import('mongodb').MongoClient}} options 
-   */
-  constructor(options) {
-    this._client = options.client;
-    const db = this._client.db();
-    this._collection = db.collection('ps_message');
-  }
-
-  async save(messages) {
-    const expireAt = moment().add(30, 'days').toDate()
-    const msgs = messages.map(msg => ({ ...msg, expireAt }))
-    await this._collection.insertMany(msgs)
-  }
-
-  async getUndeliveredMessageByUser(userId) {
-    const messages = this._collection.find({ 'META.to': userId }, { projection: { META: 1, payload: 1 } });
-    return await messages.toArray()
-  }
-
-  async markMessageDeliveredByUser(userId, messages) {
-    await this._collection.deleteMany(
-      { 'META.to': userId, 'META.id': { $in: messages } }
-    );
-  }
-
-  async close() {
-    await this._client.close()
-  }
-}
-
-function addDatabaseOptions(cmd) {
-  cmd = addMongodbOptions(cmd)
+/**
+ * Add command line options for database store
+ * @param {import('commander').Command} cmd
+ * @returns {import('commander').Command}
+ */
+function addOptions(cmd) {
+  cmd = cmd.option('--message-db <message-db>', 'Which database implementation to use (mongo)', 'mongo');
+  DATABASE_IMPL.forEach(impl => {
+    cmd = impl.addOptions(cmd)
+  })
   return cmd;
 }
 
-async function initDatabase(context) {
-  const dbContext = await initMongoClient({ options: context.options })
-  context.db = new MongodDbService({ client: dbContext.mongoClient });
+/**
+ * @private
+ * Get the database implementation as per the context options
+ * @param {{options: {messageDb: string}}} context
+ * @returns
+ */
+function getDatabaseImpl(context) {
+  const {
+    options: { messageDb }
+  } = context;
+  const store = DATABASE_IMPL.find((s) => s.code === messageDb);
+  if (!store) {
+    throw new Error(`${messageDb} is not a registered database implementation for Message database`);
+  }
+  return store;
+}
+
+/**
+ * Initialize database
+ * @returns 
+ */
+async function initialize(context) {
+  const impl = getDatabaseImpl(context)
+  const db = new impl.Implementation(context);
+  await db.init();
+  context.messageDb = db;
   return context;
 }
 
+
 module.exports = {
-  addDatabaseOptions,
-  initDatabase
+  IMessageDB,
+  addDatabaseOptions: addOptions,
+  initializeDatabase: initialize
 }

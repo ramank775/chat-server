@@ -29,7 +29,7 @@ async function prepareEventList(context) {
 async function initResources(options) {
   const context = await initDefaultResources(options)
     .then(cache.initMemCache)
-    .then(database.initDatabase)
+    .then(database.initializeDatabase)
     .then(prepareEventList)
     .then(disoveryService.initDiscoveryService)
     .then(eventStore.initializeEventStore({ producer: true, consumer: true }));
@@ -70,7 +70,10 @@ class MessageDeliveryMS extends ServiceBase {
     this.memCache = context.memCache;
     this.discoveryService = context.discoveryService;
     this.maxRetryCount = this.options.messageMaxRetries;
-    this.db = context.db;
+
+    /** @type {import('./database/message-db').IMessageDB} */
+    this.db = context.messageDb;
+    
     /** @type {import('../../libs/event-store/iEventStore').IEventStore} */
     this.eventStore = this.context.eventStore;
     this.events = this.context.events;

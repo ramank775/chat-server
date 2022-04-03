@@ -25,7 +25,7 @@ class MongoNotificationDB extends INotificationDB {
    * @param {{deviceId: string|null, token: string}} options 
    */
   async upsertToken(username, options) {
-    await this.notificationTokensCollection.updateOne(
+    await this.#collection.updateOne(
       { username, deviceId: options.deviceId },
       {
         $set: {
@@ -48,7 +48,7 @@ class MongoNotificationDB extends INotificationDB {
    * @param {{deviceId: string|null}} options 
    */
   async getToken(username, options) {
-    const record = await this.notificationTokensCollection.findOne(
+    const record = await this.#collection.findOne(
       { username, deviceId: options.deviceId },
       { projection: { _id: 0, notificationToken: 1 } }
     );
@@ -81,5 +81,5 @@ function addOptions(cmd) {
 module.exports = {
   code: 'mongo',
   addOptions,
-  MongoNotificationDB
+  Implementation: MongoNotificationDB
 }

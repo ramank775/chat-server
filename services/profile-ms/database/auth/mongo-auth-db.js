@@ -10,7 +10,7 @@ const { addMongodbOptions, initMongoClient } = require('../../../../libs/mongo-u
   #collection;
 
   /**
-   * Profile Database interface
+   * Auth Database interface
    * @param {*} context 
    */
   constructor(context) {
@@ -57,17 +57,15 @@ const { addMongodbOptions, initMongoClient } = require('../../../../libs/mongo-u
   }
 
   /**
-   * @abstract
    * Initialize the database instance
    */
   async init() {
     await this.#client.connect();
     const db = this.#client.db();
-    this.#collection = db.collection('session_auth');
+    this.#collection = db.collection('groups');
   }
 
   /**
-   * @abstract
    * Dispose the database internal resources
    */
   async dispose() {

@@ -1,5 +1,5 @@
-const { INotificationDB } = require('./notification-db');
-const mongodb = require('./mongo-notification-db')
+const { IGroupDB } = require('./group-db');
+const mongodb = require('./mongo-group-db')
 
 const DATABASE_IMPL = [
   mongodb
@@ -11,7 +11,7 @@ const DATABASE_IMPL = [
  * @returns {import('commander').Command}
  */
 function addOptions(cmd) {
-  cmd = cmd.option('--notification-db <notification-db>', 'Which database implementation to use (mongo)', 'mongo');
+  cmd = cmd.option('--group-db <group-db>', 'Which database implementation to use (mongo)', 'mongo');
   DATABASE_IMPL.forEach(impl => {
     cmd = impl.addOptions(cmd)
   })
@@ -21,16 +21,16 @@ function addOptions(cmd) {
 /**
  * @private
  * Get the database implementation as per the context options
- * @param {{options: {notificationDb: string}}} context
+ * @param {{options: {groupDb: string}}} context
  * @returns
  */
 function getDatabaseImpl(context) {
   const {
-    options: { notificationDb }
+    options: { groupDb }
   } = context;
-  const store = DATABASE_IMPL.find((s) => s.code === notificationDb);
+  const store = DATABASE_IMPL.find((s) => s.code === groupDb);
   if (!store) {
-    throw new Error(`${notificationDb} is not a registered database implementation for notification database`);
+    throw new Error(`${groupDb} is not a registered database implementation for Group database`);
   }
   return store;
 }
@@ -43,13 +43,13 @@ async function initialize(context) {
   const impl = getDatabaseImpl(context)
   const db = new impl.Implementation(context);
   await db.init();
-  context.notificationDB = db;
+  context.groupDb = db;
   return context;
 }
 
 
 module.exports = {
-  INotificationDB,
+  IGroupDB,
   addDatabaseOptions: addOptions,
   initializeDatabase: initialize
 }

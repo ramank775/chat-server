@@ -1,8 +1,8 @@
-const { ProfileDB } = require('./profile-db')
+const { IProfileDB } = require('./profile-db')
 const { addMongodbOptions, initMongoClient } = require('../../../../libs/mongo-utils');
 
 
-class MongoProfileDB extends ProfileDB {
+class MongoProfileDB extends IProfileDB {
   /** @type { import('mongodb').MongoClient } */
   #client;
 

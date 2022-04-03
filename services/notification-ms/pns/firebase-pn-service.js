@@ -63,5 +63,5 @@ function addOptions(cmd) {
 module.exports = {
   code: 'firebase',
   addOptions,
-  FirebasePushNotificationService
+  Implementation: FirebasePushNotificationService
 }

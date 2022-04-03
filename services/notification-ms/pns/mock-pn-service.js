@@ -30,5 +30,5 @@ function addOptions(cmd) {
 module.exports = {
   code: 'mock',
   addOptions,
-  MockPushNotificationService
+  Implementation: MockPushNotificationService
 }
