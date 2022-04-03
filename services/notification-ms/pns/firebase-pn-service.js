@@ -35,7 +35,7 @@ class FirebasePushNotificationService extends IPushNotificationService {
       priority: 'high',
       timeToLive: this.#ttl
     };
-    this.#messaging.sendToDevice(token, chatPayload, options)
+    return await this.#messaging.sendToDevice(token, chatPayload, options)
   }
 
   /**
