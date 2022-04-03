@@ -62,7 +62,7 @@ const { addMongodbOptions, initMongoClient } = require('../../../../libs/mongo-u
   async init() {
     await this.#client.connect();
     const db = this.#client.db();
-    this.#collection = db.collection('groups');
+    this.#collection = db.collection('session_auth');
   }
 
   /**

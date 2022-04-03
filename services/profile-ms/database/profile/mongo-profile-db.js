@@ -59,7 +59,7 @@ class MongoProfileDB extends IProfileDB {
     availableUsers.forEach((u) => {
       result[u.username] = true;
     });
-    await this.profileCollection.updateOne(
+    await this.#collection.updateOne(
       { username },
       { $set: { syncAt: new Date() } }
     );
