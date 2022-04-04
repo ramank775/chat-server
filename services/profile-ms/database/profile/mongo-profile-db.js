@@ -63,7 +63,11 @@ class MongoProfileDB extends IProfileDB {
       { username },
       { $set: { syncAt: new Date() } }
     );
-    return availableUsers;
+    const response = availableUsers.reduce((acc, user) => {
+      acc[user.username] = true;
+      return acc;
+    }, {});
+    return response
   }
 
   /**
