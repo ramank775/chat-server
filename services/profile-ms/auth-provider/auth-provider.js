@@ -27,12 +27,11 @@ class IAuthProvider {
 
   /**
    * Decode the external token supplied
-   * @param {string} token 
-   * @param {{verify: boolean}} options 
+   * @param {string} token
    * @returns {Promise<{uid: string; [key:string]: *}>}
    */
   // eslint-disable-next-line no-unused-vars
-  async decodeExternalToken(token, options) {
+  async decodeExternalToken(token) {
     throw new Error('Method not implemented');
   }
 

@@ -25,12 +25,11 @@ class MockAuthProvider extends IAuthProvider {
 
   /**
    * Decode the external token supplied
-   * @param {string} token 
-   * @param {{verify: boolean}} _options 
+   * @param {string} token
    * @returns {Promise<{uid: string; [key:string]: *}>}
    */
   // eslint-disable-next-line class-methods-use-this
-  async decodeExternalToken(token, _options) {
+  async decodeExternalToken(token) {
     if(token == null) {
       throw new Error('invalid token');
     }

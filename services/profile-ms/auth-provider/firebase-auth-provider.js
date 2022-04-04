@@ -53,11 +53,10 @@ class FirebaseAuthProvider extends IAuthProvider {
   /**
    * Decode the external token supplied
    * @param {string} token 
-   * @param {{verify: boolean}} options 
    * @returns {Promise<{uid: string; [key:string]: *}>}
    */
-  async decodeExternalToken(token, options) {
-    const decodedToken = await this.#firebaseAuth.verifyIdToken(token, options.verify);
+  async decodeExternalToken(token) {
+    const decodedToken = await this.#firebaseAuth.verifyIdToken(token, false);
     return decodedToken;
   }
 

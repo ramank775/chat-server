@@ -65,9 +65,7 @@ class ProfileMs extends HttpServiceBase {
       let isNew = false;
       let result;
       try {
-        result = await this.authProvider.decodeExternalToken(token, {
-          verify: true
-        });
+        result = await this.authProvider.decodeExternalToken(token);
       } catch (error) {
         this.log.error(`Error while authentication : ${error}`);
         return res.response({}).code(401);
