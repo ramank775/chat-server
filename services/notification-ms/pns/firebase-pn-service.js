@@ -10,6 +10,8 @@ class FirebasePushNotificationService extends IPushNotificationService {
   /** @type {import('firebase-admin').messaging.Messaging} */
   #messaging;
 
+  #logger;
+
   /**
    * Firebase push notification service
    * @param {*} context 
@@ -17,7 +19,8 @@ class FirebasePushNotificationService extends IPushNotificationService {
   constructor(context) {
     super(context);
     this.#credFilePath = context.options.firebaseAdminCredentialJsonPath;
-    this.#ttl =context.options.firebasePnTtl || this.#ttl;
+    this.#ttl = context.options.firebasePnTtl || this.#ttl;
+    this.#logger = context.log;
   }
 
   /**
@@ -35,7 +38,10 @@ class FirebasePushNotificationService extends IPushNotificationService {
       priority: 'high',
       timeToLive: this.#ttl
     };
-    return await this.#messaging.sendToDevice(token, chatPayload, options)
+    await this.#messaging.sendToDevice(token, chatPayload, options)
+      .then((response) => {
+        this.#logger.info('Push notification sent successfully', response)
+      })
   }
 
   /**
@@ -56,7 +62,11 @@ function addOptions(cmd) {
     '--firebase-admin-credential-json-path <firebaes-admin-cred-file>',
     'Path to the firebase admin credentials file'
   );
-  cmd.option('--firebase-pn-ttl <firebase-pn-ttl>', 'Firebase pushing notification Time to live (30 sec)', 30);
+  cmd.option(
+    '--firebase-pn-ttl <firebase-pn-ttl>',
+    'Firebase pushing notification Time to live (30 sec)',
+    (c) => Number(c),
+    30);
   return cmd;
 }
 
