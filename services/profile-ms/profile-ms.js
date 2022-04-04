@@ -1,4 +1,3 @@
-const admin = require('firebase-admin');
 const {
   initDefaultOptions,
   initDefaultResources,
@@ -6,73 +5,18 @@ const {
   resolveEnvVariables
 } = require('../../libs/service-base');
 const { HttpServiceBase } = require('../../libs/http-service-base');
-const { addMongodbOptions, initMongoClient } = require('../../libs/mongo-utils');
 const eventStore = require('../../libs/event-store');
-const { uuidv4, extractInfoFromRequest } = require('../../helper');
+const { profileDB } = require('./database');
+const { addAuthProviderOptions, initializeAuthProvider } = require('./auth-provider')
+const { extractInfoFromRequest } = require('../../helper');
 
 const asMain = require.main === module;
-
-function firebaseProjectOptions(cmd) {
-  return cmd.option('--firebase-project-id <firebaseProjectId>', 'Firebase Project Id');
-}
-
-async function initFirebaseAdmin(context) {
-  const { options } = context;
-  const app = admin.initializeApp({
-    projectId: options.firebaseProjectId
-  });
-  context.firebaseApp = app;
-  context.firebaseAuth = app.auth();
-  return context;
-}
-
-async function initAccessKeyCache(context) {
-  const authCollection = context.mongodbClient.collection('session_auth');
-  const cache = {};
-  cache.get = async (username) => {
-    const accesskey = cache[username];
-    if (!accesskey) {
-      const auth = await authCollection.findOne(
-        { username },
-        { projection: { _id: 0, username: 1, accesskey: 1 } }
-      );
-      if (auth) {
-        cache[username] = auth.accesskey;
-      }
-    }
-    return cache[username];
-  };
-  cache.create = async (username) => {
-    const newAccessKey = uuidv4();
-    const newAuthDoc = {
-      username,
-      accesskey: newAccessKey,
-      updatedOn: new Date()
-    };
-    await authCollection.updateOne(
-      { username },
-      {
-        $set: newAuthDoc,
-        $setOnInsert: {
-          addedOn: new Date()
-        }
-      },
-      {
-        upsert: true
-      }
-    );
-    cache[username] = newAccessKey;
-    return newAccessKey;
-  };
-  context.accessKeyProvider = cache;
-  return context;
-}
 
 function parseOptions(argv) {
   let cmd = initDefaultOptions();
   cmd = addStandardHttpOptions(cmd);
-  cmd = addMongodbOptions(cmd);
-  cmd = firebaseProjectOptions(cmd);
+  cmd = profileDB.addDatabaseOptions(cmd);
+  cmd = addAuthProviderOptions(cmd);
   cmd = eventStore.addEventStoreOptions(cmd);
   cmd.option(
     '--new-login-topic <new-login-topic>',
@@ -83,22 +27,21 @@ function parseOptions(argv) {
 
 async function initResource(options) {
   return await initDefaultResources(options)
-    .then(initMongoClient)
-    .then(initFirebaseAdmin)
-    .then(eventStore.initializeEventStore({ producer: true }))
-    .then(initAccessKeyCache);
+    .then(profileDB.initializeDatabase)
+    .then(initializeAuthProvider)
+    .then(eventStore.initializeEventStore({ producer: true }));
 }
 
 class ProfileMs extends HttpServiceBase {
   constructor(context) {
     super(context);
-    this.mongoClient = context.mongoClient;
-    this.profileCollection = context.mongodbClient.collection('profile');
-    this.firebaseAuth = context.firebaseAuth;
-    this.newLoginTopic = this.options.newLoginTopic;
+    /** @type {import('./database/profile/profile-db').IProfileDB } */
+    this.profileDB = context.profileDB;
+    /** @type {import('./auth-provider/auth-provider').IAuthProvider} */
+    this.authProvider = context.authProvider;
     /** @type {import('../../libs/event-store/iEventStore').IEventStore} */
     this.eventStore = context.eventStore;
-    this.accessKeyProvider = context.accessKeyProvider;
+    this.newLoginTopic = this.options.newLoginTopic;
   }
 
   async init() {
@@ -107,15 +50,9 @@ class ProfileMs extends HttpServiceBase {
     this.addRoute('/auth', ['GET', 'POST'], async (req, res) => {
       const username = extractInfoFromRequest(req, 'user');
       const accesskey = extractInfoFromRequest(req, 'accesskey');
-      const token = extractInfoFromRequest(req, 'token');
-      const accessKeyDb = await this.accessKeyProvider.get(username);
-      if (accesskey !== accessKeyDb) {
-        return res.response({}).code(401);
-      }
       try {
-        await this.verify(token);
-      } catch (error) {
-        this.log.error(`Error while authentication : ${error}`);
+        this.authProvider.verifyAccessKey(username, accesskey);
+      } catch {
         return res.response({}).code(401);
       }
       return res.response({}).code(200);
@@ -128,12 +65,12 @@ class ProfileMs extends HttpServiceBase {
       let isNew = false;
       let result;
       try {
-        result = await this.verify(token);
+        result = await this.authProvider.decodeExternalToken(token);
       } catch (error) {
         this.log.error(`Error while authentication : ${error}`);
         return res.response({}).code(401);
       }
-      const isExist = await this.isExists(username);
+      const isExist = await this.profileDB.isExits(username);
       if (!isExist) {
         isNew = true;
         const profile = {
@@ -142,9 +79,9 @@ class ProfileMs extends HttpServiceBase {
           addedOn: new Date(),
           isActive: true
         };
-        await this.profileCollection.insertOne(profile);
+        await this.profileDB.create(profile);
       }
-      const accesskey = await this.accessKeyProvider.create(username);
+      const accesskey = await this.authProvider.generateAccessKey(username);
       this.eventStore.emit(this.newLoginTopic, payload, username);
       return {
         status: true,
@@ -159,47 +96,22 @@ class ProfileMs extends HttpServiceBase {
       if (!username) {
         return {};
       }
-      const user = await this.profileCollection.findOne(
-        { username, isActive: true },
-        { projection: { _id: 0, name: 1, username: 1 } }
-      );
+      const user = await this.profileDB.findActiveUser(username, { name: 1, username: 1 });
       return user || {};
     });
 
     this.addRoute('/user/sync', 'POST', async (req) => {
       const username = extractInfoFromRequest(req);
       const { users = [] } = req.payload;
-      const availableUsers = await this.profileCollection
-        .find({ username: { $in: users }, isActive: true }, { projection: { _id: 0, username: 1 } })
-        .toArray();
-      const result = {};
-      availableUsers.forEach((u) => {
-        result[u.username] = true;
-      });
-      await this.profileCollection.updateOne(
-        { username },
-        { $set: { syncAt: new Date() } }
-      );
+      const result = await this.profileDB.contactBookSyncByUsername(username, users);
       return result || {};
     });
   }
 
-  async isExists(username) {
-    const count = await this.profileCollection.countDocuments({ username });
-    return count > 0;
-  }
-
-  async verify(accesskey) {
-    if (this.options.debug && accesskey === 'test') {
-      return { uid: uuidv4() };
-    }
-    const decodedToken = await this.firebaseAuth.verifyIdToken(accesskey);
-    return decodedToken;
-  }
-
   async shutdown() {
     await super.shutdown();
-    await this.context.mongoClient.close();
+    await this.profileDB.dispose();
+    await this.authProvider.dispose();
   }
 }
 

@@ -1,5 +1,5 @@
-const { IMessageDB } = require('./message-db');
-const mongodb = require('./mongo-message-db')
+const { IAuthDB } = require('./auth-db');
+const mongodb = require('./mongo-auth-db')
 
 const DATABASE_IMPL = [
   mongodb
@@ -11,7 +11,7 @@ const DATABASE_IMPL = [
  * @returns {import('commander').Command}
  */
 function addOptions(cmd) {
-  cmd = cmd.option('--message-db <message-db>', 'Which database implementation to use (mongo)', 'mongo');
+  cmd = cmd.option('--auth-db <profile-db>', 'Which database implementation to use (mongo)', 'mongo');
   DATABASE_IMPL.forEach(impl => {
     cmd = impl.addOptions(cmd)
   })
@@ -21,16 +21,16 @@ function addOptions(cmd) {
 /**
  * @private
  * Get the database implementation as per the context options
- * @param {{options: {messageDb: string}}} context
+ * @param {{options: {profileDb: string}}} context
  * @returns
  */
 function getDatabaseImpl(context) {
   const {
-    options: { messageDb }
+    options: { profileDb }
   } = context;
-  const store = DATABASE_IMPL.find((s) => s.code === messageDb);
+  const store = DATABASE_IMPL.find((s) => s.code === profileDb);
   if (!store) {
-    throw new Error(`${messageDb} is not a registered database implementation for Message database`);
+    throw new Error(`${profileDb} is not a registered database implementation for profile database`);
   }
   return store;
 }
@@ -43,13 +43,13 @@ async function initialize(context) {
   const impl = getDatabaseImpl(context)
   const db = new impl.Implementation(context);
   await db.init();
-  context.messageDb = db;
+  context.authDB = db;
   return context;
 }
 
 
 module.exports = {
-  IMessageDB,
+  IAuthDB,
   addDatabaseOptions: addOptions,
   initializeDatabase: initialize
 }

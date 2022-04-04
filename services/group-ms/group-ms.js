@@ -5,17 +5,17 @@ const {
   resolveEnvVariables
 } = require('../../libs/service-base');
 const { HttpServiceBase } = require('../../libs/http-service-base');
-const { addMongodbOptions, initMongoClient } = require('../../libs/mongo-utils');
-const { uuidv4, shortuuid, extractInfoFromRequest } = require('../../helper');
+const { shortuuid, extractInfoFromRequest } = require('../../helper');
 const { formatMessage } = require('../../libs/message-utils');
 const eventStore = require('../../libs/event-store');
+const { addDatabaseOptions, initializeDatabase } = require('./database');
 
 const asMain = require.main === module;
 
 function parseOptions(argv) {
   let cmd = initDefaultOptions();
   cmd = addStandardHttpOptions(cmd);
-  cmd = addMongodbOptions(cmd);
+  cmd = addDatabaseOptions(cmd);
   cmd = eventStore.addEventStoreOptions(cmd);
   cmd = cmd.option(
     '--new-group-message-topic <new-group-message-topic>',
@@ -26,15 +26,15 @@ function parseOptions(argv) {
 
 async function initResource(options) {
   return await initDefaultResources(options)
-    .then(initMongoClient)
+    .then(initializeDatabase)
     .then(eventStore.initializeEventStore({ producer: true }));
 }
 
 class GroupMs extends HttpServiceBase {
   constructor(context) {
     super(context);
-    this.mongoClient = context.mongoClient;
-    this.groupCollection = context.mongodbClient.collection('groups');
+    /** @type {import('./database/group-db').IGroupDB} */
+    this.db = context.groupDb;
     /** @type {import('../../libs/event-store/iEventStore').IEventStore} */
     this.eventStore = this.context.eventStore;
   }
@@ -45,11 +45,9 @@ class GroupMs extends HttpServiceBase {
       const { name, members, profilePic } = req.payload;
       const user = extractInfoFromRequest(req, 'user');
       const payload = {
-        groupId: uuidv4(),
         name,
         members: [],
         profilePic,
-        addedOn: new Date()
       };
       if (!members.includes(user)) {
         members.push(user);
@@ -57,25 +55,25 @@ class GroupMs extends HttpServiceBase {
       members.forEach((member) => {
         payload.members.push({ username: member, role: member === user ? 'admin' : 'user' });
       });
-      await this.groupCollection.insertOne(payload);
+      const groupId = await this.db.create(payload)
       this.sendNotification({
         from: user,
         to: members,
-        groupId: payload.groupId,
+        groupId,
         action: 'add',
         body: {
           added: payload.members
         }
       });
       return {
-        groupId: payload.groupId
+        groupId
       };
     });
 
     this.addRoute('/{groupId}/add', 'POST', async (req, res) => {
       const user = extractInfoFromRequest(req, 'user');
       const { groupId } = req.params;
-      const group = await this.groupCollection.findOne({ groupId, 'members.username': user });
+      const group = await this.db.getGroupInfo(groupId, user);
       if (!group) {
         return res.response({ status: false }).code(404);
       }
@@ -86,10 +84,7 @@ class GroupMs extends HttpServiceBase {
         };
       }
       const newMembers = members.map((member) => ({ username: member, role: 'user' }));
-      await this.groupCollection.updateOne(
-        { _id: group._id },
-        { $addToSet: { members: { $each: newMembers } } }
-      );
+      await this.db.addMember(groupId, user, newMembers);
       const existingMembers = group.members.map((member) => member.username);
       const receivers = [...new Set(existingMembers.concat(members))];
       this.sendNotification({
@@ -108,7 +103,7 @@ class GroupMs extends HttpServiceBase {
       const user = extractInfoFromRequest(req, 'user');
       const { member } = req.payload;
       const { groupId } = req.params;
-      const group = await this.groupCollection.findOne({ groupId, 'members.username': user });
+      const group = await this.db.getGroupInfo(groupId, user)
       if (!group) {
         return res.response({ status: false }).code(404);
       }
@@ -119,11 +114,8 @@ class GroupMs extends HttpServiceBase {
           status: false
         };
       }
-      const query = {
-        $pull: { members: { username: member } }
-      };
 
-      await this.groupCollection.updateOne({ _id: group._id }, query);
+      await this.db.removeMember(groupId, user, [member]);
 
       if (isSelf && self.role === 'admin') {
         const admin = group.members.find((x) => x.username !== user && x.role === 'admin');
@@ -131,10 +123,7 @@ class GroupMs extends HttpServiceBase {
           const nextAdmin = group.members.find((x) => x.username !== user);
           if (nextAdmin) {
             nextAdmin.role = 'admin';
-            await this.groupCollection.updateOne(
-              { _id: group._id, 'members.username': nextAdmin.username },
-              { $set: { 'members.$.role': 'admin' } }
-            );
+            await this.db.updateMemberRole(groupId, nextAdmin.username, nextAdmin.role);
           }
         }
       }
@@ -155,15 +144,7 @@ class GroupMs extends HttpServiceBase {
     this.addRoute('/{groupId}', 'GET', async (req, res) => {
       const user = extractInfoFromRequest(req, 'user');
       const { groupId } = req.params;
-      const group = await this.groupCollection.findOne(
-        {
-          groupId,
-          'members.username': user
-        },
-        {
-          projection: { _id: 0, groupId: 1, name: 1, members: 1, profilePic: 1 }
-        }
-      );
+      const group = await this.db.getGroupInfo(groupId, user );
       if (!group) {
         return res.response({ status: false }).code(404);
       }
@@ -172,14 +153,7 @@ class GroupMs extends HttpServiceBase {
 
     this.addRoute('/get', 'GET', async (req) => {
       const user = extractInfoFromRequest(req, 'user');
-      const groups = await this.groupCollection
-        .find(
-          { 'members.username': user },
-          {
-            projection: { _id: 0, groupId: 1, name: 1, members: 1, profilePic: 1 }
-          }
-        )
-        .toArray();
+      const groups = await this.db.getMemberGroups(user)
       return groups || [];
     });
   }
@@ -221,7 +195,7 @@ class GroupMs extends HttpServiceBase {
 
   async shutdown() {
     await super.shutdown();
-    await this.context.mongoClient.close();
+    await this.db.dispose();
     await this.eventStore.dispose();
   }
 }

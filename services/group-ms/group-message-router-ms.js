@@ -5,7 +5,7 @@ const {
   initDefaultResources,
   resolveEnvVariables
 } = require('../../libs/service-base');
-const { addMongodbOptions, initMongoClient } = require('../../libs/mongo-utils');
+const { addDatabaseOptions, initializeDatabase } = require('./database');
 const { formatMessage } = require('../../libs/message-utils');
 
 const asMain = require.main === module;
@@ -23,7 +23,7 @@ async function prepareEventList(context) {
 
 async function initResources(options) {
   const context = await initDefaultResources(options)
-    .then(initMongoClient)
+    .then(initializeDatabase)
     .then(prepareEventList)
     .then(eventStore.initializeEventStore({ producer: true, consumer: true }));
   return context;
@@ -32,7 +32,7 @@ async function initResources(options) {
 function parseOptions(argv) {
   let cmd = initDefaultOptions();
   cmd = eventStore.addEventStoreOptions(cmd);
-  cmd = addMongodbOptions(cmd);
+  cmd = addDatabaseOptions(cmd);
   cmd
     .option(
       '--new-group-message-topic <new-group-message-topic>',
@@ -53,8 +53,8 @@ function parseOptions(argv) {
 class GroupMessageRouterMS extends ServiceBase {
   constructor(context) {
     super(context);
-    this.mongoClient = context.mongoClient;
-    this.groupCollection = context.mongodbClient.collection('groups');
+    /** @type {import('./database/group-db').IGroupDB} */
+    this.db = context.groupDb;
     /** @type {import('../../libs/event-store/iEventStore').IEventStore} */
     this.eventStore = context.eventStore;
     this.events = context.events;
@@ -96,11 +96,11 @@ class GroupMessageRouterMS extends ServiceBase {
 
   async shutdown() {
     await this.eventStore.dispose();
-    await this.context.mongoClient.close();
+    await this.db.dispose();
   }
 
   async getGroupUsers(groupId, user) {
-    const group = await this.groupCollection.findOne({ groupId, 'members.username': user });
+    const group = await this.db.getGroupInfo(groupId, user);
     const users = group.members.map((x) => x.username);
     return users;
   }
