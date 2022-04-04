@@ -109,7 +109,7 @@ class NotificationMS extends ServiceBase {
               if (record) {
                 this.notificationMeter.mark();
                 const { notificationToken } = record;
-                this.pns.push(notificationToken, payloads).catch((err) => {
+                await this.pns.push(notificationToken, payloads).catch((err) => {
                   this.failedNotificationMeter.mark();
                   this.log.error(`Error while sending push notification ${err}`, err);
                 });
