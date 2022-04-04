@@ -124,7 +124,7 @@ class MongoGroupDB extends IGroupDB {
   async init() {
     await this.#client.connect();
     const db = this.#client.db();
-    this.#collection = db.collection('session_auth');
+    this.#collection = db.collection('groups');
   }
 
   /**
