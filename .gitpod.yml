@@ -22,8 +22,8 @@ tasks:
   - name: minio
     command: >
       mkdir -p /workspace/data/minio &&
-      export MINIO_ROOT_USER=access_key MINIO_ROOT_PASSWORD=secret_access_key
-      /minio/minio server /workspace/data/minio
+      export MINIO_ROOT_USER=access_key MINIO_ROOT_PASSWORD=secret_access_key &&
+      /minio/minio server /workspace/data/minio --console-address ":9001"
 
 
 vscode:
