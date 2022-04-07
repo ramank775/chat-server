@@ -10,5 +10,6 @@ RUN wget https://downloads.apache.org/kafka/3.1.0/kafka_2.13-3.1.0.tgz  && \
     rm kafka_2.13-3.1.0.tgz
 
 RUN wget https://dl.min.io/server/minio/release/linux-amd64/minio && \
+    sudo mkdir -p /minio && \
     sudo mv minio /minio/minio && \
     chmod +x /minio/minio
