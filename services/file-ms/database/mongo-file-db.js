@@ -22,20 +22,18 @@ class MongoFileStore extends IFileMetadataDB {
 
   /**
    * Create new File record
-   * @param {{fileName: string; owner: string; contentType: string; type: string}} payload
+   * @param {{category: string; owner: string; contentType: string;}} payload
    * @returns {Promise<string>}
    */
   async createRecord(payload) {
     const fileRecord = {
-      fileName: payload.fileName,
+      category: payload.category,
       owner: payload.owner,
       contentType: payload.contentType,
       createdAt: new Date()
     }
-    const { _id } = await this.#collection.insertOne(fileRecord, {
-      forceServerObjectId: true
-    });
-    return _id.toHexString()
+    const record = await this.#collection.insertOne(fileRecord);
+    return record.insertedId.toHexString()
   }
 
   /**

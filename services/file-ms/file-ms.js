@@ -1,4 +1,3 @@
-const path = require('path');
 const {
   initDefaultOptions,
   initDefaultResources,
@@ -8,7 +7,7 @@ const {
 const { HttpServiceBase } = require('../../libs/http-service-base');
 const { addDatabaseOptions, initializeDatabase } = require('./database');
 const { addFileStorageOptions, initializeFileStorage } = require('./file-storage')
-const { getFilename, extractInfoFromRequest } = require('../../helper');
+const { extractInfoFromRequest } = require('../../helper');
 const { getContentTypeByExt } = require('../../libs/content-type-utils');
 
 const asMain = require.main === module;
@@ -35,64 +34,59 @@ class FileMS extends HttpServiceBase {
     /** @type {import('./database/file-metadata-db').IFileMetadataDB} */
     this.fileMetadataDB = this.context.fileMetadataDB;
     /** @type {import('./file-storage/file-storage').IFileStorage} */
-    this.fileStorage = this.context.fileService;
+    this.fileStorage = this.context.fileStorage;
   }
 
   async init() {
     await super.init();
-    this.addRoute('/signed_url', 'POST', async (req, h) => {
-      const { type } = req.payload;
-      if (type === 'download') {
-        return await this.getDownloadURL(req, h);
-      } if (type === 'upload') {
-        return await this.getUploadURL(req, h);
-      }
-      return h.send({ error: 'Bad request' }).status(400);
-    });
-    this.addRoute('/status', 'PUT', this.updateFileUploadStatus);
+    this.addRoute('/upload/presigned_url', 'POST', this.getUploadURL.bind(this));
+    this.addRoute('/download/{fileId}/presigned_url', 'GET', this.getDownloadURL.bind(this));
+    this.addRoute('/{fileId}/status', 'PUT', this.updateFileUploadStatus.bind(this));
   }
 
   async updateFileUploadStatus(req, h) {
-    const { fileId, status } = req.payload;
+    const { fileId } = req.params
+    const { status } = req.payload;
     const user = extractInfoFromRequest(req, 'user');
     const file = await this.fileMetadataDB.getRecord(fileId);
     if (!file || file.owner !== user) {
-      return h.send({ error: 'file not found' }).status(404);
+      return h.response({ error: 'file not found' }).code(404);
     }
     if (file.status === true) {
-      return h.send({ error: 'bad request' }).status(400);
+      return h.response({ error: 'bad request' }).code(400);
     }
     await this.fileMetadataDB.updateFileStatus(fileId, !!status);
+    return h.response().code(200);
   }
 
   async getDownloadURL(req, h) {
-    const payload = {
-      fileId: req.payload.fileId,
-      contentType: req.payload.contentType
-    };
-    const file = await this.fileMetadataDB.getRecord(payload.fileId);
+    const { fileId } = req.params;
+
+    const file = await this.fileMetadataDB.getRecord(fileId);
     if (file == null) {
-      return h.send({ error: 'file not found' }).status(404);
+      return h.response({ error: 'file not found' }).code(404);
     }
-    payload.fileName = file.fileName;
+    const payload = {
+      fileId,
+      category: file.category,
+      contentType: file.contentType,
+    };
     const preSignedURL = await this.getSignedURL(payload, 'download');
     return { url: preSignedURL };
   }
 
   async getUploadURL(req, _h) {
     const userName = extractInfoFromRequest(req, 'user');
-    const { fileName, type } = req.payload;
-    const contentType = getContentTypeByExt(path.extname(fileName));
+    const { ext, category } = req.payload;
+    const contentType = getContentTypeByExt(ext);
     const payload = {
-      fileName: getFilename(fileName),
       contentType,
-      type
+      category,
     };
     const fileRecord = {
-      name: payload.fileName,
+      category,
       owner: userName,
       contentType,
-      type
     };
     payload.fileId = await this.fileMetadataDB.createRecord(fileRecord);
     const preSignedURL = await this.getSignedURL(payload, 'upload');
@@ -106,7 +100,7 @@ class FileMS extends HttpServiceBase {
     const preSignedURL = await this.fileStorage.getSignedUrl({
       operation,
       fileId: payload.fileId,
-      type: payload.type,
+      category: payload.category,
       contentType: payload.contentType,
     })
     return preSignedURL;
