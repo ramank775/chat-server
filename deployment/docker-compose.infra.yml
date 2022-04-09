@@ -99,3 +99,11 @@ services:
       replicas: 1
       restart_policy:
         condition: on-failure
+
+  file:
+    networks:
+      - vartalap
+    logging:
+      options:
+        max-size: "100m"
+    deploy:
