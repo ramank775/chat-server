@@ -25,15 +25,15 @@ class S3FileStorage extends IFileStorage {
 
   /**
    * Get Signed URL
-   * @param {{fileId: string; type: string; contentType: string, operation: 'upload'|'download'}} payload
+   * @param {{fileId: string; category: string; contentType: string, operation: 'upload'|'download'}} payload
    * @returns {Promise<string>}
    */
   async getSignedUrl(payload) {
-    const key = `${this.#options.baseDir}/${payload.type}/${payload.fileId}`
+    const key = `${this.#options.baseDir}/${payload.category}/${payload.fileId}`
     const params = {
-      Bucket: this.options.bucketName,
+      Bucket: this.#options.bucketName,
       Key: key,
-      Expires: this.options.urlExpireTime
+      Expires: this.#options.expireTime
     };
     if (payload.operation === 'upload') {
       params.ContentType = payload.contentType;
@@ -47,12 +47,13 @@ class S3FileStorage extends IFileStorage {
    * Initialize the file storage instance
    */
   async init() {
-    this.#client = new AWS.S3();
-    this.#client.config.update({
-      accessKeyId: this.#options.accessKeyId,
-      secretAccessKey: this.#options.secretAccessKey,
+    this.#client = new AWS.S3({
+      credentials: {
+        accessKeyId: this.#options.accessKeyId,
+        secretAccessKey: this.#options.secretAccessKey,
+      },
+      signatureVersion: 'v4',
       region: this.#options.region,
-      signatureVersion: 'v4'
     });
   }
 
@@ -69,7 +70,7 @@ function addFileServiceOptions(cmd) {
   cmd.option('--s3-access-key-id <access-key-id>', 's3 access key id');
   cmd.option('--s3-secret-access-key <secret-access-key>', 's3 secret access key');
   cmd.option('--s3-region <region>', 's3 region', 'ap-south-1');
-  cmd.option('--url-expire-time <expire-time>', 'pre signed url expire time', 600);
+  cmd.option('--url-expire-time <expire-time>', 'pre signed url expire time', (c) => Number(c), 600);
   cmd.option('--s3-bucket-name <bucket-name>', 's3 bucket name');
   return cmd;
 }

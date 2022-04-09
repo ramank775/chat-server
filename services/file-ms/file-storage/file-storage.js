@@ -20,7 +20,7 @@
   /**
    * @abstract
    * Get Signed URL
-   * @param {{fileId: string; type: string; contentType: string, operation: 'upload'|'download'}} payload
+   * @param {{fileId: string; category: string; contentType: string, operation: 'upload'|'download'}} payload
    * @returns {Promise<string>}
    */
    // eslint-disable-next-line no-unused-vars

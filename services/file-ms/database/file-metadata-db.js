@@ -20,7 +20,7 @@
   /**
    * @abstract
    * Create new File record
-   * @param {{fileName: string; owner: string; contentType: string; type: string}} payload
+   * @param {{category: string; owner: string; contentType: string;}} payload
    * @returns {Promise<string>}
    */
   // eslint-disable-next-line no-unused-vars
