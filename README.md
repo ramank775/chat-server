@@ -1,6 +1,5 @@
 # Chat Server
 [![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](code_of_conduct.md)
-
 [![Gitpod Ready-to-Code](https://img.shields.io/badge/Gitpod-Ready--to--Code-blue?logo=gitpod)](https://gitpod.io/#https://github.com/ramank775/chat-server) 
 
 A chat server based on the microservice architecture to ensure high availability, high throughput, horizontal scalability using Kafka
@@ -167,12 +166,24 @@ Click on the Gitpod badge it will start the fully setup development environment.
 
 ## Deployment
 For deployment guide refer to [deployment/README.md](./deployment/README.md).
+
 # Resources
+
+## API specs doc 
+[![Run in Postman](https://run.pstmn.io/button.svg)](https://god.gw.postman.com/run-collection/20439391-376454b4-ccc4-4fb5-8b88-5a3a3392e6d1?action=collection%2Ffork&collection-url=entityId%3D20439391-376454b4-ccc4-4fb5-8b88-5a3a3392e6d1%26entityType%3Dcollection%26workspaceId%3Def561179-c2db-47e5-85ce-10440f20555c)
+
+- API documentation [here](https://documenter.getpostman.com/view/20439391/Uyr5neME)
+
+- Open API specs 3.0 [here](./docs/openapi.yaml)
+
+## Blog posts
 To follow the update keep a eye on vartalap blogs on [blog.one9x.org](https://blog.one9x.org)
 Some of the relevent blogs are:
 - [Vartalap: Open Source Personal Messaging App](https://blog.one9x.org/vartalap/2021/04/04/vartalap-personal-messaging-app.html)
 - [Vartalap: Chat Server Architecture V1](https://blog.one9x.org/vartalap/2021/04/10/vartalap-chat-server-architecture.html)
 - [Vartalap: Chat Server Architecture V2](https://blog.one9x.org/vartalap/2021/05/22/vartalap-chat-server-architecture-v2.html)
 - [Vartalap: Chat Server Architecture V2.1](https://blog.one9x.org/vartalap/2021/06/26/vartalap-chat-server-architecture-v2-1.html)
+
+
 ## LICENSE
  [MIT](./LICENSE)
