@@ -1,0 +1,274 @@
+openapi: 3.0.0
+info:
+  title: Vartalap
+  version: 1.0.0
+servers:
+  - url: http://{{baseurl}}
+tags:
+  - name: Auth
+    description: Authentication endpoints
+  - name: Profile
+    description: User Profile Endpoints
+  - name: Gateway
+    description: >-
+      Web socket and HTTP Gateway
+
+      As open api spec doesn't yet support adding web socket specs
+
+      Endpoint: `wss://{{hostname}}/wss`
+  - name: Group
+    description: Endpoints for performing group related actions
+  - name: File
+    description: File service endpoint to upload and download files
+paths:
+  /login:
+    post:
+      tags:
+        - Auth
+      summary: Login With Firebase
+      description: Authenticate with Firebase such as Phone Auth
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                username: '{{username}}'
+                notificationToken: fcm token
+      parameters:
+        - name: token
+          in: header
+          schema:
+            type: string
+          description: Firebase auth token
+          example: '{{firebase_auth_token}}'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /profile/get:
+    get:
+      tags:
+        - Profile
+      summary: Get Profile
+      description: Get User profile
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /profile/user/sync:
+    post:
+      tags:
+        - Profile
+      summary: Sync Contact
+      description: Sync contact book, to fetch list of users using this service
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                users:
+                  - username_1
+                  - username_2
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /messages:
+    post:
+      tags:
+        - Gateway
+      summary: Send Message
+      description: Http endpoint to send messages
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                - _v: 2
+                  id: string
+                  head:
+                    type: chat|group|channel|bot|notification
+                    to: username|group_id|channel_id|bot_id
+                    from: username
+                    chatid: chatid
+                    contentType: json|text|video|audio|location|form
+                    action: >-
+                      message|ack|subscribe|unsubscribe|join|leave|create|add-member|remove-member
+                  meta:
+                    hash: md5:hash
+                    content_hash: md5:hash
+                    generate_ts: 123455667890
+                  body:
+                    text: Hello this a text message
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /group/create:
+    post:
+      tags:
+        - Group
+      summary: Create New Group
+      description: Create new group chat
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                name: Group Name/Title
+                profilePic: profile-pic-id
+                members:
+                  - member_1_username
+                  - member_2_username
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /group/{groupId}/add:
+    post:
+      tags:
+        - Group
+      summary: Add Members to Group
+      description: Add members to existing group chat
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                members:
+                  - member_3_username
+                  - member_4_username
+      parameters:
+        - name: groupId
+          in: path
+          schema:
+            type: string
+          required: true
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /group/{groupId}/remove:
+    post:
+      tags:
+        - Group
+      summary: Remove Member From Group
+      description: >-
+        Remove other members only valid if you have admin permission or Leave
+        group chat.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                member: member_1_username
+      parameters:
+        - name: groupId
+          in: path
+          schema:
+            type: string
+          required: true
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /group/{groupId}:
+    get:
+      tags:
+        - Group
+      summary: Get Group Info
+      description: Get group chat information including name, display pic, members
+      parameters:
+        - name: groupId
+          in: path
+          schema:
+            type: string
+          required: true
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /group/get:
+    get:
+      tags:
+        - Group
+      summary: Get All Groups
+      description: Get All the groups user have access to
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /file/upload/presigned_url:
+    post:
+      tags:
+        - File
+      summary: Generate Presigned URL for upload
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                ext: .png
+                category: chat
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /file/{fileId}/status:
+    put:
+      tags:
+        - File
+      summary: Update File Status
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                status: true
+      parameters:
+        - name: fileId
+          in: path
+          schema:
+            type: string
+          required: true
+          example: 62512603033fd6b538e12c72
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /file/download/{fileId}/presigned_url:
+    get:
+      tags:
+        - File
+      summary: Get Presigned Url to download file
+      parameters:
+        - name: fileId
+          in: path
+          schema:
+            type: string
+          required: true
+          example: 62512603033fd6b538e12c72
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}

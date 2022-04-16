@@ -174,6 +174,7 @@ For deployment guide refer to [deployment/README.md](./deployment/README.md).
 
 - API documentation [here](https://documenter.getpostman.com/view/20439391/Uyr5neME)
 
+- Open API specs 3.0 [here](./docs/openapi.yaml)
 
 ## Blog posts
 To follow the update keep a eye on vartalap blogs on [blog.one9x.org](https://blog.one9x.org)
