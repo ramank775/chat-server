@@ -20,7 +20,7 @@ I'm really glad you're reading this, because we need volunteer developers to hel
 
 #### **Do you intend to add a new feature or change an existing one?**
 
-* Suggest your change by opening a [new discussion](https://github.com/ramank775/chat-server/discussions/categories/ideas). 
+* Suggest your change in [Ideas in discussion](https://github.com/ramank775/chat-server/discussions/categories/ideas). 
 * Once approved [open a new issue](https://github.com/ramank775/chat-server/issues/new) and start writing code.
 
 #### **Do you have questions?**
