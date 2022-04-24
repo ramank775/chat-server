@@ -1,7 +1,4 @@
 const commander = require('commander');
-const http = require('http');
-const https = require('https');
-const fs = require('fs');
 const { AsyncLocalStorage } = require('async_hooks');
 const logger = require('./logger');
 const statsClient = require('./stats-client');
@@ -37,49 +34,6 @@ function initDefaultOptions() {
   return cmd;
 }
 
-function addStandardHttpOptions(cmd) {
-  cmd
-    .option('--port <port>', 'Http port (default 8000)', (c) => Number(c), 8000)
-    .option('--host <host>', 'Http Server Host (default 127.0.0.1)', '127.0.0.1')
-    .option('--ssl-cert <ssl-cert>', 'SSL public certificate')
-    .option('--ssl-key <ssl-key>', 'SSL private key');
-  return cmd;
-}
-
-async function initHttpServer(context) {
-  const { options, log } = context;
-  const { port, sslCert, sslKey } = options;
-  let server;
-  const isHttps = sslCert && sslKey;
-  if (isHttps) {
-    log.info(`Creating an https server on port ${port}`);
-
-    const key = fs.readFileSync(sslKey);
-    const cert = fs.readFileSync(sslCert);
-    server = https.createServer({
-      key,
-      cert
-    });
-  } else {
-    log.info(`Creating an http server on port ${port}`);
-    server = http.createServer();
-  }
-  const serverPromise = new Promise((resolve, reject) => {
-    server
-      .listen(port, () => {
-        log.info(`Http server started on ${isHttps ? 'https' : 'http'}//*:${port}`);
-        resolve();
-      })
-      .on('error', (err) => {
-        log.error('Error occur while starting a http server', err);
-        reject();
-      });
-  });
-  await serverPromise;
-  context.httpServer = server;
-  return context;
-}
-
 function resolveEnvVariables(options) {
   for (let index = 0; index < options.length; index += 1) {
     if (typeof options[index] === 'string') {
@@ -103,7 +57,7 @@ class ServiceBase {
 
   async run() {
     this.log.info(
-      `Starting service with options${JSON.stringify(this.options, (key, value) =>
+      `Starting service with options ${JSON.stringify(this.options, (key, value) =>
         /(Password|Secret|Key|Cert|Token)$/i.test(key) ? '*****' : value
       )}`
     );
@@ -146,8 +100,6 @@ class ServiceBase {
 module.exports = {
   ServiceBase,
   initDefaultResources,
-  initHttpServer,
   initDefaultOptions,
-  addStandardHttpOptions,
   resolveEnvVariables
 };

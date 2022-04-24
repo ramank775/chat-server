@@ -1,10 +1,9 @@
 const {
   initDefaultOptions,
   initDefaultResources,
-  addStandardHttpOptions,
   resolveEnvVariables
 } = require('../../libs/service-base');
-const { HttpServiceBase } = require('../../libs/http-service-base');
+const { addHttpOptions, initHttpResource, HttpServiceBase } = require('../../libs/http-service-base');
 const { shortuuid, extractInfoFromRequest } = require('../../helper');
 const { formatMessage } = require('../../libs/message-utils');
 const eventStore = require('../../libs/event-store');
@@ -14,7 +13,7 @@ const asMain = require.main === module;
 
 function parseOptions(argv) {
   let cmd = initDefaultOptions();
-  cmd = addStandardHttpOptions(cmd);
+  cmd = addHttpOptions(cmd);
   cmd = addDatabaseOptions(cmd);
   cmd = eventStore.addEventStoreOptions(cmd);
   cmd = cmd.option(
@@ -26,6 +25,7 @@ function parseOptions(argv) {
 
 async function initResource(options) {
   return await initDefaultResources(options)
+    .then(initHttpResource)
     .then(initializeDatabase)
     .then(eventStore.initializeEventStore({ producer: true }));
 }
