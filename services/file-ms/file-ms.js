@@ -1,10 +1,9 @@
 const {
   initDefaultOptions,
   initDefaultResources,
-  addStandardHttpOptions,
   resolveEnvVariables
 } = require('../../libs/service-base');
-const { HttpServiceBase } = require('../../libs/http-service-base');
+const { HttpServiceBase, addHttpOptions, initHttpResource } = require('../../libs/http-service-base');
 const { addDatabaseOptions, initializeDatabase } = require('./database');
 const { addFileStorageOptions, initializeFileStorage } = require('./file-storage')
 const { extractInfoFromRequest } = require('../../helper');
@@ -14,7 +13,7 @@ const asMain = require.main === module;
 
 function parseOptions(argv) {
   let cmd = initDefaultOptions();
-  cmd = addStandardHttpOptions(cmd);
+  cmd = addHttpOptions(cmd);
   cmd = addDatabaseOptions(cmd);
   cmd = addFileStorageOptions(cmd);
   return cmd.parse(argv).opts();
@@ -22,6 +21,7 @@ function parseOptions(argv) {
 
 async function initResource(options) {
   return await initDefaultResources(options)
+    .then(initHttpResource)
     .then(initializeDatabase)
     .then(initializeFileStorage);
 }

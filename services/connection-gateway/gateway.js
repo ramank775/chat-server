@@ -1,11 +1,10 @@
 const webSocker = require('ws');
 const {
-  addStandardHttpOptions,
   initDefaultOptions,
   initDefaultResources,
   resolveEnvVariables
 } = require('../../libs/service-base');
-const { HttpServiceBase } = require('../../libs/http-service-base');
+const { addHttpOptions, initHttpResource, HttpServiceBase } = require('../../libs/http-service-base');
 const EventStore = require('../../libs/event-store');
 const { uuidv4, shortuuid, extractInfoFromRequest } = require('../../helper');
 
@@ -23,6 +22,7 @@ async function prepareListEvent(context) {
 async function initResources(options) {
   const context = await initDefaultResources(options)
     .then(prepareListEvent)
+    .then(initHttpResource)
     .then(EventStore.initializeEventStore({ producer: true }));
 
   return context;
@@ -30,7 +30,7 @@ async function initResources(options) {
 
 function parseOptions(argv) {
   let cmd = initDefaultOptions();
-  cmd = addStandardHttpOptions(cmd);
+  cmd = addHttpOptions(cmd);
   cmd = EventStore.addEventStoreOptions(cmd);
   cmd
     .option(
@@ -122,7 +122,7 @@ class Gateway extends HttpServiceBase {
 
   async init() {
     await super.init();
-    const wss = new webSocker.Server({ server: this.hapiServer.listener });
+    const wss = new webSocker.Server({ server: this.httpServer });
     this.context.wss = wss;
     const { asyncStorage } = this.context;
     const { userEvents, messageEvents, userSocketMapping } = this;
