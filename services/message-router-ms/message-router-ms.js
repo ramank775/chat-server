@@ -15,7 +15,7 @@ async function prepareEventList(context) {
     'new-message': options.newMessageTopic,
     'send-message': options.sendMessageTopic,
     'group-message': options.groupMessageTopic,
-    ack: options.ackTopic
+    'system-message': options.systemMessageTopic || options.ackTopic,
   };
   context.events = eventName;
   context.listenerEvents = [options.newMessageTopic];
@@ -47,7 +47,11 @@ function parseOptions(argv) {
     )
     .option(
       '--ack-topic <ack-topic>',
-      'Used by producer to produce new message for acknowledgment'
+      'Used by producer to produce new message for acknowledgment (depericated use --system-message-topic instead)'
+    )
+    .option(
+      '--system-message-topic <system-message-topic>',
+      'Used by producer to produce new message for system message'
     );
   return cmd.parse(argv).opts();
 }
@@ -81,8 +85,8 @@ class MessageRouterMS extends ServiceBase {
 
     if (message.META.type === 'group') {
       this.eventStore.emit(this.events['group-message'], message, user);
-    } else if (['ack', 'state'].includes(message.META.action)) {
-      this.eventStore.emit(this.events.ack, { items: [message] }, message.META.from);
+    } else if(message.META.category === 'system') {
+      this.eventStore.emit(this.events['system-message'], { items: [message] }, message.META.from);
     } else {
       this.eventStore.emit(this.events['send-message'], { items: [message] }, user);
     }

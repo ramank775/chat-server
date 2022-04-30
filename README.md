@@ -63,6 +63,32 @@ A chat server based on the microservice architecture to ensure high availability
 
 ```json
 {
+    "_v": 2.1,
+    "id": "string",
+    "head" : {
+        "type": "chat|group|channel|bot|notification",
+        "to": "username|group_id|channel_id|bot_id",
+        "from": "username",
+        "chatid": "chatid", // to be deperciated, added for backward comptibility only,
+        "ephemeral": "true/false",
+        "category": "user|system",
+        "contentType": "json|text|video|audio|location|form",
+        "action": "message|ack|subscribe|unsubscribe|join|leave|create|add-member|remove-member"
+    },
+    "meta": {
+        "hash": "md5:hash",
+        "content_hash": "md5:hash",
+        "generate_ts": 123455667890
+    },
+    "body": {
+        "text": "Hello this a text message",
+        "ts":123455667890
+    }
+}
+```
+
+```json
+{
     "_v": 2.0,
     "id": "string",
     "head" : {

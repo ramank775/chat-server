@@ -19,8 +19,13 @@ function formatMessage(message) {
     META.to = head.to;
     META.id = id;
     META.type = head.type;
-    META.contentType = head.contentType;
     META.action = head.action;
+    // Added in version 2.1
+    if(!head.category) {
+      // As of v2.0 message with action state/ack as system message else 
+      head.category = ['state', 'ack'].includes(head.action)?'system':'message';
+    }
+    META.category = head.category
 
     // Add legacy keys for backward compatibility
     // TODO: remove this in next stable build
@@ -49,7 +54,8 @@ function formatMessage(message) {
       from: META.from,
       chatid: msg.chatId,
       contentType: msg.type,
-      action: msg.action || 'message'
+      action: msg.action || 'message',
+      category: ['state', 'ack'].includes(msg.action)?'system':'message'
     };
     msg.body = {
       text: _msg.text,
