@@ -249,10 +249,10 @@ class MessageDeliveryMS extends ServiceBase {
     const users = new Set();
     const offlineMessages = [];
     items.forEach((message) => {
-      const { to, retry = -1, saved = false } = message.META;
+      const { to, retry = -1, saved = false, ephemeral } = message.META;
       // If messages is already saved don't send it to offline message again
       // even if retry count exceed
-      if (retry > this.maxRetryCount && !saved) {
+      if (retry > this.maxRetryCount && !(saved || ephemeral)) {
         offlineMessages.push(message);
         return;
       }
@@ -270,7 +270,8 @@ class MessageDeliveryMS extends ServiceBase {
       const server = userServers[user];
       if (!server) {
         // If messages is already saved don't send it to offline message again
-        const msgs = userMapping[user].filter((m) => !m.saved);
+        const msgs = userMapping[user]
+          .filter((m) => !(m.META.ephemeral || m.META.saved));
         offlineMessages.push(...msgs);
       } else {
         const item = serverMapping[server];

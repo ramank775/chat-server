@@ -147,7 +147,8 @@ function sendAck(payload) {
         to: msg.head.from,
         from: username,
         action: 'state',
-        type: 'notification'
+        type: 'notification',
+        category: undefined
       },
       body: {
         ids: [msg.id]
