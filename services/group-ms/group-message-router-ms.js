@@ -14,7 +14,7 @@ async function prepareEventList(context) {
   const { options } = context;
   const eventName = {
     'send-message': options.sendMessageTopic,
-    ack: options.ackTopic
+    'system-message': options.systemMessageTopic || options.ackTopic
   };
   context.events = eventName;
   context.listenerEvents = [options.newGroupMessageTopic];
@@ -44,7 +44,11 @@ function parseOptions(argv) {
     )
     .option(
       '--ack-topic <ack-topic>',
-      'Used by producer to produce new message for acknowledgment'
+      'Used by producer to produce new message for acknowledgment (depericated use --system-message-topic instead)'
+    )
+    .option(
+      '--system-message-topic <system-message-topic>',
+      'Used by producer to produce new message for system message'
     );
 
   return cmd.parse(argv).opts();
@@ -76,9 +80,9 @@ class GroupMessageRouterMS extends ServiceBase {
       users = await this.getGroupUsers(message.META.to, message.META.from);
     }
     users = users.filter((x) => x !== message.META.from);
-    if (message.META.action === 'ack') {
+    if (message.META.category === 'system') {
       message.META.users = users;
-      this.eventStore.emit(this.events.ack, { items: [message] }, message.META.from);
+      this.eventStore.emit(this.events['system-message'], { items: [message] }, message.META.from);
     } else {
       const messages = users.map((user) => {
         if (typeof user === 'object') {

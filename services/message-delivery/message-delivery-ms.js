@@ -15,14 +15,14 @@ const asMain = require.main === module;
 
 async function prepareEventList(context) {
   const { options } = context;
-  const { userConnectionStateTopic, sendMessageTopic, offlineMessageTopic, ackTopic } = options;
+  const { userConnectionStateTopic, sendMessageTopic, offlineMessageTopic, ackTopic, systemMessageTopic } = options;
   context.events = {
     'user-connection-state': userConnectionStateTopic,
     'send-message': sendMessageTopic,
     'offline-message': offlineMessageTopic,
-    ack: ackTopic
+    'system-message': systemMessageTopic || ackTopic,
   };
-  context.listenerEvents = [userConnectionStateTopic, sendMessageTopic, ackTopic];
+  context.listenerEvents = [userConnectionStateTopic, sendMessageTopic, systemMessageTopic || ackTopic];
   return context;
 }
 
@@ -54,12 +54,25 @@ function parseOptions(argv) {
       '--offline-message-topic <offline-message-topic>',
       'Used by producer to produce new message for offline'
     )
-    .option('--ack-topic <ack-topic>', 'Used by producer to produce new message for acknowledgment')
+    .option(
+      '--ack-topic <ack-topic>',
+      'Used by consumer to consume new message for acknowledgment (depericated use --system-message-topic instead)'
+    )
+    .option(
+      '--system-message-topic <system-message-topic>',
+      'Used by consumer to consume new message for system message'
+    )
     .option(
       '--message-max-retries <message-max-retries>',
       'Max no of retries to deliver message (default value is 3)',
       (value) => Number(value),
       3
+    )
+    .option(
+      '--ack-action-alias <ack-action-alias>',
+      'Alias for acknowledgement message. For multiple value supply comma seperate value default (ack,state)',
+      (value) => value.split(','),
+      'ack,state'
     );
   return cmd.parse(argv).opts();
 }
@@ -73,10 +86,11 @@ class MessageDeliveryMS extends ServiceBase {
 
     /** @type {import('./database/message-db').IMessageDB} */
     this.db = context.messageDb;
-    
+
     /** @type {import('../../libs/event-store/iEventStore').IEventStore} */
     this.eventStore = this.context.eventStore;
     this.events = this.context.events;
+    this.ackAlias = this.options.ackActionAlias;
     this.userConnectedCounter = this.statsClient.counter({
       name: 'userconnected'
     });
@@ -87,7 +101,7 @@ class MessageDeliveryMS extends ServiceBase {
   }
 
   init() {
-    const {events} = this;
+    const { events } = this;
     this.eventStore.on = async (event, value) => {
       switch (event) {
         case events['user-connection-state']:
@@ -108,11 +122,8 @@ class MessageDeliveryMS extends ServiceBase {
         case events['send-message']:
           this.onMessage(value);
           break;
-        case events.ack:
-          {
-            const { items } = value;
-            this.ackMessage(items);
-          }
+        case events['system-message']:
+          this.onSystemMessage(value);
           break;
         default:
           throw new Error(`Unknown event ${event}`);
@@ -135,13 +146,33 @@ class MessageDeliveryMS extends ServiceBase {
   }
 
   async onMessage(value) {
-    this.db.save(value.items);
+    const nonEphemeralMessages = value.items.filter((msg) => !msg.META.ephemeral)
+    this.db.save(nonEphemeralMessages);
     await this.sendMessage(value);
   }
 
+  async onSystemMessage(value) {
+    const { acks, other } = value.items.reduce((acc, msg) => {
+      if (this.ackAlias.includes(msg.META.action)) {
+        acc.acks.push(msg)
+        if (msg.META.to !== 'server') {
+          acc.other.push(msg)
+        }
+      } else {
+        acc.other.push(msg)
+      }
+      return acc
+    }, { acks: [], other: [] });
+
+    if (acks.length) {
+      this.ackMessage(acks)
+    }
+    if (other.length) {
+      this.onMessage({ items: other })
+    }
+  }
+
   ackMessage(items) {
-    const stateAckMsgs = items.filter((msg) => msg.META.action === 'state');
-    this.onMessage({ items: stateAckMsgs });
     const userMessages = items.reduce((mapping, msg) => {
       const user = msg.META.from;
       if (!mapping[user]) {
@@ -218,10 +249,10 @@ class MessageDeliveryMS extends ServiceBase {
     const users = new Set();
     const offlineMessages = [];
     items.forEach((message) => {
-      const { to, retry = -1, saved = false } = message.META;
+      const { to, retry = -1, saved = false, ephemeral } = message.META;
       // If messages is already saved don't send it to offline message again
       // even if retry count exceed
-      if (retry > this.maxRetryCount && !saved) {
+      if (retry > this.maxRetryCount && !(saved || ephemeral)) {
         offlineMessages.push(message);
         return;
       }
@@ -239,7 +270,8 @@ class MessageDeliveryMS extends ServiceBase {
       const server = userServers[user];
       if (!server) {
         // If messages is already saved don't send it to offline message again
-        const msgs = userMapping[user].filter((m) => !m.saved);
+        const msgs = userMapping[user]
+          .filter((m) => !(m.META.ephemeral || m.META.saved));
         offlineMessages.push(...msgs);
       } else {
         const item = serverMapping[server];
