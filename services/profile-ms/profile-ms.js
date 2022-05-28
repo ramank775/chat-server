@@ -75,7 +75,7 @@ class ProfileMs extends HttpServiceBase {
     const username = extractInfoFromRequest(req, 'user');
     const accesskey = extractInfoFromRequest(req, 'accesskey');
     try {
-      this.authProvider.verifyAccessKey(username, accesskey);
+      await this.authProvider.verifyAccessKey(username, accesskey);
     } catch {
       return res.response({}).code(401);
     }
