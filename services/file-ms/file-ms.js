@@ -39,7 +39,15 @@ class FileMS extends HttpServiceBase {
 
   async init() {
     await super.init();
-    this.addRoute('/upload/presigned_url', 'POST', this.getUploadURL.bind(this));
+    /**
+     * @deprecated
+     * Route is deprecated in favour of new route `GET - /upload/presigned_url`
+     * This will be removed in next major release @version v3.x
+     */
+    this.addRoute('/upload/presigned_url', 'POST', this.generateUploadURL.bind(this));
+
+    this.addRoute('/upload/presigned_url', 'GET', this.getUploadURL.bind(this));
+
     this.addRoute('/download/{fileId}/presigned_url', 'GET', this.getDownloadURL.bind(this));
     this.addRoute('/{fileId}/status', 'PUT', this.updateFileUploadStatus.bind(this));
   }
@@ -75,9 +83,19 @@ class FileMS extends HttpServiceBase {
     return { url: preSignedURL };
   }
 
-  async getUploadURL(req, _h) {
-    const userName = extractInfoFromRequest(req, 'user');
+  async getUploadURL(req) {
+    const username = extractInfoFromRequest(req, 'user');
+    const { ext, category } = req.query;
+    return await this.getUploadPreSignedUrl(ext, category, username);
+  }
+
+  async generateUploadURL(req) {
+    const username = extractInfoFromRequest(req, 'user');
     const { ext, category } = req.payload;
+    return await this.getUploadPreSignedUrl(ext, category, username);
+  }
+
+  async getUploadPreSignedUrl(ext, category, owner) {
     const contentType = getContentTypeByExt(ext);
     const payload = {
       contentType,
@@ -85,7 +103,7 @@ class FileMS extends HttpServiceBase {
     };
     const fileRecord = {
       category,
-      owner: userName,
+      owner,
       contentType,
     };
     payload.fileId = await this.fileMetadataDB.createRecord(fileRecord);
