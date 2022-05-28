@@ -47,65 +47,88 @@ class ProfileMs extends HttpServiceBase {
   async init() {
     await super.init();
 
-    this.addRoute('/auth', ['GET', 'POST'], async (req, res) => {
-      const username = extractInfoFromRequest(req, 'user');
-      const accesskey = extractInfoFromRequest(req, 'accesskey');
-      try {
-        this.authProvider.verifyAccessKey(username, accesskey);
-      } catch {
-        return res.response({}).code(401);
-      }
-      return res.response({}).code(200);
-    });
+    this.addRoute('/auth', ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], this.auth.bind(this));
 
-    this.addRoute('/login', 'POST', async (req, res) => {
-      const { payload } = req;
-      const { username } = payload;
-      const token = extractInfoFromRequest(req, 'token');
-      let isNew = false;
-      let result;
-      try {
-        result = await this.authProvider.decodeExternalToken(token);
-      } catch (error) {
-        this.log.error(`Error while authentication : ${error}`);
-        return res.response({}).code(401);
-      }
-      const isExist = await this.profileDB.isExits(username);
-      if (!isExist) {
-        isNew = true;
-        const profile = {
-          username,
-          uid: result.uid,
-          addedOn: new Date(),
-          isActive: true
-        };
-        await this.profileDB.create(profile);
-      }
-      const accesskey = await this.authProvider.generateAccessKey(username);
-      this.eventStore.emit(this.newLoginTopic, payload, username);
-      return {
-        status: true,
+    this.addRoute('/login', 'POST', this.login.bind(this));
+
+    /**
+     * @deprecated
+     * Route is deprecated in favour of new Route `GET - /`
+     * This will be removed in next major release @version v3.x
+     */
+    this.addRoute('/get', 'GET', this.fetchProfile.bind(this));
+
+    this.addRoute('/', 'GET', this.fetchProfile.bind(this));
+
+    /**
+     * @deprecated
+     * Route is deprecated in favour of new Route `POST - /contactbook/sync`
+     * This will be removed in next major release @version v3.x
+     */
+    this.addRoute('/user/sync', 'POST', this.syncContact.bind(this));
+
+    this.addRoute('/contactbook/sync', 'POST', this.syncContact.bind(this))
+
+  }
+
+  async auth(req, res) {
+    const username = extractInfoFromRequest(req, 'user');
+    const accesskey = extractInfoFromRequest(req, 'accesskey');
+    try {
+      this.authProvider.verifyAccessKey(username, accesskey);
+    } catch {
+      return res.response({}).code(401);
+    }
+    return res.response({}).code(200);
+  }
+
+  async login(req, res) {
+    const { payload } = req;
+    const { username } = payload;
+    const token = extractInfoFromRequest(req, 'token');
+    let isNew = false;
+    let result;
+    try {
+      result = await this.authProvider.decodeExternalToken(token);
+    } catch (error) {
+      this.log.error(`Error while authentication : ${error}`);
+      return res.response({}).code(401);
+    }
+    const isExist = await this.profileDB.isExits(username);
+    if (!isExist) {
+      isNew = true;
+      const profile = {
         username,
-        accesskey,
-        isNew
+        uid: result.uid,
+        addedOn: new Date(),
+        isActive: true
       };
-    });
+      await this.profileDB.create(profile);
+    }
+    const accesskey = await this.authProvider.generateAccessKey(username);
+    this.eventStore.emit(this.newLoginTopic, payload, username);
+    return {
+      status: true,
+      username,
+      accesskey,
+      isNew
+    };
+  }
 
-    this.addRoute('/get', 'GET', async (req) => {
-      const username = extractInfoFromRequest(req);
-      if (!username) {
-        return {};
-      }
-      const user = await this.profileDB.findActiveUser(username, { name: 1, username: 1 });
-      return user || {};
-    });
+  async fetchProfile(req) {
+    const username = extractInfoFromRequest(req);
+    if (!username) {
+      return {};
+    }
+    const user = await this.profileDB.findActiveUser(username, { name: 1, username: 1 });
+    return user || {};
+  }
 
-    this.addRoute('/user/sync', 'POST', async (req) => {
-      const username = extractInfoFromRequest(req);
-      const { users = [] } = req.payload;
-      const result = await this.profileDB.contactBookSyncByUsername(username, users);
-      return result || {};
-    });
+  async syncContact(req) {
+    const username = extractInfoFromRequest(req);
+    const { users = [] } = req.payload;
+    const result = await this.profileDB.contactBookSyncByUsername(username, users);
+    return result || {};
   }
 
   async shutdown() {
