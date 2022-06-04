@@ -1,10 +1,11 @@
+const Joi = require('joi');
 const {
   initDefaultOptions,
   initDefaultResources,
   resolveEnvVariables
 } = require('../../libs/service-base');
 const { addHttpOptions, initHttpResource, HttpServiceBase } = require('../../libs/http-service-base');
-const { shortuuid, extractInfoFromRequest } = require('../../helper');
+const { shortuuid, extractInfoFromRequest, schemas } = require('../../helper');
 const { formatMessage } = require('../../libs/message-utils');
 const eventStore = require('../../libs/event-store');
 const { addDatabaseOptions, initializeDatabase } = require('./database');
@@ -47,37 +48,119 @@ class GroupMs extends HttpServiceBase {
      * Route is deprecated in favour of new route `GET - /`
      * This will be removed in next major release @version v3.x
      */
-    this.addRoute('/get', 'GET', this.getGroups.bind(this));
+    this.addRoute(
+      '/get',
+      'GET',
+      this.getGroups.bind(this)
+    );
 
     /**
      * @deprecated
      * Route is deprecated in favour of new route `POST - /`
      * This will be removed in next major release @version v3.x
      */
-    this.addRoute('/create', 'POST', this.createGroup.bind(this));
+    this.addRoute(
+      '/create',
+      'POST',
+      this.createGroup.bind(this)
+    );
 
-    this.addRoute('/', 'GET', this.getGroups.bind(this));
+    this.addRoute(
+      '/',
+      'GET',
+      this.getGroups.bind(this),
+      {
+        validation: {
+          headers: schemas.authHeaders
+        }
+      }
+    );
 
-    this.addRoute('/', 'POST', this.createGroup.bind(this));
+    this.addRoute(
+      '/',
+      'POST',
+      this.createGroup.bind(this),
+      {
+        validation: {
+          headers: schemas.authHeaders,
+          payload: Joi.object({
+            name: Joi.string().required(),
+            members: Joi.array().items(Joi.string()).max(100),
+            profilePic: Joi.string()
+          })
+        }
+      }
+    );
 
-    this.addRoute('/{groupId}', 'GET', this.getGroupInfo.bind(this));
+    this.addRoute(
+      '/{groupId}',
+      'GET',
+      this.getGroupInfo.bind(this),
+      {
+        validation: {
+          headers: schemas.authHeaders,
+          params: Joi.object({
+            groupId: Joi.string().required()
+          })
+        }
+      }
+    );
 
     /**
      * @deprecated
      * Route in depreceated in favour for new route `POST /:group_id/members`
      * This will be removed in next major release @version v3.x
      */
-    this.addRoute('/{groupId}/add', 'POST', this.addMembers.bind(this));
+    this.addRoute(
+      '/{groupId}/add',
+      'POST',
+      this.addMembers.bind(this)
+    );
 
     /**
      * @deprecated
      * Route in depreceated in favour for new route `DELETE /:group_id/members`
      * This will be removed in next major release @version v3.x
      */
-    this.addRoute('/{groupId}/remove', 'POST', this.removeMembers.bind(this));
+    this.addRoute(
+      '/{groupId}/remove',
+      'POST',
+      this.removeMembers.bind(this)
+    );
 
-    this.addRoute('/{groupId}/members', 'POST', this.addMembers.bind(this));
-    this.addRoute('/{groupId}/members', 'DELETE', this.removeMembers.bind(this));
+    this.addRoute(
+      '/{groupId}/members',
+      'POST',
+      this.addMembers.bind(this),
+      {
+        validation: {
+          headers: schemas.authHeaders,
+          params: Joi.object({
+            groupId: Joi.string().required()
+          }),
+          payload: Joi.object({
+            members: Joi.array().items(Joi.string()).max(50)
+          })
+        }
+      }
+    );
+
+    this.addRoute(
+      '/{groupId}/members',
+      'DELETE',
+      this.removeMembers.bind(this),
+      {
+        validation: {
+          headers: schemas.authHeaders,
+          params: Joi.object({
+            groupId: Joi.string().required()
+          }),
+          payload: Joi.object({
+            member: Joi.string()
+          })
+        }
+      }
+    );
   }
 
   async getGroups(req) {

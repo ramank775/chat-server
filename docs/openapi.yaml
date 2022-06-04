@@ -64,7 +64,7 @@ paths:
             schema:
               type: object
               example:
-                username: '{{username}}'
+                username: "{{username}}"
                 notificationToken: fcm token
       parameters:
         - name: token
@@ -72,9 +72,9 @@ paths:
           schema:
             type: string
           description: Firebase auth token
-          example: '{{firebase_auth_token}}'
+          example: "{{firebase_auth_token}}"
       responses:
-        '200':
+        "200":
           description: Successful response
           content:
             application/json: {}
@@ -85,7 +85,7 @@ paths:
       summary: Get Profile
       description: Get User profile
       responses:
-        '200':
+        "200":
           description: Successful response
           content:
             application/json: {}
@@ -118,7 +118,7 @@ paths:
                   body:
                     text: Hello this a text message
       responses:
-        '200':
+        "201":
           description: Successful response
           content:
             application/json: {}
@@ -129,7 +129,7 @@ paths:
       summary: Get All Groups
       description: Get All the groups user have access to
       responses:
-        '200':
+        "200":
           description: Successful response
           content:
             application/json: {}
@@ -150,7 +150,7 @@ paths:
                   - member_1_username
                   - member_2_username
       responses:
-        '200':
+        "200":
           description: Successful response
           content:
             application/json: {}
@@ -168,7 +168,7 @@ paths:
           required: true
           example: e3dbe14f-c8da-4436-b912-da059098c6a5
       responses:
-        '200':
+        "200":
           description: Successful response
           content:
             application/json: {}
@@ -195,7 +195,7 @@ paths:
           required: true
           example: e3dbe14f-c8da-4436-b912-da059098c6a5
       responses:
-        '200':
+        "200":
           description: Successful response
           content:
             application/json: {}
@@ -214,7 +214,7 @@ paths:
           required: true
           example: e3dbe14f-c8da-4436-b912-da059098c6a5
       responses:
-        '200':
+        "200":
           description: Successful response
           content:
             application/json: {}
@@ -235,7 +235,7 @@ paths:
             type: string
           example: chat
       responses:
-        '200':
+        "200":
           description: Successful response
           content:
             application/json: {}
@@ -251,7 +251,7 @@ paths:
             type: string
           required: true
       responses:
-        '200':
+        "200":
           description: Successful response
           content:
             application/json: {}
@@ -274,7 +274,7 @@ paths:
             type: string
           required: true
       responses:
-        '200':
+        "200":
           description: Successful response
           content:
             application/json: {}
@@ -294,7 +294,7 @@ paths:
                   - username_1
                   - username_2
       responses:
-        '200':
+        "200":
           description: Successful response
           content:
             application/json: {}

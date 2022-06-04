@@ -1,3 +1,4 @@
+const Joi = require('joi');
 const {
   initDefaultOptions,
   initDefaultResources,
@@ -6,7 +7,7 @@ const {
 const { HttpServiceBase, addHttpOptions, initHttpResource } = require('../../libs/http-service-base');
 const { addDatabaseOptions, initializeDatabase } = require('./database');
 const { addFileStorageOptions, initializeFileStorage } = require('./file-storage')
-const { extractInfoFromRequest } = require('../../helper');
+const { extractInfoFromRequest, schemas } = require('../../helper');
 const { getContentTypeByExt } = require('../../libs/content-type-utils');
 
 const asMain = require.main === module;
@@ -44,12 +45,56 @@ class FileMS extends HttpServiceBase {
      * Route is deprecated in favour of new route `GET - /upload/presigned_url`
      * This will be removed in next major release @version v3.x
      */
-    this.addRoute('/upload/presigned_url', 'POST', this.generateUploadURL.bind(this));
+    this.addRoute(
+      '/upload/presigned_url',
+      'POST',
+      this.generateUploadURL.bind(this)
+    );
 
-    this.addRoute('/upload/presigned_url', 'GET', this.getUploadURL.bind(this));
+    this.addRoute(
+      '/upload/presigned_url',
+      'GET',
+      this.getUploadURL.bind(this),
+      {
+        validation: {
+          headers: schemas.authHeaders,
+          query: Joi.object({
+            ext: Joi.string().required(),
+            category: Joi.string().required()
+          })
+        }
+      }
+    );
 
-    this.addRoute('/download/{fileId}/presigned_url', 'GET', this.getDownloadURL.bind(this));
-    this.addRoute('/{fileId}/status', 'PUT', this.updateFileUploadStatus.bind(this));
+    this.addRoute(
+      '/download/{fileId}/presigned_url',
+      'GET',
+      this.getDownloadURL.bind(this),
+      {
+        validation: Joi.object({
+          headers: schemas.authHeaders,
+          params: Joi.object({
+            fileId: Joi.string().required()
+          })
+        })
+      }
+    );
+    this.addRoute(
+      '/{fileId}/status',
+      'PUT',
+      this.updateFileUploadStatus.bind(this),
+      {
+        validation: Joi.object({
+          headers: schemas.authHeaders,
+          params: Joi.object({
+            fileId: Joi.string().required()
+          }),
+          payload: Joi.object({
+            status: Joi.bool().required()
+          })
+        })
+      }
+    );
   }
 
   async updateFileUploadStatus(req, h) {

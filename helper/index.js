@@ -1,6 +1,7 @@
 const short = require('short-uuid');
 const crypto = require('crypto');
 const path = require('path');
+const schemas = require('./schema');
 
 function uuidv4() {
   return crypto.randomUUID();
@@ -33,4 +34,5 @@ module.exports = {
   getUTCEpoch,
   shortuuid,
   getFilename,
+  schemas
 };

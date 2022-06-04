@@ -1,4 +1,5 @@
 const webSocker = require('ws');
+const Joi = require('joi');
 const {
   initDefaultOptions,
   initDefaultResources,
@@ -6,7 +7,7 @@ const {
 } = require('../../libs/service-base');
 const { addHttpOptions, initHttpResource, HttpServiceBase } = require('../../libs/http-service-base');
 const EventStore = require('../../libs/event-store');
-const { uuidv4, shortuuid, extractInfoFromRequest } = require('../../helper');
+const { uuidv4, shortuuid, extractInfoFromRequest, schemas } = require('../../helper');
 
 const asMain = require.main === module;
 
@@ -186,14 +187,41 @@ class Gateway extends HttpServiceBase {
       };
     });
 
-    this.addRoute('/messages', 'post', async (req, res) => {
-      const user = extractInfoFromRequest(req, 'user');
-      const messages = req.payload;
-      messages.forEach((message) => {
-        this.messageEvents.onNewMessage(message, user);
-      });
-      return res.response().code(201);
+    this.addRoute(
+      '/messages',
+      'post',
+      this.newMessage.bind(this),
+      {
+        validation: {
+          headers: schemas.authHeaders,
+          payload: Joi.array().items(
+            Joi.object({
+              _v: Joi.number().required(),
+              id: Joi.string().required(),
+              head: Joi.object({
+                type: Joi.string().required(),
+                to: Joi.string().required(),
+                from: Joi.string(),
+                chatid: Joi.string(),
+                contentType: Joi.string().required(),
+                action: Joi.string().required()
+              }).unknown(true),
+              meta: Joi.object().unknown(true),
+              body: Joi.any().required()
+            })
+          )
+        }
+      }
+    );
+  }
+
+  async newMessage(req, res) {
+    const user = extractInfoFromRequest(req, 'user');
+    const messages = req.payload;
+    messages.forEach((message) => {
+      this.messageEvents.onNewMessage(message, user);
     });
+    return res.response().code(201);
   }
 
   async shutdown() {

@@ -1,3 +1,4 @@
+const Joi = require('joi');
 const {
   initDefaultOptions,
   initDefaultResources,
@@ -7,7 +8,7 @@ const { addHttpOptions, initHttpResource, HttpServiceBase } = require('../../lib
 const eventStore = require('../../libs/event-store');
 const { profileDB } = require('./database');
 const { addAuthProviderOptions, initializeAuthProvider } = require('./auth-provider')
-const { extractInfoFromRequest } = require('../../helper');
+const { extractInfoFromRequest, schemas } = require('../../helper');
 
 const asMain = require.main === module;
 
@@ -47,27 +48,73 @@ class ProfileMs extends HttpServiceBase {
   async init() {
     await super.init();
 
-    this.addRoute('/auth', ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], this.auth.bind(this));
+    this.addRoute(
+      '/auth',
+      ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+      this.auth.bind(this)
+    );
 
-    this.addRoute('/login', 'POST', this.login.bind(this));
+    this.addRoute(
+      '/login',
+      'POST',
+      this.login.bind(this),
+      {
+        validation: {
+          payload: Joi.object({
+            username: Joi.string().required(),
+            notificationToken: Joi.string().required(),
+            deviceId: Joi.string().required()
+          }).required(),
+          headers: schemas.authHeaders
+        }
+      });
 
     /**
      * @deprecated
      * Route is deprecated in favour of new Route `GET - /`
      * This will be removed in next major release @version v3.x
      */
-    this.addRoute('/get', 'GET', this.fetchProfile.bind(this));
+    this.addRoute(
+      '/get',
+      'GET',
+      this.fetchProfile.bind(this)
+    );
 
-    this.addRoute('/', 'GET', this.fetchProfile.bind(this));
+    this.addRoute(
+      '/',
+      'GET',
+      this.fetchProfile.bind(this),
+      {
+        validation: {
+          headers: schemas.authHeaders
+        }
+      }
+    );
 
     /**
      * @deprecated
      * Route is deprecated in favour of new Route `POST - /contactbook/sync`
      * This will be removed in next major release @version v3.x
      */
-    this.addRoute('/user/sync', 'POST', this.syncContact.bind(this));
+    this.addRoute(
+      '/user/sync',
+      'POST',
+      this.syncContact.bind(this)
+    );
 
-    this.addRoute('/contactbook/sync', 'POST', this.syncContact.bind(this))
+    this.addRoute(
+      '/contactbook/sync',
+      'POST',
+      this.syncContact.bind(this),
+      {
+        validation: {
+          headers: schemas.authHeaders,
+          payload: Joi.object({
+            users: Joi.array().items(Joi.string()).required()
+          })
+        }
+      }
+    );
 
   }
 
