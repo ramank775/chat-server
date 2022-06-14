@@ -39,7 +39,7 @@ function getUserInfo() {
 }
 
 async function login(username, token) {
-  return fetch('/login', {
+  return fetch('/v1.0/login', {
     method: 'POST',
     headers: {
       token,
@@ -73,7 +73,7 @@ function sendMessageViaSocket(message) {
 }
 
 function sendMessageViaRest(message) {
-  fetch('/messages', {
+  fetch('/v1.0/messages', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify([JSON.stringify(message)])
@@ -91,7 +91,7 @@ function getMsgId(to) {
 }
 
 function getGroups() {
-  fetch('/group/get')
+  fetch('/v1.0/groups/')
     .then((res) => res.json())
     .then((res) => {
       console.log(res);
@@ -114,7 +114,7 @@ function createGroup() {
     members: groupMembers,
     profilePic: null
   };
-  fetch('/group/create', {
+  fetch('/v1.0/groups/', {
     method: 'post',
     body: JSON.stringify(payload),
     headers: new Headers({
@@ -218,7 +218,7 @@ function connectSocket() {
 
     const host = window.location.hostname;
     const startTime = Date.now();
-    ws = new WebSocket(`wss://${host}/wss/`);
+    ws = new WebSocket(`wss://${host}/v1.0/wss/`);
 
     ws.onopen = function onopen() {
       console.log('connection time', Date.now() - startTime);
