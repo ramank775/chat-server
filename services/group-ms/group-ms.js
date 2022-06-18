@@ -70,7 +70,7 @@ class GroupMs extends HttpServiceBase {
       'GET',
       this.getGroups.bind(this),
       {
-        validation: {
+        validate:{
           headers: schemas.authHeaders
         }
       }
@@ -81,12 +81,12 @@ class GroupMs extends HttpServiceBase {
       'POST',
       this.createGroup.bind(this),
       {
-        validation: {
+        validate:{
           headers: schemas.authHeaders,
           payload: Joi.object({
             name: Joi.string().required(),
-            members: Joi.array().items(Joi.string()).max(100),
-            profilePic: Joi.string()
+            members: Joi.array().items(Joi.string()).max(100).required(),
+            profilePic: Joi.string().allow(null)
           })
         }
       }
@@ -97,7 +97,7 @@ class GroupMs extends HttpServiceBase {
       'GET',
       this.getGroupInfo.bind(this),
       {
-        validation: {
+        validate:{
           headers: schemas.authHeaders,
           params: Joi.object({
             groupId: Joi.string().required()
@@ -133,7 +133,7 @@ class GroupMs extends HttpServiceBase {
       'POST',
       this.addMembers.bind(this),
       {
-        validation: {
+        validate:{
           headers: schemas.authHeaders,
           params: Joi.object({
             groupId: Joi.string().required()
@@ -150,7 +150,7 @@ class GroupMs extends HttpServiceBase {
       'DELETE',
       this.removeMembers.bind(this),
       {
-        validation: {
+        validate:{
           headers: schemas.authHeaders,
           params: Joi.object({
             groupId: Joi.string().required()

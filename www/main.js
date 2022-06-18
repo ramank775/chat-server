@@ -38,14 +38,27 @@ function getUserInfo() {
   return [username, accesskey];
 }
 
-async function login(username, token) {
+function getHeaders() {
+  const [username, accesskey] = getUserInfo();
+  return new Headers({
+    'Content-Type': 'application/json',
+    'user': username,
+    'accesskey': accesskey
+  })
+}
+
+async function login(username, authtoken) {
   return fetch('/v1.0/login', {
     method: 'POST',
     headers: {
-      token,
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify({ username, notificationToken: 'testing-token' })
+    body: JSON.stringify({
+      username,
+      authToken: authtoken,
+      notificationToken: 'testing-token',
+      deviceId: 'default'
+    })
   })
     .then((res) => {
       if (res.ok) {
@@ -56,7 +69,6 @@ async function login(username, token) {
     .then((res) => {
       setCookie('user', username, 1000);
       setCookie('accesskey', res.accesskey, 1000);
-      setCookie('token', token, 1000);
     })
     .catch((err) => {
       console.log(err);
@@ -75,7 +87,7 @@ function sendMessageViaSocket(message) {
 function sendMessageViaRest(message) {
   fetch('/v1.0/messages', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getHeaders(),
     body: JSON.stringify([JSON.stringify(message)])
   })
     .then((resp) => resp.text())
@@ -91,7 +103,9 @@ function getMsgId(to) {
 }
 
 function getGroups() {
-  fetch('/v1.0/groups/')
+  fetch('/v1.0/groups/', {
+    headers: getHeaders()
+  })
     .then((res) => res.json())
     .then((res) => {
       console.log(res);
@@ -117,9 +131,7 @@ function createGroup() {
   fetch('/v1.0/groups/', {
     method: 'post',
     body: JSON.stringify(payload),
-    headers: new Headers({
-      'Content-Type': 'application/json'
-    })
+    headers: getHeaders()
   })
     .then((res) => res.json())
     .then((res) => {
@@ -241,16 +253,16 @@ function connectSocket() {
       console.log('onclose');
       document.getElementById('status').innerText = 'Disconnected';
       clearInterval(timer);
-      timer= null;
+      timer = null;
     };
     ws.onerror = function onerror() {
       console.log('onerror');
       clearInterval(timer);
-      timer= null;
+      timer = null;
     };
     timer = setInterval(() => {
       ws.send(0x9);
-    },30000)
+    }, 30000)
   } else {
     console.log('WebSocket object is not supported in your browser');
   }

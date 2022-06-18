@@ -192,24 +192,9 @@ class Gateway extends HttpServiceBase {
       'post',
       this.newMessage.bind(this),
       {
-        validation: {
+        validate:{
           headers: schemas.authHeaders,
-          payload: Joi.array().items(
-            Joi.object({
-              _v: Joi.number().required(),
-              id: Joi.string().required(),
-              head: Joi.object({
-                type: Joi.string().required(),
-                to: Joi.string().required(),
-                from: Joi.string(),
-                chatid: Joi.string(),
-                contentType: Joi.string().required(),
-                action: Joi.string().required()
-              }).unknown(true),
-              meta: Joi.object().unknown(true),
-              body: Joi.any().required()
-            })
-          )
+          payload: Joi.array().items(Joi.string()).min(1).required()
         }
       }
     );

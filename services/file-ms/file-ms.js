@@ -56,7 +56,7 @@ class FileMS extends HttpServiceBase {
       'GET',
       this.getUploadURL.bind(this),
       {
-        validation: {
+        validate:{
           headers: schemas.authHeaders,
           query: Joi.object({
             ext: Joi.string().required(),
@@ -71,12 +71,12 @@ class FileMS extends HttpServiceBase {
       'GET',
       this.getDownloadURL.bind(this),
       {
-        validation: Joi.object({
+        validate: {
           headers: schemas.authHeaders,
           params: Joi.object({
             fileId: Joi.string().required()
           })
-        })
+        }
       }
     );
     this.addRoute(
@@ -84,7 +84,7 @@ class FileMS extends HttpServiceBase {
       'PUT',
       this.updateFileUploadStatus.bind(this),
       {
-        validation: Joi.object({
+        validate:{
           headers: schemas.authHeaders,
           params: Joi.object({
             fileId: Joi.string().required()
@@ -92,7 +92,7 @@ class FileMS extends HttpServiceBase {
           payload: Joi.object({
             status: Joi.bool().required()
           })
-        })
+        }
       }
     );
   }

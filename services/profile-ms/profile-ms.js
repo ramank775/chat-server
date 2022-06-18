@@ -59,13 +59,13 @@ class ProfileMs extends HttpServiceBase {
       'POST',
       this.login.bind(this),
       {
-        validation: {
+        validate:{
           payload: Joi.object({
             username: Joi.string().required(),
+            authToken: Joi.string(),
             notificationToken: Joi.string().required(),
-            deviceId: Joi.string().required()
+            deviceId: Joi.string().default('default')
           }).required(),
-          headers: schemas.authHeaders
         }
       });
 
@@ -85,7 +85,7 @@ class ProfileMs extends HttpServiceBase {
       'GET',
       this.fetchProfile.bind(this),
       {
-        validation: {
+        validate:{
           headers: schemas.authHeaders
         }
       }
@@ -107,7 +107,7 @@ class ProfileMs extends HttpServiceBase {
       'POST',
       this.syncContact.bind(this),
       {
-        validation: {
+        validate:{
           headers: schemas.authHeaders,
           payload: Joi.object({
             users: Joi.array().items(Joi.string()).required()
@@ -131,8 +131,8 @@ class ProfileMs extends HttpServiceBase {
 
   async login(req, res) {
     const { payload } = req;
-    const { username } = payload;
-    const token = extractInfoFromRequest(req, 'token');
+    const { username, authToken } = payload;
+    const token = authToken || extractInfoFromRequest(req, 'token');
     let isNew = false;
     let result;
     try {

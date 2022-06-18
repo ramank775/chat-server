@@ -2,6 +2,7 @@ const http = require('http');
 const https = require('https');
 const fs = require('fs');
 const Hapi = require('@hapi/hapi');
+const Boom = require('@hapi/boom');
 const { ServiceBase } = require('./service-base');
 const { extractInfoFromRequest, shortuuid } = require('../helper');
 
@@ -97,6 +98,15 @@ class HttpServiceBase extends ServiceBase {
       type: 'histogram',
       measurement: 'median'
     });
+    if(options && options.validate) {
+      options.validate.options = {
+        abortEarly: false
+      }
+      options.validate.failAction = (_req, _h, error) => {
+        const errorMessage = error.details.map(({message}) => message).join('\n')
+        throw Boom.badRequest(errorMessage)
+      }
+    }
     this.hapiServer.route({
       method,
       path,
