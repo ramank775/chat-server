@@ -22,7 +22,7 @@ info:
     ```
   version: 1.0.0
 servers:
-  - url: http://{{baseurl}}
+  - url: https://{{baseurl}}
 components:
   securitySchemes:
     apikeyAuth:
@@ -65,14 +65,9 @@ paths:
               type: object
               example:
                 username: '{{username}}'
+                authToken: '{{firebase_auth_token}}'
                 notificationToken: fcm token
-      parameters:
-        - name: token
-          in: header
-          schema:
-            type: string
-          description: Firebase auth token
-          example: '{{firebase_auth_token}}'
+                deviceId: default
       responses:
         '200':
           description: Successful response
@@ -101,22 +96,12 @@ paths:
             schema:
               type: object
               example:
-                - _v: 2
-                  id: string
-                  head:
-                    type: chat|group|channel|bot|notification
-                    to: username|group_id|channel_id|bot_id
-                    from: username
-                    chatid: chatid
-                    contentType: json|text|video|audio|location|form
-                    action: >-
-                      message|ack|subscribe|unsubscribe|join|leave|create|add-member|remove-member
-                  meta:
-                    hash: md5:hash
-                    content_hash: md5:hash
-                    generate_ts: 123455667890
-                  body:
-                    text: Hello this a text message
+                - >-
+                  {"_v":2,"id":"string","head":{"type":"chat|group|channel|bot|notification","to":"username|group_id|channel_id|bot_id","from":"username","chatid":"chatid","contentType":"json|text|video|audio|location|form","action":"message|ack|subscribe|unsubscribe|join|leave|create|add-member|remove-member"},"meta":{"hash":"md5:hash","content_hash":"md5:hash","generate_ts":123455667890},"body":{"text":"Hello
+                  this a text message"}}
+                - >-
+                  {"_v":2,"id":"string","head":{"type":"chat|group|channel|bot|notification","to":"username|group_id|channel_id|bot_id","from":"username","chatid":"chatid","contentType":"json|text|video|audio|location|form","action":"message|ack|subscribe|unsubscribe|join|leave|create|add-member|remove-member"},"meta":{"hash":"md5:hash","content_hash":"md5:hash","generate_ts":123455667890},"body":{"text":"Hello
+                  this a text message"}}
       responses:
         '200':
           description: Successful response
@@ -273,6 +258,7 @@ paths:
           schema:
             type: string
           required: true
+          example: e3dbe14f-c8da-4436-b912-da059098c6a5
       responses:
         '200':
           description: Successful response
