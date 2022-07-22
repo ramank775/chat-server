@@ -1,7 +1,7 @@
 FROM gitpod/workspace-mongodb
 
 ENV NATS_VERSION="v2.8.3"
-ENV KAFKA_VERSION="3.0.0"
+ENV KAFKA_VERSION="3.2.0"
 
 COPY .gitpod/load.nginx.conf /etc/nginx/nginx.conf
 
