@@ -13,7 +13,8 @@ tasks:
       KAFKA_HOME=/kafka &&
       ./deployment/scripts/init-kafka.bash $KAFKA_HOME .env
   - name: Nats
-    command: nats-server -js
+    init: chmod +x deployment/scripts/*.bash && ./deployment/scripts/setup.bash
+    command: ./deployment/scripts/init-nats.bash .env
   - name: Nginx
     command: export NGINX_DOCROOT="${GITPOD_REPO_ROOT}/www" && nginx
   - name: mongodb

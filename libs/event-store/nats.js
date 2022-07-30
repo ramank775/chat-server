@@ -50,9 +50,9 @@ function parseNatsOptions(options) {
 }
 
 function getConsumerOpts(options) {
-  const opts = nats.consumerOpts()
-  opts.queue(options.natsConsumerGroup)
-  opts.durable(options.natsConsumerGroup)
+  const opts = nats.consumerOpts();
+  opts.queue(options.natsConsumerGroup);
+  opts.durable(options.natsConsumerGroup);
   return opts;
 }
 
@@ -71,20 +71,24 @@ class NatsEventStore extends IEventStore {
   /** @type {nats.JetStreamClient} */
   #jsc;
 
-  /** @type {nats.JetStreamPullSubscription} */
-  #psub;
+  /** @type {Map<string,nats.JetStreamPullSubscription>} */
+  #psub = new Map();
 
   #isDisconnect = false;
 
   /** @type { string[] } */
-  #listenerEvents
+  #subjects
+
+  /** @type {nats.Codec} */
+  #codec
 
   constructor(context) {
     super();
     this.#options = context.options;
     this.#logger = context.log;
-    this.#listenerEvents = context.listenerEvents;
+    this.#subjects = context.listenerEvents;
     this.#asyncStorage = context.asyncStorage;
+    this.#codec = nats.JSONCodec()
   }
 
   /**
@@ -110,52 +114,30 @@ class NatsEventStore extends IEventStore {
   }
 
   async #createNatsConsumer() {
+    nats.createInbox()
     const js = await this.#getJetStreamClient();
-    const opts = getConsumerOpts(this.#options);
-    opts.callback(async (err, msg) => {
-      if (err) {
-        this.#logger.error('Error while processing nats message', err);
-      }
-      if (!msg) {
-        return;
-      }
 
-      const start = Date.now();
-      const trackId = msg.headers.get('track_id') || shortuuid();
-      const [topic, key, partition] = msg.subject.split('.', 3);
-
-      await this.#asyncStorage.run(trackId, async () => {
-        const data = {
-          key,
-          value: JSON.parse(msg.value.toString())
-        };
-        const logInfo = {
-          topic,
-          partition,
-          offset: msg.seq,
-          key: data.key
-        };
-        this.#logger.info(`new data received`, { ...logInfo, ...(data.value.META || {}) });
-        const sConsume = Date.now();
-        try {
-          await this.on(topic, data.value);
-          msg.ack()
-        } catch (e) {
-          this.#logger.error(`Error while processing message`, { err: e });
-          // TODO: wait to msg to have retryCount
-          if (msg.redelivered) msg.term()
-          else msg.nak()
-        }
-        logInfo.latency = Date.now() - start;
-        logInfo.consume_latency = Date.now() - sConsume;
-        this.#logger.info('message consumed', logInfo);
-      });
-
-      this.#psub.pull();
-    })
     try {
       this.#logger.info('subscribing to consumer.');
-      this.#psub = await js.pullSubscribe(this.#options.natsConsumerStream, opts);
+      const promises = this.#subjects.map((subject) => {
+        const opts = getConsumerOpts(this.#options);
+        opts.callback(async (err, msg) => {
+          if (err) {
+            this.#logger.error('Error while processing nats message', err);
+          }
+          if (!msg) {
+            return;
+          }
+          await this.#eachMessage(msg);
+          this.#psub.get(subject).pull();
+        })
+        const subp = js.pullSubscribe(`${subject}.>`, opts);
+        subp.then((sub) => {
+          this.#psub.set(subject, sub);
+        })
+        return subp;
+      })
+      await Promise.all(promises)
       this.#logger.info('Consumer subscribe sucessfully.');
     } catch (error) {
       this.#logger.error(`Error while subscribing consumer. ${error}`);
@@ -167,6 +149,41 @@ class NatsEventStore extends IEventStore {
     }, 500);
 
     return this.#jsc;
+  }
+
+  async #eachMessage(msg) {
+    const start = Date.now();
+    const trackId = msg.headers.get('track_id') || shortuuid();
+    const [topic, key, partition] = msg.subject.split('.', 3);
+
+    await this.#asyncStorage.run(trackId, async () => {
+      const data = {
+        key,
+        value: this.#codec.decode(msg.data)
+      };
+      const logInfo = {
+        topic,
+        partition,
+        offset: msg.seq,
+        key: data.key
+      };
+      this.#logger.info(`new data received`, { ...logInfo, ...(data.value.META || {}) });
+      const sConsume = Date.now();
+      try {
+        await this.on(topic, data.value);
+        msg.ack();
+      } catch (e) {
+        this.#logger.error(`Error while processing message`, { err: e });
+        // TODO: wait to msg to have retryCount
+        if (msg.redelivered)
+          msg.term();
+        else
+          msg.nak();
+      }
+      logInfo.latency = Date.now() - start;
+      logInfo.consume_latency = Date.now() - sConsume;
+      this.#logger.info('message consumed', logInfo);
+    });
   }
 
   /**
@@ -191,7 +208,7 @@ class NatsEventStore extends IEventStore {
     try {
       const start = Date.now();
       const jc = await this.#getJetStreamClient()
-      const data = JSON.stringify(args)
+      const data = this.#codec.encode(args)
       const headers = nats.headers()
       headers.append('track_id', trackId)
       const response = await jc.publish(`${event}.${key}`, data, {

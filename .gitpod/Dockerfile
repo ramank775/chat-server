@@ -1,7 +1,8 @@
 FROM gitpod/workspace-mongodb
 
-ENV NATS_VERSION="v2.8.3"
-ENV KAFKA_VERSION="3.2.0"
+ARG NATS_VERSION="v2.8.3"
+ARG KAFKA_VERSION="3.2.0"
+ARG NATS_CLI_VERSION="0.0.33"
 
 COPY .gitpod/load.nginx.conf /etc/nginx/nginx.conf
 
@@ -16,3 +17,8 @@ RUN curl -L https://github.com/nats-io/nats-server/releases/download/${NATS_VERS
   unzip nats-server.zip -d nats-server && \
   sudo cp nats-server/nats-server-${NATS_VERSION}-linux-amd64/nats-server /usr/bin && \
   rm -rf nats-server.zip nats-server
+
+RUN curl -L https://github.com/nats-io/natscli/releases/download/v${NATS_CLI_VERSION}/nats-${NATS_CLI_VERSION}-linux-amd64.zip -o nats-cli.zip && \
+  unzip nats-cli.zip -d nats-cli && \
+  sudo cp nats-cli/nats-${NATS_CLI_VERSION}-linux-amd64/nats /usr/bin && \
+  rm -rf nats-cli.zip nats-cli
