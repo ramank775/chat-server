@@ -1,6 +1,6 @@
 {
   "name": "chat-server",
-  "version": "2.6.2",
+  "version": "2.7.0",
   "description": "A chat server based on the microservice architecture to ensure high availability, high throughput, horizontal scalability using Kafka",
   "main": "",
   "repository": "https://github.com/ramank775/chat-server.git",
@@ -12,34 +12,35 @@
     "prepare": "husky install"
   },
   "engines": {
-    "node": ">12.0.0"
+    "node": ">14.0.0"
   },
   "dependencies": {
     "@hapi/boom": "^10.0.0",
     "@hapi/hapi": "^20.2.2",
     "@pm2/io": "^5.0.0",
-    "aws-sdk": "^2.1176.0",
+    "aws-sdk": "^2.1185.0",
     "commander": "^9.4.0",
-    "firebase-admin": "^11.0.0",
-    "ioredis": "^5.2.0",
+    "firebase-admin": "^11.0.1",
+    "ioredis": "^5.2.2",
     "joi": "^17.6.0",
     "kafkajs": "2.1.0",
     "moment": "^2.29.4",
-    "mongodb": "^4.8.0",
+    "mongodb": "^4.8.1",
+    "nats": "^2.7.1",
     "node-fetch": "^2.6.6",
     "short-uuid": "^4.2.0",
     "winston": "^3.8.1",
     "ws": "^8.8.1"
   },
   "devDependencies": {
-    "@babel/core": "^7.18.6",
-    "@babel/eslint-parser": "^7.18.2",
-    "@babel/preset-env": "7.18.6",
-    "eslint": "^8.19.0",
+    "@babel/core": "^7.18.9",
+    "@babel/eslint-parser": "^7.18.9",
+    "@babel/preset-env": "7.18.9",
+    "eslint": "^8.20.0",
     "eslint-config-airbnb": "^19.0.4",
     "eslint-config-prettier": "^8.5.0",
     "eslint-plugin-import": "^2.26.0",
-    "eslint-plugin-jsx-a11y": "^6.6.0",
+    "eslint-plugin-jsx-a11y": "^6.6.1",
     "eslint-plugin-node": "^11.1.0",
     "eslint-plugin-prettier": "^4.2.1",
     "eslint-plugin-react": "^7.30.1",

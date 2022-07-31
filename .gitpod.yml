@@ -1,4 +1,3 @@
-
 image:
   file: .gitpod/Dockerfile
 
@@ -9,17 +8,19 @@ ports:
 tasks:
   - init: yarn install
   - name: Kafka
-    init: chmod +x deployment/scripts/*.bash && ./deployment/scripts/setup.bash 
-    command: > 
+    init: chmod +x deployment/scripts/*.bash && ./deployment/scripts/setup.bash
+    command: >
       KAFKA_HOME=/kafka &&
       ./deployment/scripts/init-kafka.bash $KAFKA_HOME .env
+  - name: Nats
+    init: chmod +x deployment/scripts/*.bash && ./deployment/scripts/setup.bash
+    command: ./deployment/scripts/init-nats.bash .env
   - name: Nginx
     command: export NGINX_DOCROOT="${GITPOD_REPO_ROOT}/www" && nginx
   - name: mongodb
     command: mkdir -p /workspace/data && mongod --dbpath /workspace/data
   - name: redis
-    command:  redis-server 
-
+    command: redis-server
 
 vscode:
   extensions:

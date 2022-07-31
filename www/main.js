@@ -228,9 +228,11 @@ function connectSocket() {
   if (window.WebSocket) {
     console.log('WebSocket object is supported in your browser');
 
-    const host = window.location.hostname;
+    const { protocol, hostname } = window.location;
+    console.log('protocol', protocol)
+    const socketUrl = `${protocol === 'https:' ? 'wss' : 'ws'}://${hostname}/v1.0/wss/`
     const startTime = Date.now();
-    ws = new WebSocket(`wss://${host}/v1.0/wss/`);
+    ws = new WebSocket(socketUrl);
 
     ws.onopen = function onopen() {
       console.log('connection time', Date.now() - startTime);
@@ -238,6 +240,7 @@ function connectSocket() {
       console.log('onopen');
     };
     ws.onmessage = function onmessage(e) {
+      if (e.data === "pong") return;
       const msgSpace = document.getElementById('message');
       const newMsgItem = document.createElement('li');
 
@@ -261,7 +264,7 @@ function connectSocket() {
       timer = null;
     };
     timer = setInterval(() => {
-      ws.send(0x9);
+      ws.send("ping");
     }, 30000)
   } else {
     console.log('WebSocket object is not supported in your browser');

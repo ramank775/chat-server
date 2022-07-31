@@ -1,8 +1,10 @@
 const { IEventStore } = require('./iEventStore')
 const Kafka = require('./kafka');
+const Nats = require('./nats');
 
 const EVENT_STORE = [
-  Kafka
+  Kafka,
+  Nats,
 ];
 
 /**
