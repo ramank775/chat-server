@@ -145,7 +145,9 @@ class NatsEventStore extends IEventStore {
     }
 
     setTimeout(async () => {
-      this.#psub.pull()
+      this.#psub.forEach((sub) => {
+        sub.pull();
+      })
     }, 500);
 
     return this.#jsc;
@@ -250,8 +252,7 @@ function initOptions(cmd) {
     .option('--nats-auth-token <auth-token>', 'Nats client authentication token for token authentication')
     .option('--nats-auth-nkey <auth-nkey>', 'Nats client secret nkey for nkey/jwt authentication')
     .option('--nats-auth-jwt <auth-jwt>', 'Nats client user jwt token for jwt authentication')
-    .option('--nats-consumer-group <consumer-group>', 'Nats consumer group name for durable consumer')
-    .option('--nats-consumer-stream <consumer-stream>', 'Nats stream name for consumer');
+    .option('--nats-consumer-group <consumer-group>', 'Nats consumer group name for durable consumer');
 }
 
 async function initialize(context, options) {

@@ -213,7 +213,6 @@
         "--service-discovery-path=${SERVICE_DISCOVERY_PATH}",
         "--nats-server-list=${NATS_SERVER_LIST}",
         "--nats-consumer-group=${CONSUMER_GROUP_MESSAGE_DELIVERY}",
-        "--nats-consumer-stream=${NATS_MESSAGE_DELIVERY_STREAM}",
         "--cache-type=redis",
         "--redis-endpoint=127.0.0.1:6379"
       ],
@@ -235,7 +234,6 @@
         "--group-message-topic=${TOPIC_NEW_GROUP_MS}",
         "--nats-server-list=${NATS_SERVER_LIST}",
         "--nats-consumer-group=${CONSUMER_GROUP_MESSAGE_ROUTER}",
-        "--nats-consumer-stream=${NATS_MESSAGE_ROUTER_STREAM}",
       ],
       "envFile": "${workspaceFolder}/.env",
       "autoAttachChildProcesses": true
@@ -291,7 +289,6 @@
         "--persistence-message-topic=${TOPIC_DB_MESSAGE}",
         "--nats-server-list=${NATS_SERVER_LIST}",
         "--nats-consumer-group=${CONSUMER_GROUP_GROUP_MESSAGE_ROUTER}",
-        "--nats-consumer-stream=${NATS_GROUP_MESSAGE_ROUTER_STREAM}",
         "--mongo-url=${MONGO_URL}",
       ],
       "envFile": "${workspaceFolder}/.env",
@@ -310,7 +307,6 @@
         "--firebase-admin-credential-json-path=${workspaceFolder}/${FIREBASE_ADMIN_CRED_JSON_PATH}",
         "--event-store=nats",
         "--nats-server-list=${NATS_SERVER_LIST}",
-        "--nats-consumer-stream=${NATS_NOTIFICATION_STREAM}",
         "--nats-consumer-group=notification-ms",
         "--new-login-topic=${TOPIC_NEW_LOGIN}",
         "--offline-message-topic=${TOPIC_OFFLINE_MESSAGE}",

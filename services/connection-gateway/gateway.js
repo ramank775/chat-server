@@ -132,10 +132,15 @@ class Gateway extends HttpServiceBase {
       userSocketMapping[user] = ws;
       ws.user = user;
       userEvents.onConnect(user);
-      ws.on('message', function onMessage(msg) {
+      ws.on('message', function onMessage(rawmsg) {
+        const msg = rawmsg.toString();
+        if (msg === "ping") {
+          ws.send("pong");
+          return
+        }
         const trackId = shortuuid();
         asyncStorage.run(trackId, () => {
-          messageEvents.onNewMessage(msg.toString(), this.user);
+          messageEvents.onNewMessage(msg, this.user);
         });
       });
       ws.on('close', function onClose(_code, _reason) {
@@ -192,7 +197,7 @@ class Gateway extends HttpServiceBase {
       'post',
       this.newMessage.bind(this),
       {
-        validate:{
+        validate: {
           headers: schemas.authHeaders,
           payload: Joi.array().items(Joi.string()).min(1).required()
         }
