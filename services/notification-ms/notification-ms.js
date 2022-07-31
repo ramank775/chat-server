@@ -40,7 +40,7 @@ function parseOptions(argv) {
     '--offline-message-topic <offline-message-topic>',
     'Used by producer to produce new message to send the push notification'
   );
-  cmd.option('--new-login-topic <new-login-topic>', 'New login kafka topic');
+  cmd.option('--new-login-topic <new-login-topic>', 'New login topic');
   cmd.option(
     '--offline-msg-initial <offline-msg-initial>',
     'Initial for saved messages',

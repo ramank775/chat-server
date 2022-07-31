@@ -13,7 +13,7 @@ const EVENT_STORE = [
  * @returns {import('commander').Command}
  */
 function addOptions(cmd) {
-  cmd = cmd.option('--event-store <event-source>', 'Which event store to use (Kafka)', 'kafka');
+  cmd = cmd.option('--event-store <event-source>', 'Which event store to use (kafka, nats)', 'nats');
   EVENT_STORE.forEach((store) => {
     if (store.initOptions) {
       cmd = store.initOptions(cmd);

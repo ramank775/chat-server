@@ -2,7 +2,7 @@
 [![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](code_of_conduct.md)
 [![Gitpod Ready-to-Code](https://img.shields.io/badge/Gitpod-Ready--to--Code-blue?logo=gitpod)](https://gitpod.io/#https://github.com/ramank775/chat-server) 
 
-A chat server based on the microservice architecture to ensure high availability, high throughput, horizontal scalability using Kafka
+A chat server based on the microservice architecture to ensure high availability, high throughput, horizontal scalability.
 
 ## Architecture
 ![Architecture](docs/Architecture.png)
@@ -17,7 +17,7 @@ A chat server based on the microservice architecture to ensure high availability
 - Web Socket Gateway: It's handling client websocket connection and sending message to message broker
     - Responsibility
         - Maintaining Web Socket Connection
-        - Forwarding event like `onConnect`, `onDisconnect`, `new-message` to message broker (Kafka)
+        - Forwarding event like `onConnect`, `onDisconnect`, `new-message` to message broker
         - Sending message back to client
 
 - Rest Http Gateway: It handle rest call to send messages.
@@ -157,7 +157,7 @@ Click on the Gitpod badge it will start the fully setup development environment.
 ### Development environment on local machine
 
 ### Prerequisites
-- Apache Kafka
+- [Apache Kafka](https://kafka.apache.org/) / [Nats](https://nats.io/)
 - Mongodb
 - Nginx
 - Firebase project 
@@ -178,11 +178,21 @@ Click on the Gitpod badge it will start the fully setup development environment.
     ```
     cp .env.tmpl .env
     ```
-- Initialize Kafka 
+- Initialize Message Broker 
     ```
     cd deployment/scripts
+    ```
+    Setup Kafka
+    ```
     ./init-kafka.bash ${KAFKA_INSTALLATION_DIRECTORY} .env
     ```
+    OR
+
+    Setup Nats
+    ```
+    ./init-nats.bash .env
+    ```
+
 - Open project in vscode
 - Start the required microservice from `RUN and DEBUG` option
 - (Optional) Start nginx using the configuration [deployment/config/nginx.config](./deployment/config/nginx.dev.config)

@@ -92,7 +92,7 @@ class NatsEventStore extends IEventStore {
   }
 
   /**
-   * Get kafka instance
+   * Get Nats Connection instance
    * @param {Object} context
    * @return {Promise<nats.NatsConnection>}
    */

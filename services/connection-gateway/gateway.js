@@ -36,7 +36,7 @@ function parseOptions(argv) {
   cmd
     .option(
       '--gateway-name <app-name>',
-      'Used as gateway server idenitifer for the user connected to this server, as well as the kafka topic for send message'
+      'Used as gateway server idenitifer for the user connected to this server.'
     )
     .option(
       '--user-connection-state-topic <user-connection-state-topic>',
