@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+message Message {
+  float version = 1;
+  string id = 2;
+  enum Type {
+    ServerAck = 0;
+    Individual = 1;
+    Notification = 2;
+    Group = 3;
+    Custom = 9;
+  }
+  Type type = 3;
+  bool ephemeral = 4;
+  string source = 5;
+  string destination = 6;
+  uint64 timestamp = 7;
+  bytes content = 8;
+  map<string, string> meta = 9;
+  string server_id = 10;
+  uint64 server_timestamp = 11;
+}
+
+message UserStateChange {
+  string user = 1;
+  enum State {
+    CONNECTED = 0;
+    DISCONNECTED = 2;
+  }
+  State state = 2;
+  string gateway = 3;
+}

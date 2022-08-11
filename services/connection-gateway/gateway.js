@@ -8,6 +8,7 @@ const {
 const { addHttpOptions, initHttpResource, HttpServiceBase } = require('../../libs/http-service-base');
 const EventStore = require('../../libs/event-store');
 const { uuidv4, shortuuid, extractInfoFromRequest, schemas } = require('../../helper');
+const { Message } = require('../../libs/message-utils');
 
 const asMain = require.main === module;
 
@@ -75,8 +76,8 @@ class Gateway extends HttpServiceBase {
       events
     } = this.context;
     const serverName = this.options.gatewayName;
-    const publishEvent = (event, user, eventArgs) => {
-      eventStore.emit(event, eventArgs, user);
+    this.publishEvent = async (event, user, eventArgs) => {
+      await eventStore.emit(events[event], eventArgs, user);
     };
     const userConnectedCounter = this.statsClient.counter({
       name: 'userConnected'
@@ -84,7 +85,7 @@ class Gateway extends HttpServiceBase {
     this.userEvents = {
       onConnect(user) {
         userConnectedCounter.inc(1);
-        publishEvent(events['user-connection-state'], user, {
+        this.publishEvent('user-connection-state', user, {
           action: 'connect',
           user,
           server: serverName
@@ -92,31 +93,18 @@ class Gateway extends HttpServiceBase {
       },
       onDisconnect(user) {
         userConnectedCounter.dec(1);
-        publishEvent(events['user-connection-state'], user, {
+        this.publishEvent('user-connection-state', user, {
           action: 'disconnect',
           user,
           server: serverName
         });
       }
     };
-    const newMessageMeter = this.statsClient.meter({
+    this.newMessageMeter = this.statsClient.meter({
       name: 'newMessage/sec',
       type: 'meter'
     });
-    this.messageEvents = {
-      onNewMessage(message, from) {
-        newMessageMeter.mark();
-        const event = {
-          payload: message,
-          META: {
-            from,
-            sid: shortuuid(),
-            rts: Date.now()
-          }
-        };
-        publishEvent(events['new-message'], from, event);
-      }
-    };
+
 
     this.userSocketMapping = {};
   }
@@ -126,21 +114,41 @@ class Gateway extends HttpServiceBase {
     const wss = new webSocker.Server({ server: this.httpServer });
     this.context.wss = wss;
     const { asyncStorage } = this.context;
-    const { userEvents, messageEvents, userSocketMapping } = this;
+    const { userEvents, userSocketMapping } = this;
     wss.on('connection', (ws, request) => {
       const user = getUserInfoFromRequest(request);
       userSocketMapping[user] = ws;
       ws.user = user;
       userEvents.onConnect(user);
-      ws.on('message', function onMessage(rawmsg) {
-        const msg = rawmsg.toString();
-        if (msg === "ping") {
-          ws.send("pong");
-          return
+      ws.on('message', function onMessage(rawmsg, isBinary) {
+        if (!isBinary) {
+          const msg = rawmsg.toString();
+          if (msg === "ping") {
+            ws.send("pong");
+            return
+          }
         }
         const trackId = shortuuid();
-        asyncStorage.run(trackId, () => {
-          messageEvents.onNewMessage(msg, this.user);
+        asyncStorage.run(trackId, async () => {
+          this.newMessageMeter.mark();
+          const options = {
+            source: this.user
+          }
+          const message = isBinary ?
+            Message.fromBinary(rawmsg, options)
+            : Message.fromString(rawmsg.toString(), options)
+          message.set_server_id(trackId);
+          message.set_server_timestamp();
+          await this.publishEvent('new-message', message.destination, message.toBinary());
+
+          if (this.ackEnabled) {
+            const ack = message.buildServerAckMessage()
+            if (this.isBinary) {
+              ws.send(ack.toBinary(), { isBinary: true })
+            } else {
+              ws.send(ack.toString());
+            }
+          }
         });
       });
       ws.on('close', function onClose(_code, _reason) {

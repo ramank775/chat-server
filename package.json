@@ -24,10 +24,12 @@
     "ioredis": "^5.2.2",
     "joi": "^17.6.0",
     "kafkajs": "2.1.0",
+    "long": "^5.2.0",
     "moment": "^2.29.4",
     "mongodb": "^4.8.1",
     "nats": "^2.7.1",
     "node-fetch": "^2.6.6",
+    "protobufjs": "^7.0.0",
     "short-uuid": "^4.2.0",
     "winston": "^3.8.1",
     "ws": "^8.8.1"

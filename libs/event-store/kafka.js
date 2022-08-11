@@ -387,17 +387,17 @@ class KafkaEventStore extends IEventStore {
             this.#asyncStorage.run(trackId, () => {
               const data = {
                 key: message.key ? message.key.toString() : null,
-                value: JSON.parse(message.value.toString())
+                value: message.value
               };
               const logInfo = {
                 topic,
                 partition,
                 offset: message.offset,
-                key: data.key
+                key: data.key,
               };
-              this.#logger.info(`new data received`, { ...logInfo, ...(data.value.META || {}) });
+              this.#logger.info(`new data received`, logInfo);
               const sConsume = Date.now();
-              this.on(topic, data.value);
+              this.on(topic, data.value, data.key);
               logInfo.latency = Date.now() - start;
               logInfo.consume_latency = Date.now() - sConsume;
               this.#logger.info('message consumed', logInfo);
@@ -428,7 +428,7 @@ class KafkaEventStore extends IEventStore {
   /**
    * Emit an new event to event store
    * @param {string} event Name of the event
-   * @param {*} args Event arguments
+   * @param {string|Buffer|null} args Event arguments
    * @param {string} key
    */
   async emit(event, args, key) {
@@ -440,7 +440,7 @@ class KafkaEventStore extends IEventStore {
         messages: [
           {
             key,
-            value: JSON.stringify(args),
+            value: args,
             headers: {
               track_id: trackId
             }

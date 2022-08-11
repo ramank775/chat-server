@@ -79,8 +79,6 @@ class NatsEventStore extends IEventStore {
   /** @type { string[] } */
   #subjects
 
-  /** @type {nats.Codec} */
-  #codec
 
   constructor(context) {
     super();
@@ -88,7 +86,6 @@ class NatsEventStore extends IEventStore {
     this.#logger = context.log;
     this.#subjects = context.listenerEvents;
     this.#asyncStorage = context.asyncStorage;
-    this.#codec = nats.JSONCodec()
   }
 
   /**
@@ -161,7 +158,7 @@ class NatsEventStore extends IEventStore {
     await this.#asyncStorage.run(trackId, async () => {
       const data = {
         key,
-        value: this.#codec.decode(msg.data)
+        value: msg.data
       };
       const logInfo = {
         topic,
@@ -169,7 +166,7 @@ class NatsEventStore extends IEventStore {
         offset: msg.seq,
         key: data.key
       };
-      this.#logger.info(`new data received`, { ...logInfo, ...(data.value.META || {}) });
+      this.#logger.info(`new data received`, logInfo);
       const sConsume = Date.now();
       try {
         await this.on(topic, data.value);
@@ -210,10 +207,9 @@ class NatsEventStore extends IEventStore {
     try {
       const start = Date.now();
       const jc = await this.#getJetStreamClient()
-      const data = this.#codec.encode(args)
       const headers = nats.headers()
       headers.append('track_id', trackId)
-      const response = await jc.publish(`${event}.${key}`, data, {
+      const response = await jc.publish(`${event}.${key}`, args, {
         msgID: trackId,
         headers,
       });
