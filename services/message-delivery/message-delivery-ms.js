@@ -10,29 +10,52 @@ const cache = require('../../libs/cache');
 const disoveryService = require('../../libs/discovery-service-utils');
 const database = require('./database');
 const { shortuuid } = require('../../helper');
+const { MessageEvent, ConnectionStateEvent, CONNECTION_STATE } = require('../../libs/event-args');
 
 const asMain = require.main === module;
+
+const EVENT_TYPE = {
+  CONNECTION_EVENT: 'connection-state',
+  SEND_EVENT: 'send-event',
+  OFFLINE_EVENT: 'offline-event',
+  SYSTEM_EVENT: 'system-event',
+  CLIENT_ACK_EVENT: 'client-ack-event'
+};
 
 async function prepareEventList(context) {
   const { options } = context;
   const { userConnectionStateTopic, sendMessageTopic, offlineMessageTopic, ackTopic, systemMessageTopic } = options;
   context.events = {
-    'user-connection-state': userConnectionStateTopic,
-    'send-message': sendMessageTopic,
-    'offline-message': offlineMessageTopic,
-    'system-message': systemMessageTopic || ackTopic,
+    [EVENT_TYPE.CONNECTION_EVENT]: userConnectionStateTopic,
+    [EVENT_TYPE.SEND_EVENT]: sendMessageTopic,
+    [EVENT_TYPE.OFFLINE_EVENT]: offlineMessageTopic,
+    [EVENT_TYPE.SYSTEM_EVENT]: systemMessageTopic,
+    [EVENT_TYPE.CLIENT_ACK_EVENT]: ackTopic,
   };
-  context.listenerEvents = [userConnectionStateTopic, sendMessageTopic, systemMessageTopic || ackTopic];
+  context.listenerEvents = [userConnectionStateTopic, sendMessageTopic, systemMessageTopic, ackTopic];
   return context;
 }
 
 async function initResources(options) {
-  const context = await initDefaultResources(options)
+  let context = await initDefaultResources(options)
     .then(cache.initMemCache)
     .then(database.initializeDatabase)
     .then(prepareEventList)
-    .then(disoveryService.initDiscoveryService)
-    .then(eventStore.initializeEventStore({ producer: true, consumer: true }));
+    .then(disoveryService.initDiscoveryService);
+
+  context = await eventStore.initializeEventStore({
+    producer: true,
+    consumer: true,
+    decodeMessageCb: (topic) => {
+      const { events } = context
+      switch (topic) {
+        case events[EVENT_TYPE.CONNECTION_EVENT]:
+          return ConnectionStateEvent;
+        default:
+          return MessageEvent;
+      }
+    }
+  })(context);
   return context;
 }
 
@@ -56,7 +79,7 @@ function parseOptions(argv) {
     )
     .option(
       '--ack-topic <ack-topic>',
-      'Used by consumer to consume new message for acknowledgment (depericated use --system-message-topic instead)'
+      'Used by consumer to consume for ack message received by client.'
     )
     .option(
       '--system-message-topic <system-message-topic>',
@@ -102,33 +125,41 @@ class MessageDeliveryMS extends ServiceBase {
 
   init() {
     const { events } = this;
-    this.eventStore.on = async (event, value) => {
+    this.eventStore.on = async (event, message, key) => {
       switch (event) {
-        case events['user-connection-state']:
-          {
-            const { action, user, server } = value;
-            switch (action) {
-              case 'connect':
-                this.onConnect(user, server);
-                break;
-              case 'disconnect':
-                this.onDisconnect(user, server);
-                break;
-              default:
-                throw new Error('Unkown action');
-            }
-          }
+        case events[EVENT_TYPE.CONNECTION_EVENT]:
+          this.onConnectionStateChange(message);
           break;
-        case events['send-message']:
-          this.onMessage(value);
+        case events[EVENT_TYPE.SEND_EVENT]:
+          this.onMessage(message, key);
           break;
-        case events['system-message']:
-          this.onSystemMessage(value);
+        case events[EVENT_TYPE.SYSTEM_EVENT]:
+          this.onSystemEvent(message, key);
+          break;
+        case events[EVENT_TYPE.CLIENT_ACK_EVENT]:
+          this.onClientAckEvent(message, key);
           break;
         default:
           throw new Error(`Unknown event ${event}`);
       }
     };
+  }
+
+  /**
+   * Handle user connection state change event
+   * @param {import('../../libs/event-args').ConnectionStateEvent} message 
+   */
+  async onConnectionStateChange(message) {
+    switch (message.state) {
+      case CONNECTION_STATE.CONNECTED:
+        this.onConnect(message.user, message.gateway);
+        break;
+      case CONNECTION_STATE.DISCONNECTED:
+        this.onDisconnect(message.user, message.gateway);
+        break;
+      default:
+        throw new Error('Unkown action');
+    }
   }
 
   async onConnect(user, server) {
@@ -145,147 +176,109 @@ class MessageDeliveryMS extends ServiceBase {
     }
   }
 
-  async onMessage(value) {
-    const nonEphemeralMessages = value.items.filter((msg) => !msg.META.ephemeral)
-    this.db.save(nonEphemeralMessages);
-    await this.sendMessage(value);
+  /**
+   * 
+   * @param {import('../../libs/event-args').MessageEvent} value 
+   * @param {string} receiver
+   */
+  async onMessage(value, receiver) {
+    if (!value.ephemeral) {
+      this.db.save(receiver, value);
+    }
+    await this.sendMessage(value, receiver);
   }
 
-  async onSystemMessage(value) {
-    const { acks, other } = value.items.reduce((acc, msg) => {
-      if (this.ackAlias.includes(msg.META.action)) {
-        acc.acks.push(msg)
-        if (msg.META.to !== 'server') {
-          acc.other.push(msg)
+  /**
+   * 
+   * @param {import('../../libs/event-args').MessageEvent} value 
+   * @param {string} receiver
+   */
+  async onSystemEvent(value, receiver) {
+    if (value.destination === 'server') {
+      this.ackMessage(value);
+    } else {
+      this.onMessage(value, receiver)
+    }
+  }
+
+  /**
+   * 
+   * @param {import('../../libs/event-args').MessageEvent} value 
+   */
+  async onClientAckEvent(value) {
+    await this.db.markMessageDeliveredByUser(value.source, [value.id]);
+  }
+
+  /**
+   * 
+   * @param {import('../../libs/event-args').MessageEvent} value 
+   * @param {string} receiver
+   */
+  async sendMessage(value, receiver) {
+    await this.sendMessageWithRetry(receiver, [value], { saved: false, retry: 0 })
+  }
+
+  async sendMessageWithRetry(receiver, messages, { trackid = null, saved = false, retry = 0 }) {
+    if (retry > this.maxRetryCount) return
+    const servers = await this.getServer([receiver])
+    const server = servers[receiver]
+    if (!server) {
+      if (saved) return
+      await this.sendOfflineMessage(messages, receiver);
+      return
+    }
+    const url = await this.discoveryService.getServiceUrl(server);
+    const trackId = trackid || this.context.asyncStorage.getStore() || shortuuid();
+    const body = {
+      items: [{
+        receiver,
+        meta: {
+          saved,
+          retry
+        },
+        messages: messages.map((m) => m.toBinary())
+      }]
+    }
+    fetch(`${url}/send`, {
+      method: 'post',
+      body: JSON.stringify(body),
+      headers: {
+        'Content-Type': 'application/json',
+        'x-request-id': trackId
+      }
+    })
+      .then((res) => res.json())
+      .then(async ({ errors }) => {
+        if (!(errors && errors.length)) {
+          return;
         }
-      } else {
-        acc.other.push(msg)
-      }
-      return acc
-    }, { acks: [], other: [] });
-
-    if (acks.length) {
-      this.ackMessage(acks)
-    }
-    if (other.length) {
-      this.onMessage({ items: other })
-    }
-  }
-
-  ackMessage(items) {
-    const userMessages = items.reduce((mapping, msg) => {
-      const user = msg.META.from;
-      if (!mapping[user]) {
-        mapping[user] = [];
-      }
-      mapping[user].push(...msg.payload.body.ids);
-      return mapping;
-    }, {});
-    Object.entries(userMessages).forEach(async ([user, ids]) => {
-      await this.db.markMessageDeliveredByUser(user, ids);
-    });
-  }
-
-  async sendMessage(value) {
-    const { asyncStorage } = this.context;
-    const trackId = asyncStorage.getStore() || shortuuid();
-    const { online, offline } = await this.createMessageGroup(value);
-
-    if (offline.length) this.sendOfflineMessage(offline);
-
-    Object.keys(online).forEach(async (key) => {
-      const messages = online[key];
-      const url = await this.discoveryService.getServiceUrl(key);
-      fetch(`${url}/send`, {
-        method: 'post',
-        body: JSON.stringify({ items: messages }),
-        headers: {
-          'Content-Type': 'application/json',
-          'x-request-id': trackId
+        const error = errors[0];
+        if (error.code === 404) {
+          await this.sendMessageWithRetry(receiver, messages, { trackid: trackId, saved, retry: retry + 1 })
+          return;
+        }
+        const notFoundMessages = messages.filter((m) => error.messages.find(((err) => err.code === 400 && err.sid === m.server_id)))
+        if (notFoundMessages.length) {
+          await this.sendMessageWithRetry(receiver, notFoundMessages, { trackid: trackId, saved, retry: retry + 1 })
         }
       })
-        .then((res) => res.json())
-        .then(({ errors }) => {
-          const failedMessages = errors.map((x) => x.messages);
-          // HACK: until client implements the proper ack and
-          // server has rest endpoint for message sync and ack
-          // remove successfully sent messages
-          this.markMessagesAsSent(messages, failedMessages);
-          if (!errors.length) {
-            return;
-          }
-          this.sendMessage({ items: failedMessages.flat() });
-        })
-        .catch((e) => {
-          this.log.error('Error while sending messages', e);
-        });
-    });
+      .catch((e) => {
+        this.log.error('Error while sending messages', e);
+      });
   }
 
-  async sendOfflineMessage(messages) {
-    this.eventStore.emit(this.events['offline-message'], messages);
+  async sendOfflineMessage(messages, receiver) {
+    const promises = messages.map(async (m) => {
+      await this.eventStore.emit(this.events[EVENT_TYPE.OFFLINE_EVENT], m, receiver);
+    })
+    await Promise.all(promises);
   }
 
   async sendPendingMessage(user) {
     const messages = await this.db.getUndeliveredMessageByUser(user);
     if (!(messages && messages.length)) return;
     this.log.info(`Processing pending message for ${user}, length : ${messages.length}`);
-
-    const payload = messages.map((m) => {
-      const { _id: _, ...msg } = m;
-      msg.META.saved = true;
-      return msg;
-    });
-    const msgs = {
-      items: payload
-    };
-    await this.sendMessage(msgs);
-  }
-
-  async createMessageGroup(value) {
-    const { items } = value;
-    const serverMapping = {};
-    const userMapping = {};
-    const users = new Set();
-    const offlineMessages = [];
-    items.forEach((message) => {
-      const { to, retry = -1, saved = false, ephemeral } = message.META;
-      // If messages is already saved don't send it to offline message again
-      // even if retry count exceed
-      if (retry > this.maxRetryCount && !(saved || ephemeral)) {
-        offlineMessages.push(message);
-        return;
-      }
-      message.META.retry = retry + 1;
-      const userMsgs = userMapping[to];
-      if (userMsgs) {
-        userMsgs.push(message);
-      } else {
-        users.add(to);
-        userMapping[to] = [message];
-      }
-    });
-    const userServers = await this.getServer([...users]);
-    users.forEach(user => {
-      const server = userServers[user];
-      if (!server) {
-        // If messages is already saved don't send it to offline message again
-        const msgs = userMapping[user]
-          .filter((m) => !(m.META.ephemeral || m.META.saved));
-        offlineMessages.push(...msgs);
-      } else {
-        const item = serverMapping[server];
-        if (item) {
-          item.push(userMapping[user]);
-        } else {
-          serverMapping[server] = [userMapping[user]];
-        }
-      }
-    })
-    return {
-      online: serverMapping,
-      offline: offlineMessages
-    };
+    await this.sendMessageWithRetry(user, messages, { saved: true, retry: 0 })
   }
 
   async markMessagesAsSent(messages, failedMessages) {
@@ -321,11 +314,6 @@ class MessageDeliveryMS extends ServiceBase {
     });
   }
 
-  async shutdown() {
-    await this.eventStore.dispose();
-    await this.db.close();
-  }
-
   async getServer(users) {
     const servers = await this.memCache.getAll(users);
     const result = {}
@@ -333,6 +321,11 @@ class MessageDeliveryMS extends ServiceBase {
       result[users[idx]] = servers[idx];
     }
     return result;
+  }
+
+  async shutdown() {
+    await this.eventStore.dispose();
+    await this.db.close();
   }
 }
 
