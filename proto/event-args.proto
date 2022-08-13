@@ -5,10 +5,11 @@ message Message {
   string id = 2;
   enum Type {
     ServerAck = 0;
-    Individual = 1;
-    Notification = 2;
-    Group = 3;
-    Custom = 9;
+    ClientAck = 1;
+    Individual = 2;
+    Notification = 3;
+    Group = 4;
+    Custom = 10;
   }
   Type type = 3;
   bool ephemeral = 4;
@@ -21,7 +22,7 @@ message Message {
   uint64 server_timestamp = 11;
 }
 
-message UserStateChange {
+message UserConnectionState {
   string user = 1;
   enum State {
     CONNECTED = 0;
@@ -29,4 +30,11 @@ message UserStateChange {
   }
   State state = 2;
   string gateway = 3;
+}
+
+message Login {
+  string user = 1;
+  string deviceId = 2;
+  string notificationToken = 3;
+  float messageVersion = 4;
 }

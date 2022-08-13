@@ -1,4 +1,5 @@
 const eventStore = require('../../libs/event-store');
+const { MessageEvent } = require('../../libs/event-args');
 const {
   ServiceBase,
   initDefaultOptions,
@@ -6,15 +7,19 @@ const {
   resolveEnvVariables
 } = require('../../libs/service-base');
 const { addDatabaseOptions, initializeDatabase } = require('./database');
-const { formatMessage } = require('../../libs/message-utils');
 
 const asMain = require.main === module;
+
+const EVENT_TYPE = {
+  SEND_EVENT: 'send-event',
+  SYSTEM_EVENT: 'system-event',
+}
 
 async function prepareEventList(context) {
   const { options } = context;
   const eventName = {
-    'send-message': options.sendMessageTopic,
-    'system-message': options.systemMessageTopic || options.ackTopic
+    [EVENT_TYPE.SEND_EVENT]: options.sendMessageTopic,
+    [EVENT_TYPE.SYSTEM_EVENT]: options.systemMessageTopic || options.ackTopic
   };
   context.events = eventName;
   context.listenerEvents = [options.newGroupMessageTopic];
@@ -25,7 +30,12 @@ async function initResources(options) {
   const context = await initDefaultResources(options)
     .then(initializeDatabase)
     .then(prepareEventList)
-    .then(eventStore.initializeEventStore({ producer: true, consumer: true }));
+    .then(eventStore.initializeEventStore({
+      producer: true,
+      consumer: true,
+      decodeMessageCb: () => MessageEvent
+    }));
+
   return context;
 }
 
@@ -65,37 +75,32 @@ class GroupMessageRouterMS extends ServiceBase {
   }
 
   init() {
-    this.eventStore.on = async (_, message) => {
-      this.redirectMessage(message);
+    this.eventStore.on = async (_, message, key) => {
+      await this.redirectMessage(message, key);
     };
   }
 
-  async redirectMessage(message) {
+  /**
+   * Redirect Group message.
+   * @param {import('../../libs/event-args').MessageEvent} message 
+   * @param {string} key 
+   */
+  async redirectMessage(message, key) {
     const start = Date.now();
-    if (!message.META.parsed) {
-      message = formatMessage(message);
-    }
-    let { users } = message.META;
-    if (!users) {
-      users = await this.getGroupUsers(message.META.to, message.META.from);
-    }
-    users = users.filter((x) => x !== message.META.from);
-    if (message.META.category === 'system') {
-      message.META.users = users;
-      this.eventStore.emit(this.events['system-message'], { items: [message] }, message.META.from);
+    if (message.type === 'Notification') {
+      await this.publish(EVENT_TYPE.SYSTEM_EVENT, message, key);
     } else {
-      const messages = users.map((user) => {
-        if (typeof user === 'object') {
-          user = user.username;
-        }
-        const msg = { ...message };
-        // Set message META property type as single so failed message to be handled by mesasge router
-        msg.META = { ...msg.META, to: user, users: undefined };
-        return msg;
-      });
-      this.eventStore.emit(this.events['send-message'], { items: messages });
+      const users = await this.getGroupUsers(message.destination, message.source);
+      const promises = users.filter((x) => x !== message.source).map(async (user) => {
+        await this.publish(EVENT_TYPE.SEND_EVENT, message, user);
+      })
+      await Promise.all(promises)
     }
-    this.log.info('Message redirected', { sid: message.META.sid, latency: Date.now() - start });
+    this.log.info('Message redirected', { sid: message.server_id, latency: Date.now() - start });
+  }
+
+  async publish(event, message, key) {
+    this.eventStore.emit(this.events[event], message, key)
   }
 
   async shutdown() {

@@ -1,4 +1,5 @@
 const { IEventStore } = require('./iEventStore')
+const { IEventArg } = require('./iEventArg')
 const Kafka = require('./kafka');
 const Nats = require('./nats');
 
@@ -55,6 +56,7 @@ function initialize(options) {
 
 module.exports = {
   IEventStore,
+  IEventArg,
   addEventStoreOptions: addOptions,
   initializeEventStore: initialize
 }

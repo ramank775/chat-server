@@ -5,10 +5,10 @@ const {
   resolveEnvVariables
 } = require('../../libs/service-base');
 const { addHttpOptions, initHttpResource, HttpServiceBase } = require('../../libs/http-service-base');
-const { shortuuid, extractInfoFromRequest, schemas } = require('../../helper');
-const { formatMessage } = require('../../libs/message-utils');
+const { extractInfoFromRequest, schemas } = require('../../helper');
 const eventStore = require('../../libs/event-store');
 const { addDatabaseOptions, initializeDatabase } = require('./database');
+const { GroupEvent } = require('./group-event');
 
 const asMain = require.main === module;
 
@@ -18,9 +18,9 @@ function parseOptions(argv) {
   cmd = addDatabaseOptions(cmd);
   cmd = eventStore.addEventStoreOptions(cmd);
   cmd = cmd.option(
-    '--new-group-message-topic <new-group-message-topic>',
-    'Used by consumer to consume new group message for each new incoming message'
-  );
+    '--send-message-topic <send-message-topic>',
+    'Used by producer to produce new message to send message to user'
+  )
   return cmd.parse(argv).opts();
 }
 
@@ -70,7 +70,7 @@ class GroupMs extends HttpServiceBase {
       'GET',
       this.getGroups.bind(this),
       {
-        validate:{
+        validate: {
           headers: schemas.authHeaders
         }
       }
@@ -81,7 +81,7 @@ class GroupMs extends HttpServiceBase {
       'POST',
       this.createGroup.bind(this),
       {
-        validate:{
+        validate: {
           headers: schemas.authHeaders,
           payload: Joi.object({
             name: Joi.string().required(),
@@ -97,7 +97,7 @@ class GroupMs extends HttpServiceBase {
       'GET',
       this.getGroupInfo.bind(this),
       {
-        validate:{
+        validate: {
           headers: schemas.authHeaders,
           params: Joi.object({
             groupId: Joi.string().required()
@@ -133,7 +133,7 @@ class GroupMs extends HttpServiceBase {
       'POST',
       this.addMembers.bind(this),
       {
-        validate:{
+        validate: {
           headers: schemas.authHeaders,
           params: Joi.object({
             groupId: Joi.string().required()
@@ -150,7 +150,7 @@ class GroupMs extends HttpServiceBase {
       'DELETE',
       this.removeMembers.bind(this),
       {
-        validate:{
+        validate: {
           headers: schemas.authHeaders,
           params: Joi.object({
             groupId: Joi.string().required()
@@ -194,15 +194,9 @@ class GroupMs extends HttpServiceBase {
       payload.members.push({ username: member, role: member === user ? 'admin' : 'user' });
     });
     const groupId = await this.db.create(payload)
-    this.sendNotification({
-      from: user,
-      to: members,
-      groupId,
-      action: 'add',
-      body: {
-        added: payload.members
-      }
-    });
+    const event = new GroupEvent(groupId, 'add', user)
+    event.newMembers(payload.members)
+    this.sendNotification(event, members);
     return {
       groupId
     };
@@ -225,15 +219,9 @@ class GroupMs extends HttpServiceBase {
     await this.db.addMember(groupId, user, newMembers);
     const existingMembers = group.members.map((member) => member.username);
     const receivers = [...new Set(existingMembers.concat(members))];
-    this.sendNotification({
-      from: user,
-      to: receivers,
-      groupId,
-      action: 'add',
-      body: {
-        added: newMembers
-      }
-    });
+    const event = new GroupEvent(groupId, 'add', user);
+    event.newMembers(newMembers)
+    this.sendNotification(event, receivers);
     return { status: true };
   }
 
@@ -265,15 +253,9 @@ class GroupMs extends HttpServiceBase {
         }
       }
     }
-    this.sendNotification({
-      from: user,
-      to: group.members.map((u) => u.username),
-      groupId,
-      action: 'remove',
-      body: {
-        removed: [member]
-      }
-    });
+    const event = new GroupEvent(groupId, 'remove', user)
+    event.removedMembers([member])
+    this.sendNotification(event, group.members.map((u) => u.username));
     return {
       status: true
     };
@@ -281,37 +263,15 @@ class GroupMs extends HttpServiceBase {
 
   /**
    * Send Group action update to all group members
-   * @param {{from: string, to: string[], groupId: string, action: string; body: unknown}} notification
+   * @param {GroupEvent} notification
+   * @param {string[]} receivers
    */
-  sendNotification(notification) {
-    const { newGroupMessageTopic } = this.options;
-    const payload = JSON.stringify({
-      _v: 2.0,
-      id: shortuuid(),
-      meta: {
-        createdAt: Date.now()
-      },
-      head: {
-        type: 'group',
-        to: notification.groupId,
-        from: notification.from,
-        chatId: notification.groupId,
-        contentType: 'notification',
-        action: notification.action
-      },
-      body: notification.body
-    });
-    const msg = {
-      META: {
-        from: notification.from,
-        users: notification.to,
-        rts: Date.now(),
-        sid: shortuuid()
-      },
-      payload
-    };
-    const message = formatMessage(msg);
-    this.eventStore.emit(newGroupMessageTopic, message, notification.from);
+  async sendNotification(notification, receivers) {
+    const { sendMessageTopic } = this.options;
+    const promises = receivers.map(async (r) => {
+      await this.eventStore.emit(sendMessageTopic, notification, r);
+    })
+    await Promise.all(promises)
   }
 
   async shutdown() {

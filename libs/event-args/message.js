@@ -1,103 +1,18 @@
-const protobufjs = require('protobufjs');
-const path = require('path');
 const Long = require('long');
-const { getUTCEpoch, shortuuid } = require('../helper');
+const { getUTCEpoch, shortuuid } = require('../../helper');
+const { IEventArg } = require('../event-store');
+const { getProtoDefination } = require('./util');
 
-function formatMessage(message) {
-  const { META, payload } = message;
-  const parsedPayload = JSON.parse(payload);
-  const msg = {
-    _v: parsedPayload._v || 1.0
-  };
-
-  if (msg._v >= 2.0) {
-    const { id, head, meta, body } = parsedPayload;
-    head.from = META.from;
-    msg.head = head;
-    msg.id = id;
-    msg.body = body;
-    msg.body.ts = getUTCEpoch();
-
-    Object.assign(META, meta);
-    META.to = head.to;
-    META.id = id;
-    META.type = head.type;
-    META.action = head.action;
-    // Added in version 2.1
-    if (!head.category) {
-      // As of v2.0 message with action state/ack as system message else 
-      head.category = ['state', 'ack'].includes(head.action) ? 'system' : 'message';
-    }
-    META.category = head.category
-
-    // Add legacy keys for backward compatibility
-    // TODO: remove this in next stable build
-    msg.from = META.from;
-    msg.to = head.to;
-    msg.msgId = id;
-    msg.type = head.contentType;
-    msg.chatId = head.chatId; // to be deperciated, added for backward comptibility only
-    msg.text = body.text;
-    msg.module = head.type;
-    msg.action = head.action;
-    msg.chatType = head.type;
-  } else {
-    const { to, type, chatType, ..._msg } = parsedPayload;
-    Object.assign(msg, _msg);
-    msg.from = META.from;
-    msg.to = to;
-    msg.type = type;
-    msg.chatType = chatType;
-
-    // Add new format keys
-    msg.id = msg.msgId;
-    msg.head = {
-      type: chatType || msg.module,
-      to,
-      from: META.from,
-      chatid: msg.chatId,
-      contentType: msg.type,
-      action: msg.action || 'message',
-      category: ['state', 'ack'].includes(msg.action) ? 'system' : 'message'
-    };
-    msg.body = {
-      text: _msg.text,
-      ts: getUTCEpoch()
-    };
-
-    Object.assign(META, {
-      to,
-      id: msg.id,
-      type: chatType,
-      contentType: type,
-      action: msg.head.action
-    });
-  }
-
-  const formattedMessage = {
-    META: { ...META, parsed: true },
-    payload: msg
-  };
-  return formattedMessage;
+const MESSAGE_TYPE = {
+  SERVER_ACK: 'ServerAck',
+  CLIENT_ACK: 'ClientAck',
+  INDIVIDUAL: 'Individual',
+  NOTIFICATION: 'Notification',
+  GROUP: 'Group',
+  CUSTOM: 'Custom'
 }
 
-let protoRoot = null
-function loadProtoDefination(location) {
-  if (!location) {
-    location = path.join(__dirname, '../proto', 'message.proto');
-  }
-  protoRoot = protobufjs.loadSync(path)
-  return protoRoot;
-}
-
-function getProtoDefination(type) {
-  if (!protoRoot) {
-    protoRoot = loadProtoDefination();
-  }
-  return protoRoot.lookupType(type)
-}
-
-class Message {
+class MessageEvent extends IEventArg {
   static #binary_resource_name = 'Message';
 
   /** @type {string|Buffer} */
@@ -142,7 +57,7 @@ class Message {
   static fromString(payload, options) {
     if (!options) options = {}
     const json = JSON.parse(payload);
-    const message = new Message();
+    const message = new MessageEvent();
     message._raw = payload;
     message._raw_format = 'json';
     message._version = json._v || 1.0;
@@ -180,13 +95,13 @@ class Message {
 
   static fromBinary(payload, options) {
     if (!options) options = {}
-    const messageDefination = getProtoDefination(this.#binary_resource_name);
+    const messageDefination = getProtoDefination(MessageEvent.#binary_resource_name);
     const incomming = messageDefination.decode(payload)
     const json = messageDefination.toObject(incomming, {
       longs: Long,
       enums: String
     })
-    const message = new Message();
+    const message = new MessageEvent();
     message._raw = payload;
     message._raw_format = 'binary';
 
@@ -274,7 +189,7 @@ class Message {
   }
 
   buildServerAckMessage() {
-    const ackMessage = new Message();
+    const ackMessage = new MessageEvent();
     ackMessage._version = this._version;
     ackMessage._id = this._id;
     ackMessage._ephemeral = true;
@@ -282,7 +197,7 @@ class Message {
     ackMessage._source = 'server';
     ackMessage._server_id = this._server_id;
     ackMessage._server_timestamp = this._server_timestamp;
-    ackMessage._type = 'ServerAck';
+    ackMessage._type = MESSAGE_TYPE.SERVER_ACK;
     return ackMessage;
   }
 
@@ -332,9 +247,7 @@ class Message {
   }
 }
 
-
 module.exports = {
-  formatMessage,
-  loadProtoDefination,
-  Message
-};
+  MESSAGE_TYPE,
+  MessageEvent
+}

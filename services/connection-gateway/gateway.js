@@ -8,19 +8,25 @@ const {
 const { addHttpOptions, initHttpResource, HttpServiceBase } = require('../../libs/http-service-base');
 const EventStore = require('../../libs/event-store');
 const { uuidv4, shortuuid, extractInfoFromRequest, schemas } = require('../../helper');
-const { Message } = require('../../libs/message-utils');
+const { MessageEvent, ConnectionStateEvent } = require('../../libs/event-args');
 
 const asMain = require.main === module;
+
+const EVENT_TYPE = {
+  CONNECTION_EVENT: 'connection-state',
+  NEW_MESSAGE_EVENT: 'new-message',
+}
 
 async function prepareListEvent(context) {
   const { options } = context;
   const eventName = {
-    'user-connection-state': options.userConnectionStateTopic,
-    'new-message': options.newMessageTopic
+    [EVENT_TYPE.CONNECTION_EVENT]: options.userConnectionStateTopic,
+    [EVENT_TYPE.NEW_MESSAGE_EVENT]: options.newMessageTopic
   };
   context.events = eventName;
   return context;
 }
+
 async function initResources(options) {
   const context = await initDefaultResources(options)
     .then(prepareListEvent)
@@ -75,130 +81,26 @@ class Gateway extends HttpServiceBase {
       eventStore,
       events
     } = this.context;
-    const serverName = this.options.gatewayName;
-    this.publishEvent = async (event, user, eventArgs) => {
-      await eventStore.emit(events[event], eventArgs, user);
+
+    this.publishEvent = async (event, eventArgs, key) => {
+      await eventStore.emit(events[event], eventArgs, key);
     };
-    const userConnectedCounter = this.statsClient.counter({
+    this.userConnectedCounter = this.statsClient.counter({
       name: 'userConnected'
     });
-    this.userEvents = {
-      onConnect(user) {
-        userConnectedCounter.inc(1);
-        this.publishEvent('user-connection-state', user, {
-          action: 'connect',
-          user,
-          server: serverName
-        });
-      },
-      onDisconnect(user) {
-        userConnectedCounter.dec(1);
-        this.publishEvent('user-connection-state', user, {
-          action: 'disconnect',
-          user,
-          server: serverName
-        });
-      }
-    };
     this.newMessageMeter = this.statsClient.meter({
       name: 'newMessage/sec',
       type: 'meter'
     });
 
-
-    this.userSocketMapping = {};
+    this.userSocketMapping = new Map();
   }
 
   async init() {
     await super.init();
-    const wss = new webSocker.Server({ server: this.httpServer });
-    this.context.wss = wss;
-    const { asyncStorage } = this.context;
-    const { userEvents, userSocketMapping } = this;
-    wss.on('connection', (ws, request) => {
-      const user = getUserInfoFromRequest(request);
-      userSocketMapping[user] = ws;
-      ws.user = user;
-      userEvents.onConnect(user);
-      ws.on('message', function onMessage(rawmsg, isBinary) {
-        if (!isBinary) {
-          const msg = rawmsg.toString();
-          if (msg === "ping") {
-            ws.send("pong");
-            return
-          }
-        }
-        const trackId = shortuuid();
-        asyncStorage.run(trackId, async () => {
-          this.newMessageMeter.mark();
-          const options = {
-            source: this.user
-          }
-          const message = isBinary ?
-            Message.fromBinary(rawmsg, options)
-            : Message.fromString(rawmsg.toString(), options)
-          message.set_server_id(trackId);
-          message.set_server_timestamp();
-          await this.publishEvent('new-message', message.destination, message.toBinary());
+    this.initWebsocket();
 
-          if (this.ackEnabled) {
-            const ack = message.buildServerAckMessage()
-            if (this.isBinary) {
-              ws.send(ack.toBinary(), { isBinary: true })
-            } else {
-              ws.send(ack.toString());
-            }
-          }
-        });
-      });
-      ws.on('close', function onClose(_code, _reason) {
-        userEvents.onDisconnect(this.user);
-        delete userSocketMapping[this.user];
-      });
-    });
-
-    this.addRoute('/send', 'post', async (req, _res) => {
-      const items = req.payload.items || [];
-      const errors = [];
-      items.forEach((messages) => {
-        if (!messages.length) return;
-        const { to } = messages[0].META;
-        const ws = userSocketMapping[to];
-        if (ws) {
-          const { payloads, meta } = messages.reduce(
-            (acc, msg) => {
-              acc.payloads.push(msg.payload);
-              if (msg.META.sid) {
-                acc.meta.push(msg.META);
-              }
-              return acc;
-            },
-            {
-              payloads: [],
-              meta: []
-            }
-          );
-          const payload = JSON.stringify(payloads);
-          ws.send(payload);
-          const sentAt = Date.now();
-          const latencies = meta.map((m) => ({
-            sid: m.sid,
-            latency: sentAt - m.rts,
-            saved: m.saved,
-            retry: m.retry
-          }));
-          this.log.info(`Message delivery to user`, { latencies });
-        } else {
-          errors.push({
-            messages,
-            code: 404
-          });
-        }
-      });
-      return {
-        errors
-      };
-    });
+    this.addRoute('/send', 'post', this.sendRestMessage.bind(this));
 
     this.addRoute(
       '/messages',
@@ -213,6 +115,17 @@ class Gateway extends HttpServiceBase {
     );
   }
 
+  initWebsocket() {
+    const wss = new webSocker.Server({ server: this.httpServer });
+    this.context.wss = wss;
+    wss.on('connection', (ws, request) => {
+      const user = getUserInfoFromRequest(request);
+      this.onConnect(user, ws);
+      ws.on('message', (payload, isBinary) => this.onMessage(payload, isBinary, user));
+      ws.on('close', () => this.onDisconnect(user));
+    });
+  }
+
   async newMessage(req, res) {
     const user = extractInfoFromRequest(req, 'user');
     const messages = req.payload;
@@ -222,11 +135,113 @@ class Gateway extends HttpServiceBase {
     return res.response().code(201);
   }
 
+  async onMessage(payload, isBinary, user) {
+    const ws = this.userSocketMapping.get(user);
+    if (!isBinary) {
+      const msg = payload.toString();
+      if (msg === "ping") {
+        ws.send("pong");
+        return
+      }
+    }
+    const trackId = shortuuid();
+    this.context.asyncStorage.run(trackId, async () => {
+      this.newMessageMeter.mark();
+      const options = {
+        source: user
+      }
+      const message = isBinary ?
+        MessageEvent.fromBinary(payload, options)
+        : MessageEvent.fromString(payload.toString(), options)
+      message.set_server_id(trackId);
+      message.set_server_timestamp();
+      await this.publishEvent(EVENT_TYPE.NEW_MESSAGE_EVENT, message, message.destination);
+      if (ws.ackEnabled) {
+        const ack = message.buildServerAckMessage()
+        this.sendWebsocketMessage(ws.user, ack)
+      }
+    });
+
+  }
+
+  async onConnect(user, ws) {
+    this.userSocketMapping.set(user, ws);
+    this.userConnectedCounter.inc(1);
+    const message = ConnectionStateEvent.connect(user, this.options.gatewayName);
+    await this.publishEvent(EVENT_TYPE.CONNECTION_EVENT, message, user);
+  }
+
+  async onDisconnect(user) {
+    this.userSocketMapping.delete(user);
+    this.userConnectedCounter.dec(1);
+    const message = ConnectionStateEvent.disconnect(user, this.options.gatewayName);
+    await this.publishEvent(EVENT_TYPE.CONNECTION_EVENT, message, user);
+  }
+
+  async sendRestMessage(req, _res) {
+    const items = req.payload.items || [];
+    const errors = [];
+    items.forEach((item) => {
+      const { receiver, messages } = item
+      if (!messages.length) return;
+      const ws = this.userSocketMapping.get(receiver);
+      if (ws) {
+        const latencies = []
+        const uError = []
+        messages.forEach((m) => {
+          try {
+            const message = MessageEvent.fromBinary(m.raw)
+            this.sendWebsocketMessage(receiver, message)
+            latencies.push({
+              retry: m.meta.retry,
+              saved: m.meta.saved,
+              sid: m.meta.sid,
+              latency: Date.now() - message.server_timestamp,
+            })
+          } catch (e) {
+            uError.push({
+              code: 500,
+              error: e,
+              sid: m.meta.sid
+            });
+          }
+        })
+        errors.push({
+          receiver,
+          message: uError
+        })
+        this.log.info(`Message delivery to user`, { latencies });
+      } else {
+        errors.push({
+          code: 404,
+          receiver,
+          messages: messages.map((m) => ({ sid: m.meta.sid }))
+        });
+      }
+    });
+    return {
+      errors
+    };
+  }
+
+  /**
+   * Send messages to user via websocket
+   * @param {string} user
+   * @param {import('../../libs/event-args').MessageEvent} message 
+   */
+  sendWebsocketMessage(user, message) {
+    const ws = this.userSocketMapping.get(user)
+    if (ws.isBinary) {
+      ws.send(message.toBinary(), { isBinary: true })
+    } else {
+      ws.send(message.toString());
+    }
+  }
+
   async shutdown() {
     await super.shutdown()
     const { eventStore } = this.context;
     await eventStore.dispose()
-
   }
 
 }

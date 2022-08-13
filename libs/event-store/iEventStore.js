@@ -1,6 +1,8 @@
-
 /**
- * @typedef {{producer: boolean; consumer: boolean}} InitOptions
+ * @typedef {import('./iEventArg').IEventArg} IEventArg
+ */
+/**
+ * @typedef {{producer: boolean; consumer: boolean; decodeMessageCb: (topic: string) => IEventArg }} InitOptions
  */
 
 class IEventStore {
@@ -16,11 +18,12 @@ class IEventStore {
    * @property
    * Function to listen to new events
    * @param {string} _event Name of the event
-   * @param {*} _args Event arguments
+   * @param {IEventArg} _args Event arguments
+   * @param {string} _key Event Grouping key
    */
 
   // eslint-disable-next-line class-methods-use-this
-  on = async (_event, _args) => { 
+  on = async (_event, _args, _key) => {
     throw new Error("Not Implemented Exception")
   };
 
@@ -38,8 +41,8 @@ class IEventStore {
    * @abstract
    * Emit an new event to event store
    * @param {string} _event Name of the event
-   * @param {*} _args Event arguments
-   * @param {string} _key
+   * @param {IEventArg} _args Event arguments
+   * @param {string} key Event grouping key
    */
   // eslint-disable-next-line class-methods-use-this
   async emit(_event, _args, _key) {

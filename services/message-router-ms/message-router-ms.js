@@ -1,21 +1,30 @@
 const eventStore = require('../../libs/event-store');
+const { MessageEvent } = require('../../libs/event-args');
 const {
   ServiceBase,
   initDefaultOptions,
   initDefaultResources,
   resolveEnvVariables
 } = require('../../libs/service-base');
-const { formatMessage } = require('../../libs/message-utils');
 
 const asMain = require.main === module;
+
+/** @typedef {import('../../libs/event-args').MessageEvent} Message */
+
+const EVENT_TYPE = {
+  NEW_MESSAGE_EVENT: 'new-message',
+  SEND_EVENT: 'send-event',
+  GROUP_MESSAGE_EVENT: 'group-message',
+  SYSTEM_EVENT: 'system-event',
+}
 
 async function prepareEventList(context) {
   const { options } = context;
   const eventName = {
-    'new-message': options.newMessageTopic,
-    'send-message': options.sendMessageTopic,
-    'group-message': options.groupMessageTopic,
-    'system-message': options.systemMessageTopic || options.ackTopic,
+    [EVENT_TYPE.NEW_MESSAGE_EVENT]: options.newMessageTopic,
+    [EVENT_TYPE.SEND_EVENT]: options.sendMessageTopic,
+    [EVENT_TYPE.GROUP_MESSAGE_EVENT]: options.groupMessageTopic,
+    [EVENT_TYPE.GROUP_MESSAGE_EVENT]: options.systemMessageTopic || options.ackTopic,
   };
   context.events = eventName;
   context.listenerEvents = [options.newMessageTopic];
@@ -23,9 +32,13 @@ async function prepareEventList(context) {
 }
 
 async function initResources(options) {
-  const context = await initDefaultResources(options)
-    .then(prepareEventList)
-    .then(eventStore.initializeEventStore({ producer: true, consumer: true }));
+  let context = await initDefaultResources(options)
+    .then(prepareEventList);
+  context = await eventStore.initializeEventStore({
+    producer: true,
+    consumer: true,
+    decodeMessageCb: () => MessageEvent
+  })(context)
   return context;
 }
 
@@ -70,27 +83,36 @@ class MessageRouterMS extends ServiceBase {
   }
 
   init() {
-    this.eventStore.on = (_, message) => {
+    this.eventStore.on = (_, message, key) => {
       this.redirectMessageMeter.mark();
-      this.redirectMessage(message);
+      this.redirectMessage(message, key);
     };
   }
 
-  redirectMessage(message) {
+  /**
+   * Redirect message based on the type
+   * @param {Message} message 
+   * @param {string} key
+   */
+  async redirectMessage(message, key) {
     const start = Date.now();
-    if (!message.META.parsed) {
-      message = formatMessage(message);
-    }
-    const user = message.META.to;
 
-    if (message.META.type === 'group') {
-      this.eventStore.emit(this.events['group-message'], message, user);
-    } else if(message.META.category === 'system') {
-      this.eventStore.emit(this.events['system-message'], { items: [message] }, message.META.from);
-    } else {
-      this.eventStore.emit(this.events['send-message'], { items: [message] }, user);
+    switch (message.type) {
+      case 'Group':
+        await this.publish(EVENT_TYPE.GROUP_MESSAGE_EVENT, message, key);
+        break;
+      case 'Notification':
+        await this.publish(EVENT_TYPE.SYSTEM_EVENT, message, key);
+        break;
+      default:
+        await this.publish(EVENT_TYPE.SEND_EVENT, message, key);
     }
-    this.log.info('Message redirected', { sid: message.META.sid, latency: Date.now() - start });
+
+    this.log.info('Message redirected', { sid: message.server_id, latency: Date.now() - start });
+  }
+
+  async publish(event, message, key) {
+    this.eventStore.emit(this.events[event], message, key)
   }
 
   async shutdown() {

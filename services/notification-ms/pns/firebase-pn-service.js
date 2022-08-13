@@ -31,7 +31,7 @@ class FirebasePushNotificationService extends IPushNotificationService {
   async push(token, payload) {
     const chatPayload = {
       data: {
-        message: JSON.stringify(payload)
+        message: payload
       }
     };
     const options = {
