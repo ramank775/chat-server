@@ -1,6 +1,7 @@
 const moment = require('moment');
 const { IMessageDB } = require('./message-db');
 const { addMongodbOptions, initMongoClient } = require('../../../libs/mongo-utils');
+const { MessageEvent } = require('../../../libs/event-args')
 
 class MongoMessageDB extends IMessageDB {
 
@@ -19,20 +20,34 @@ class MongoMessageDB extends IMessageDB {
     this.#client = initMongoClient(context);
   }
 
-  async save(messages) {
+  /**
+   * Save messages in database
+   * @param {string} user
+   * @param {MessageEvent[]} messages 
+   */
+  async save(user, messages) {
     const expireAt = moment().add(30, 'days').toDate()
-    const msgs = messages.map(msg => ({ ...msg, expireAt }))
+    const msgs = messages.map(msg => ({
+      id: msg.id,
+      user,
+      payload: msg.toBinary(),
+      expireAt
+    }))
     await this.#collection.insertMany(msgs)
   }
 
-  async getUndeliveredMessageByUser(userId) {
-    const messages = this.#collection.find({ 'META.to': userId }, { projection: { META: 1, payload: 1 } });
-    return await messages.toArray()
+  async getUndeliveredMessage(userId) {
+    const cursor = this.#collection.find({ user: userId }, { projection: { payload: 1 } });
+    const messageEventCursor = cursor.map((doc) => {
+      const binary = doc.payload.buffer
+      return MessageEvent.fromBinary(binary)
+    })
+    return await messageEventCursor.toArray()
   }
 
-  async markMessageDeliveredByUser(userId, messages) {
+  async markMessageDelivered(userId, messageIds) {
     await this.#collection.deleteMany(
-      { 'META.to': userId, 'META.id': { $in: messages } }
+      { user: userId, id: { $in: messageIds } }
     );
   }
 

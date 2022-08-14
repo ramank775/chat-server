@@ -182,7 +182,7 @@ class Gateway extends HttpServiceBase {
     const items = req.payload.items || [];
     const errors = [];
     items.forEach((item) => {
-      const { receiver, messages } = item
+      const { receiver, messages, meta } = item
       if (!messages.length) return;
       const ws = this.userSocketMapping.get(receiver);
       if (ws) {
@@ -190,25 +190,25 @@ class Gateway extends HttpServiceBase {
         const uError = []
         messages.forEach((m) => {
           try {
-            const message = MessageEvent.fromBinary(m.raw)
+            const message = MessageEvent.fromBinary(Buffer.from(m.raw))
             this.sendWebsocketMessage(receiver, message)
             latencies.push({
-              retry: m.meta.retry,
-              saved: m.meta.saved,
-              sid: m.meta.sid,
+              retry: meta.retry,
+              saved: meta.saved,
+              sid: message.server_id,
               latency: Date.now() - message.server_timestamp,
             })
           } catch (e) {
             uError.push({
               code: 500,
               error: e,
-              sid: m.meta.sid
+              sid: m.sid
             });
           }
         })
         errors.push({
           receiver,
-          message: uError
+          messages: uError
         })
         this.log.info(`Message delivery to user`, { latencies });
       } else {

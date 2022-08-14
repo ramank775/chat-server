@@ -22,21 +22,17 @@ class LoginEvent extends IEventArg {
     this._user = args.user;
     this._deviceId = args.deviceId;
     this._notificationToken = args.notificationToken;
-    this._messageVersion = args._messageVersion || 2.1;
+    this._messageVersion = args.messageVersion || 2.1;
   }
 
   static fromBinary(payload) {
-    const messageDefination = getProtoDefination(this.#binary_resource_name);
+    const messageDefination = getProtoDefination(LoginEvent.#binary_resource_name);
     const incomming = messageDefination.decode(payload)
     const json = messageDefination.toObject(incomming, {
       longs: Long,
       enums: String
     })
-    const message = new LoginEvent();
-    message._user = json.user;
-    message._deviceId = json.deviceId;
-    message._notificationToken = json.notificationToken;
-    message._messageVersion = json.messageVersion;
+    const message = new LoginEvent(json);
     return message;
   }
 

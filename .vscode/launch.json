@@ -40,6 +40,7 @@
         "--send-message-topic=${TOPIC_SEND_MESSAGE}",
         "--system-message-topic=${TOPIC_SYSTEM_MESSAGE}",
         "--offline-message-topic=${TOPIC_OFFLINE_MESSAGE}",
+        "--client-ack-topic=${TOPIC_CLIENT_ACK_MESSAGE}",
         "--service-discovery-path=${SERVICE_DISCOVERY_PATH}",
         "--kafka-broker-list=${BROKER_LIST}",
         "--kafka-security-protocol=${KAFKA_SECURITY_PROTOCOL}",
@@ -109,7 +110,7 @@
         "--event-store=kafka",
         "--kafka-client-id=group-1",
         "--kafka-broker-list=${BROKER_LIST}",
-        "--new-group-message-topic=${TOPIC_NEW_GROUP_MS}"
+        "--send-message-topic=${TOPIC_SEND_MESSAGE}",
       ],
       "envFile": "${workspaceFolder}/.env",
       "autoAttachChildProcesses": true
@@ -210,6 +211,7 @@
         "--send-message-topic=${TOPIC_SEND_MESSAGE}",
         "--system-message-topic=${TOPIC_SYSTEM_MESSAGE}",
         "--offline-message-topic=${TOPIC_OFFLINE_MESSAGE}",
+        "--client-ack-topic=${TOPIC_CLIENT_ACK_MESSAGE}",
         "--service-discovery-path=${SERVICE_DISCOVERY_PATH}",
         "--nats-server-list=${NATS_SERVER_LIST}",
         "--nats-consumer-group=${CONSUMER_GROUP_MESSAGE_DELIVERY}",
@@ -268,7 +270,7 @@
         "--port=4002",
         "--mongo-url=mongodb://localhost:27017/chat",
         "--event-store=nats",
-        "--new-group-message-topic=${TOPIC_NEW_GROUP_MS}",
+        "--send-message-topic=${TOPIC_SEND_MESSAGE}",
         "--nats-server-list=${NATS_SERVER_LIST}",
       ],
       "envFile": "${workspaceFolder}/.env",

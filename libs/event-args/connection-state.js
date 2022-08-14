@@ -36,7 +36,7 @@ class ConnectionStateEvent extends IEventArg {
   }
 
   static fromBinary(payload) {
-    const messageDefination = getProtoDefination(this.#binary_resource_name);
+    const messageDefination = getProtoDefination(ConnectionStateEvent.#binary_resource_name);
     const incomming = messageDefination.decode(payload)
     const json = messageDefination.toObject(incomming, {
       longs: Long,
@@ -54,7 +54,7 @@ class ConnectionStateEvent extends IEventArg {
     const message = {
       user: this._user,
       gateway: this._gateway,
-      state: this._state
+      state: messageDefination.State[this._state]
     };
     const temp = messageDefination.create(message);
     return messageDefination.encode(temp).finish();

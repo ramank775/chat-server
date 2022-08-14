@@ -1,5 +1,7 @@
 /* eslint-disable class-methods-use-this */
 
+/** @typedef {import('../../../libs/event-args').MessageEvent} MessageEvent */
+
 /**
  * @abstract
  * Interface for Auth Database
@@ -20,30 +22,33 @@ class IMessageDB {
   /**
    * @abstract
    * Save messages
-   * @param {[]} messages
+   * @param {string} user
+   * @param {MessageEvent[]} messages
    */
   // eslint-disable-next-line no-unused-vars
-  async save(messages) {
+  async save(user, messages) {
     throw new Error('Method not implemented')
   }
 
   /**
    * @abstract
    * Get Pending Messages
-   * @param {[]} messages
+   * @param {string} userId
+   * @return {Promise<MessageEvent[]>}
    */
   // eslint-disable-next-line no-unused-vars
-  async getUndeliveredMessageByUser(userId) {
+  async getUndeliveredMessage(userId) {
     throw new Error('Method not implemented')
   }
 
   /**
    * @abstract
    * Mark message as delivered
-   * @param {[]} messages
+   * @param {string} userId
+   * @param {string[]} messageIds
    */
   // eslint-disable-next-line no-unused-vars
-  async markMessageDeliveredByUser(userId, messages) {
+  async markMessageDelivered(userId, messageIds) {
     throw new Error('Method not implemented')
   }
 

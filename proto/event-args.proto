@@ -4,12 +4,12 @@ message Message {
   float version = 1;
   string id = 2;
   enum Type {
-    ServerAck = 0;
-    ClientAck = 1;
-    Individual = 2;
-    Notification = 3;
-    Group = 4;
-    Custom = 10;
+    SERVER_ACK = 0;
+    CLIENT_ACK = 1;
+    INDIVIDUAL = 2;
+    NOTIFICATION = 3;
+    GROUP = 4;
+    CUSTOM = 10;
   }
   Type type = 3;
   bool ephemeral = 4;

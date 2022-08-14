@@ -24,15 +24,18 @@ const EVENT_TYPE = {
 
 async function prepareEventList(context) {
   const { options } = context;
-  const { userConnectionStateTopic, sendMessageTopic, offlineMessageTopic, ackTopic, systemMessageTopic } = options;
+  const {
+    userConnectionStateTopic, sendMessageTopic,
+    offlineMessageTopic, clientAckTopic, systemMessageTopic
+  } = options;
   context.events = {
     [EVENT_TYPE.CONNECTION_EVENT]: userConnectionStateTopic,
     [EVENT_TYPE.SEND_EVENT]: sendMessageTopic,
     [EVENT_TYPE.OFFLINE_EVENT]: offlineMessageTopic,
     [EVENT_TYPE.SYSTEM_EVENT]: systemMessageTopic,
-    [EVENT_TYPE.CLIENT_ACK_EVENT]: ackTopic,
+    [EVENT_TYPE.CLIENT_ACK_EVENT]: clientAckTopic,
   };
-  context.listenerEvents = [userConnectionStateTopic, sendMessageTopic, systemMessageTopic, ackTopic];
+  context.listenerEvents = [userConnectionStateTopic, sendMessageTopic, systemMessageTopic, clientAckTopic];
   return context;
 }
 
@@ -78,7 +81,7 @@ function parseOptions(argv) {
       'Used by producer to produce new message for offline'
     )
     .option(
-      '--ack-topic <ack-topic>',
+      '--client-ack-topic <client-ack-topic>',
       'Used by consumer to consume for ack message received by client.'
     )
     .option(
@@ -183,7 +186,7 @@ class MessageDeliveryMS extends ServiceBase {
    */
   async onMessage(value, receiver) {
     if (!value.ephemeral) {
-      this.db.save(receiver, value);
+      this.db.save(receiver, [value]);
     }
     await this.sendMessage(value, receiver);
   }
@@ -206,7 +209,7 @@ class MessageDeliveryMS extends ServiceBase {
    * @param {import('../../libs/event-args').MessageEvent} value 
    */
   async onClientAckEvent(value) {
-    await this.db.markMessageDeliveredByUser(value.source, [value.id]);
+    await this.db.markMessageDelivered(value.source, [value.id]);
   }
 
   /**
@@ -236,7 +239,7 @@ class MessageDeliveryMS extends ServiceBase {
           saved,
           retry
         },
-        messages: messages.map((m) => m.toBinary())
+        messages: messages.map((m) => ({ sid: m.server_id, raw: m.toBinary() }))
       }]
     }
     fetch(`${url}/send`, {
@@ -257,9 +260,21 @@ class MessageDeliveryMS extends ServiceBase {
           await this.sendMessageWithRetry(receiver, messages, { trackid: trackId, saved, retry: retry + 1 })
           return;
         }
-        const notFoundMessages = messages.filter((m) => error.messages.find(((err) => err.code === 400 && err.sid === m.server_id)))
-        if (notFoundMessages.length) {
-          await this.sendMessageWithRetry(receiver, notFoundMessages, { trackid: trackId, saved, retry: retry + 1 })
+        const errorMessages = [];
+        const deliveredMessages = [];
+        messages.forEach((m) => {
+          const errMsg = error.messages.find((err) => err.sid === m.server_id)
+          if (!errMsg) {
+            deliveredMessages.push(m.id)
+          } else if (errMsg.code === 400) {
+            errorMessages.push(m)
+          }
+        })
+        if (deliveredMessages.length) {
+          await this.db.markMessageDelivered(receiver, deliveredMessages)
+        }
+        if (errorMessages.length) {
+          await this.sendMessageWithRetry(receiver, errorMessages, { trackid: trackId, saved, retry: retry + 1 })
         }
       })
       .catch((e) => {
@@ -275,7 +290,7 @@ class MessageDeliveryMS extends ServiceBase {
   }
 
   async sendPendingMessage(user) {
-    const messages = await this.db.getUndeliveredMessageByUser(user);
+    const messages = await this.db.getUndeliveredMessage(user);
     if (!(messages && messages.length)) return;
     this.log.info(`Processing pending message for ${user}, length : ${messages.length}`);
     await this.sendMessageWithRetry(user, messages, { saved: true, retry: 0 })
@@ -310,7 +325,7 @@ class MessageDeliveryMS extends ServiceBase {
     }, {});
 
     Object.entries(deliveredMessages).forEach(async ([user, ids]) => {
-      await this.db.markMessageDeliveredByUser(user, ids);
+      await this.db.markMessageDelivered(user, ids);
     });
   }
 

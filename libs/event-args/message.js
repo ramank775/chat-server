@@ -4,12 +4,12 @@ const { IEventArg } = require('../event-store');
 const { getProtoDefination } = require('./util');
 
 const MESSAGE_TYPE = {
-  SERVER_ACK: 'ServerAck',
-  CLIENT_ACK: 'ClientAck',
-  INDIVIDUAL: 'Individual',
-  NOTIFICATION: 'Notification',
-  GROUP: 'Group',
-  CUSTOM: 'Custom'
+  SERVER_ACK: 'SERVER_ACK',
+  CLIENT_ACK: 'CLIENT_ACK',
+  INDIVIDUAL: 'INDIVIDUAL',
+  NOTIFICATION: 'NOTIFICATION',
+  GROUP: 'GROUP',
+  CUSTOM: 'CUSTOM'
 }
 
 class MessageEvent extends IEventArg {
@@ -162,7 +162,7 @@ class MessageEvent extends IEventArg {
     if (this._raw && this._raw_format === 'binary')
       return this._raw;
 
-    const messageDefination = getProtoDefination(this.#binary_resource_name);
+    const messageDefination = getProtoDefination(MessageEvent.#binary_resource_name);
     let content = this._content;
     if (typeof this._content === 'object') {
       content = JSON.stringify(this._content)
@@ -170,7 +170,7 @@ class MessageEvent extends IEventArg {
     const message = {
       version: this._version,
       id: this._id,
-      type: this._type,
+      type: messageDefination.Type[this._type],
       ephemeral: this._ephemeral || false,
       source: this._source,
       destination: this._destination,
@@ -180,11 +180,7 @@ class MessageEvent extends IEventArg {
       server_id: this._server_id,
       server_timestamp: this._server_timestamp
     }
-    const errorMessage = messageDefination.verify(message)
-    if (errorMessage) {
-      throw Error(errorMessage)
-    }
-    const temp = messageDefination.create(errorMessage)
+    const temp = messageDefination.create(message)
     return messageDefination.encode(temp).finish()
   }
 
