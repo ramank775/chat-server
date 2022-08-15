@@ -143,7 +143,10 @@ function createGroup() {
 function sendAck(payload) {
   if (!enableAck) return;
   const [username] = getUserInfo();
-  const messages = JSON.parse(payload);
+  let messages = JSON.parse(payload);
+  if (!Array.isArray(messages)) {
+    messages = [messages]
+  }
   const acks = messages
     .filter((msg) => msg.head.action === 'message')
     .map((msg) => ({

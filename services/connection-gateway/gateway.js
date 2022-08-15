@@ -215,7 +215,7 @@ class Gateway extends HttpServiceBase {
         errors.push({
           code: 404,
           receiver,
-          messages: messages.map((m) => ({ sid: m.meta.sid }))
+          messages: messages.map((m) => ({ sid: m.sid }))
         });
       }
     });

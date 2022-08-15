@@ -125,14 +125,16 @@ class MessageEvent extends IEventArg {
     let body = this._content
     if (typeof this._content === 'string') {
       body = JSON.parse(this._content)
+    } else if (Buffer.isBuffer(this._content)) {
+      body = JSON.parse(this._content.toString('utf-8'))
     }
     const message = {
       _v: version,
       id: this._id,
       head: {
         type: this._type,
-        to: this._source,
-        from: this._destination,
+        from: this._source,
+        to: this._destination,
         ephemeral: this._ephemeral
       },
       body
@@ -166,6 +168,7 @@ class MessageEvent extends IEventArg {
     let content = this._content;
     if (typeof this._content === 'object') {
       content = JSON.stringify(this._content)
+      content = Buffer.from(content, 'utf-8')
     }
     const message = {
       version: this._version,
