@@ -110,7 +110,7 @@
         "--event-store=kafka",
         "--kafka-client-id=group-1",
         "--kafka-broker-list=${BROKER_LIST}",
-        "--send-message-topic=${TOPIC_SEND_MESSAGE}",
+        "--system-message-topic=${TOPIC_SYSTEM_MESSAGE}",
       ],
       "envFile": "${workspaceFolder}/.env",
       "autoAttachChildProcesses": true
@@ -270,7 +270,7 @@
         "--port=4002",
         "--mongo-url=mongodb://localhost:27017/chat",
         "--event-store=nats",
-        "--send-message-topic=${TOPIC_SEND_MESSAGE}",
+        "--system-message-topic=${TOPIC_SYSTEM_MESSAGE}",
         "--nats-server-list=${NATS_SERVER_LIST}",
       ],
       "envFile": "${workspaceFolder}/.env",

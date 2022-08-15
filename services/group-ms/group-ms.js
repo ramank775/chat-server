@@ -18,8 +18,8 @@ function parseOptions(argv) {
   cmd = addDatabaseOptions(cmd);
   cmd = eventStore.addEventStoreOptions(cmd);
   cmd = cmd.option(
-    '--send-message-topic <send-message-topic>',
-    'Used by producer to produce new message to send message to user'
+    '--system-message-topic <system-message-topic>',
+    'Used by producer to produce new message for system message'
   )
   return cmd.parse(argv).opts();
 }
@@ -267,9 +267,9 @@ class GroupMs extends HttpServiceBase {
    * @param {string[]} receivers
    */
   async sendNotification(notification, receivers) {
-    const { sendMessageTopic } = this.options;
+    const { systemMessageTopic } = this.options;
     const promises = receivers.map(async (r) => {
-      await this.eventStore.emit(sendMessageTopic, notification, r);
+      await this.eventStore.emit(systemMessageTopic, notification, r);
     })
     await Promise.all(promises)
   }

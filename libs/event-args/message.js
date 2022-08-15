@@ -45,8 +45,8 @@ class MessageEvent extends IEventArg {
   /** @type {string|Buffer|Object} */
   _content;
 
-  /** @type {Map<string,string>} */
-  _meta = new Map()
+  /** @type {Record<string, string>} */
+  _meta = {}
 
   /** @type {string} */
   _server_id;
@@ -71,11 +71,7 @@ class MessageEvent extends IEventArg {
       message._ephemeral = ephemeral;
       Object.entries(others)
         .forEach(([key, value]) => {
-          message._meta.set(key, value)
-        })
-      Object.entries(json.meta)
-        .forEach(([key, value]) => {
-          message._meta.set(`_m${key}`, value)
+          message._meta[key] = `${value}`;
         })
       message._content = json.body
     } else {
@@ -86,9 +82,9 @@ class MessageEvent extends IEventArg {
       message._content = {
         text: json.text
       }
-      message._meta.set('chatid', json.chatId);
-      message._meta.set('action', json.action);
-      message._meta.set('state', json.state);
+      message._meta.chatid = json.chatId || json.chatid;
+      message._meta.action = json.action;
+      message._meta.state = json.state;
     }
     return message;
   }
@@ -114,7 +110,7 @@ class MessageEvent extends IEventArg {
     message._destination = json.destination;
     message._timestamp = json.timestamp;
     message._content = json.content;
-    message._meta = json.meta || new Map();
+    message._meta = json.meta || {};
     message._server_id = json.server_id;
     message._server_timestamp = json.server_timestamp;
     if (options.source) this._raw = null;
@@ -139,7 +135,7 @@ class MessageEvent extends IEventArg {
       },
       body
     }
-    this._meta.forEach((value, key) => {
+    Object.entries(this._meta).forEach(([key, value]) => {
       if (key.startsWith('_m')) {
         return;
       }
@@ -182,6 +178,10 @@ class MessageEvent extends IEventArg {
       meta: this._meta,
       server_id: this._server_id,
       server_timestamp: this._server_timestamp
+    }
+    const errorMessage = messageDefination.verify(message);
+    if (errorMessage) {
+      throw new Error(errorMessage)
     }
     const temp = messageDefination.create(message)
     return messageDefination.encode(temp).finish()

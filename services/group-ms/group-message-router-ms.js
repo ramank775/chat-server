@@ -85,17 +85,13 @@ class GroupMessageRouterMS extends ServiceBase {
    * @param {import('../../libs/event-args').MessageEvent} message 
    * @param {string} key 
    */
-  async redirectMessage(message, key) {
+  async redirectMessage(message) {
     const start = Date.now();
-    if (message.type === 'Notification') {
-      await this.publish(EVENT_TYPE.SYSTEM_EVENT, message, key);
-    } else {
-      const users = await this.getGroupUsers(message.destination, message.source);
-      const promises = users.filter((x) => x !== message.source).map(async (user) => {
-        await this.publish(EVENT_TYPE.SEND_EVENT, message, user);
-      })
-      await Promise.all(promises)
-    }
+    const users = await this.getGroupUsers(message.destination, message.source);
+    const promises = users.filter((x) => x !== message.source).map(async (user) => {
+      await this.publish(EVENT_TYPE.SEND_EVENT, message, user);
+    })
+    await Promise.all(promises)
     this.log.info('Message redirected', { sid: message.server_id, latency: Date.now() - start });
   }
 

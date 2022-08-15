@@ -213,7 +213,6 @@ class NatsEventStore extends IEventStore {
       headers.append('track_id', trackId)
       const data = args.toBinary()
       const response = await jc.publish(`${event}.${key}`, data, {
-        msgID: trackId,
         headers,
       });
       const elasped = Date.now() - start;
@@ -221,6 +220,7 @@ class NatsEventStore extends IEventStore {
         event,
         stream: response.stream,
         offset: response.seq,
+        duplicate: response.duplicate,
         key,
         produceIn: elasped
       });

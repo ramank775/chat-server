@@ -1,5 +1,5 @@
 const eventStore = require('../../libs/event-store');
-const { MessageEvent } = require('../../libs/event-args');
+const { MessageEvent, MESSAGE_TYPE } = require('../../libs/event-args');
 const {
   ServiceBase,
   initDefaultOptions,
@@ -24,7 +24,7 @@ async function prepareEventList(context) {
     [EVENT_TYPE.NEW_MESSAGE_EVENT]: options.newMessageTopic,
     [EVENT_TYPE.SEND_EVENT]: options.sendMessageTopic,
     [EVENT_TYPE.GROUP_MESSAGE_EVENT]: options.groupMessageTopic,
-    [EVENT_TYPE.GROUP_MESSAGE_EVENT]: options.systemMessageTopic || options.ackTopic,
+    [EVENT_TYPE.SYSTEM_EVENT]: options.systemMessageTopic || options.ackTopic,
   };
   context.events = eventName;
   context.listenerEvents = [options.newMessageTopic];
@@ -98,10 +98,10 @@ class MessageRouterMS extends ServiceBase {
     const start = Date.now();
 
     switch (message.type) {
-      case 'Group':
+      case MESSAGE_TYPE.GROUP:
         await this.publish(EVENT_TYPE.GROUP_MESSAGE_EVENT, message, key);
         break;
-      case 'Notification':
+      case MESSAGE_TYPE.NOTIFICATION:
         await this.publish(EVENT_TYPE.SYSTEM_EVENT, message, key);
         break;
       default:

@@ -7,7 +7,7 @@ const {
 const eventStore = require('../../libs/event-store');
 const { addDatabaseOptions, initializeDatabase } = require('./database');
 const { addPNSOptions, initializePNS } = require('./pns');
-const { LoginEvent, MessageEvent } = require('../../libs/event-args');
+const { LoginEvent, MessageEvent, MESSAGE_TYPE } = require('../../libs/event-args');
 
 const asMain = require.main === module;
 
@@ -122,7 +122,7 @@ class NotificationMS extends ServiceBase {
    * @param {import('../../libs/event-args').MessageEvent} message 
    */
   async pushNotification(message, user) {
-    if (message.type === 'Notification') return;
+    if (message.type === MESSAGE_TYPE.NOTIFICATION) return;
     const record = await this.notifDB.getToken(user, { deviceId: 'default' });
     if (!record) return;
     const payload = (record.messageVersion || 2.1) < 3 ? message.toString() : message.toBinary()
