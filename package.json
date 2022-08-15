@@ -1,6 +1,6 @@
 {
   "name": "chat-server",
-  "version": "2.7.0",
+  "version": "2.8.0",
   "description": "A chat server based on the microservice architecture to ensure high availability, high throughput, horizontal scalability.",
   "main": "",
   "repository": "https://github.com/ramank775/chat-server.git",
