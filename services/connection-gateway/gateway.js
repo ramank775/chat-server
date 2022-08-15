@@ -8,20 +8,22 @@ const {
 const { addHttpOptions, initHttpResource, HttpServiceBase } = require('../../libs/http-service-base');
 const EventStore = require('../../libs/event-store');
 const { uuidv4, shortuuid, extractInfoFromRequest, schemas } = require('../../helper');
-const { MessageEvent, ConnectionStateEvent } = require('../../libs/event-args');
+const { MessageEvent, ConnectionStateEvent, MESSAGE_TYPE } = require('../../libs/event-args');
 
 const asMain = require.main === module;
 
 const EVENT_TYPE = {
   CONNECTION_EVENT: 'connection-state',
   NEW_MESSAGE_EVENT: 'new-message',
+  CLIENT_ACK: 'client-ack',
 }
 
 async function prepareListEvent(context) {
   const { options } = context;
   const eventName = {
     [EVENT_TYPE.CONNECTION_EVENT]: options.userConnectionStateTopic,
-    [EVENT_TYPE.NEW_MESSAGE_EVENT]: options.newMessageTopic
+    [EVENT_TYPE.NEW_MESSAGE_EVENT]: options.newMessageTopic,
+    [EVENT_TYPE.CLIENT_ACK]: options.clientAckTopic,
   };
   context.events = eventName;
   return context;
@@ -52,6 +54,10 @@ function parseOptions(argv) {
     .option(
       '--new-message-topic <new-message-topic>',
       'Used by producer to produce new message for each new incoming message'
+    )
+    .option(
+      '--client-ack-topic <client-ack-topic>',
+      'Used by producer to produce for ack message received by client.'
     );
   return cmd.parse(argv).opts();
 }
@@ -155,7 +161,8 @@ class Gateway extends HttpServiceBase {
         : MessageEvent.fromString(payload.toString(), options)
       message.set_server_id(trackId);
       message.set_server_timestamp();
-      await this.publishEvent(EVENT_TYPE.NEW_MESSAGE_EVENT, message, message.destination);
+      const event = message.type === MESSAGE_TYPE.CLIENT_ACK ? EVENT_TYPE.CLIENT_ACK : EVENT_TYPE.NEW_MESSAGE_EVENT;
+      await this.publishEvent(event, message, message.destination);
       if (ws.ackEnabled) {
         const ack = message.buildServerAckMessage()
         this.sendWebsocketMessage(ws.user, ack)

@@ -204,7 +204,7 @@ class MessageEvent extends IEventArg {
    * @param {string?} id
    */
   set_server_id(id) {
-    id ||= shortuuid()
+    id = id || shortuuid()
     this._server_id = id;
     this._raw = null;
   }
@@ -217,7 +217,7 @@ class MessageEvent extends IEventArg {
    * @param {number} ts 
    */
   set_server_timestamp(ts) {
-    ts ||= getUTCEpoch();
+    ts = ts || getUTCEpoch();
     this._server_timestamp = Long.fromNumber(ts)
   }
 
