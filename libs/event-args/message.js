@@ -67,7 +67,7 @@ class MessageEvent extends IEventArg {
       const { type, to, from, ephemeral, ...others } = json.head;
       message._source = from || options.source;
       message._destination = to;
-      message._type = type;
+      message._type = type.toUpperCase();
       message._ephemeral = ephemeral;
       Object.entries(others)
         .forEach(([key, value]) => {
@@ -80,7 +80,7 @@ class MessageEvent extends IEventArg {
       message._content = json.body
     } else {
       message._id = json.msgId;
-      message._type = json.chatType || json.module;
+      message._type = (json.chatType || json.module).toUpperCase();
       message._source = json.from || options.source;
       message._destination = json.to;
       message._content = {
