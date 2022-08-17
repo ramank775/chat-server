@@ -1,5 +1,6 @@
 const webSocker = require('ws');
 const Joi = require('joi');
+const URL = require('url');
 const {
   initDefaultOptions,
   initDefaultResources,
@@ -126,6 +127,9 @@ class Gateway extends HttpServiceBase {
     this.context.wss = wss;
     wss.on('connection', (ws, request) => {
       const user = getUserInfoFromRequest(request);
+      const url = new URL.URL(request.url);
+      ws.isbinary = url.searchParams.get('format') === 'binary';
+      ws.ackEnabled = url.searchParams.get('ack') === 'true';
       this.onConnect(user, ws);
       ws.on('message', (payload, isBinary) => this.onMessage(payload, isBinary, user));
       ws.on('close', () => this.onDisconnect(user));
@@ -134,11 +138,34 @@ class Gateway extends HttpServiceBase {
 
   async newMessage(req, res) {
     const user = extractInfoFromRequest(req, 'user');
+    const { isbinary, ack } = req.query;
     const messages = req.payload;
-    messages.forEach((message) => {
-      this.messageEvents.onNewMessage(message, user);
-    });
-    return res.response().code(201);
+    const promises = messages.map(async (msg) => {
+      let event;
+      const options = {
+        source: user
+      }
+      if (isbinary) {
+        const bmsg = Buffer.from(msg, 'base64');
+        event = MessageEvent.fromBinary(bmsg, options);
+      } else {
+        event = MessageEvent.fromString(msg, options);
+      }
+      event.set_server_id();
+      event.server_timestamp();
+      await this.publishEvent(EVENT_TYPE.NEW_MESSAGE_EVENT, event, event.destination);
+      if (ack) {
+        return event.buildServerAckMessage()
+      }
+    })
+    const acks = await Promise.all(promises);
+    const response = ack ? {
+      acks: acks.map((m) => (isbinary ?
+        m.toBinary().toString('base64')
+        : m.toString()
+      ))
+    } : {}
+    return res.json(response).code(201);
   }
 
   async onMessage(payload, isBinary, user) {
