@@ -127,7 +127,7 @@ class Gateway extends HttpServiceBase {
     this.context.wss = wss;
     wss.on('connection', (ws, request) => {
       const user = getUserInfoFromRequest(request);
-      const url = new URL.URL(request.url);
+      const url = new URL.URL(request.url, this.uri);
       ws.isbinary = url.searchParams.get('format') === 'binary';
       ws.ackEnabled = url.searchParams.get('ack') === 'true';
       this.onConnect(user, ws);
@@ -152,7 +152,7 @@ class Gateway extends HttpServiceBase {
         event = MessageEvent.fromString(msg, options);
       }
       event.set_server_id();
-      event.server_timestamp();
+      event.set_server_timestamp();
       await this.publishEvent(EVENT_TYPE.NEW_MESSAGE_EVENT, event, event.destination);
       if (ack) {
         return event.buildServerAckMessage()
@@ -165,7 +165,7 @@ class Gateway extends HttpServiceBase {
         : m.toString()
       ))
     } : {}
-    return res.json(response).code(201);
+    return res.response(response).code(201);
   }
 
   async onMessage(payload, isBinary, user) {
@@ -192,7 +192,7 @@ class Gateway extends HttpServiceBase {
       await this.publishEvent(event, message, message.destination);
       if (ws.ackEnabled) {
         const ack = message.buildServerAckMessage()
-        this.sendWebsocketMessage(ws.user, ack)
+        this.sendWebsocketMessage(user, ack)
       }
     });
 

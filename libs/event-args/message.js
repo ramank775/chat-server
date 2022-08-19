@@ -133,7 +133,7 @@ class MessageEvent extends IEventArg {
         to: this._destination,
         ephemeral: this._ephemeral
       },
-      body
+      body: body || {}
     }
     Object.entries(this._meta).forEach(([key, value]) => {
       if (key.startsWith('_m')) {
