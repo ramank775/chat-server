@@ -1,14 +1,24 @@
+/// <reference path="messaging.js" />
+
+// eslint-disable-next-line node/no-unsupported-features/es-syntax, import/extensions
+import { Messaging, Message } from './messaging.js';
+
+/* eslint-env browser */
+
 /* eslint-disable no-console */
-let ws;
+
+// eslint-disable-next-line
 let groups = [];
-let id = 0;
-/* 
-* Enable Ack flag to be exposed for testing.
-* It can be set or unset from the browser console
-*/
-// eslint-disable-next-line prefer-const
-let enableAck = true;
-let timer = null;
+
+const events = new Map();
+// eslint-disable-next-line no-var
+// var Messaging;
+// eslint-disable-next-line no-var
+// var Message;
+
+/** @type {Messaging} */
+let messaging;
+
 function getCookie(cname) {
   const name = `${cname}=`;
   const decodedCookie = decodeURIComponent(document.cookie);
@@ -38,34 +48,14 @@ function getUserInfo() {
   return [username, accesskey];
 }
 
-function getHeaders() {
-  const [username, accesskey] = getUserInfo();
-  return new Headers({
-    'Content-Type': 'application/json',
-    'user': username,
-    'accesskey': accesskey
-  })
-}
 
 async function login(username, authtoken) {
-  return fetch('/v1.0/login', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      username,
-      authToken: authtoken,
-      notificationToken: 'testing-token',
-      deviceId: 'default'
-    })
+  return Messaging.login({
+    username,
+    authToken: authtoken,
+    notificationToken: 'testing-token',
+    deviceId: 'default'
   })
-    .then((res) => {
-      if (res.ok) {
-        return res.json();
-      }
-      throw new Error('Login failed');
-    })
     .then((res) => {
       setCookie('user', username, 1000);
       setCookie('accesskey', res.accesskey, 1000);
@@ -80,204 +70,80 @@ function isLogin() {
   return !!(username && accesskey);
 }
 
-function sendMessageViaSocket(message) {
-  ws.send(JSON.stringify(message));
-}
-
-function sendMessageViaRest(message) {
-  fetch('/v1.0/messages', {
-    method: 'POST',
-    headers: getHeaders(),
-    body: JSON.stringify([JSON.stringify(message)])
+function showGroups() {
+  const groupSpace = document.getElementById('groups')
+  groupSpace.innerHTML = '';
+  groups.forEach(g => {
+    const newGroup = document.createElement('li');
+    newGroup.id = g.id
+    const name = document.createElement('span')
+    name.textContent = g.name
+    newGroup.appendChild(name)
+    newGroup.onclick = function groupClick() {
+      document.getElementById('to').value = g.id
+    }
+    groupSpace.appendChild(newGroup)
   })
-    .then((resp) => resp.text())
-    .then(console.log)
-    .catch((err) => {
-      console.log(err);
-    });
-}
-
-function getMsgId(to) {
-  id += 1
-  return to + Date.now() + id;
 }
 
 function getGroups() {
-  fetch('/v1.0/groups/', {
-    headers: getHeaders()
-  })
-    .then((res) => res.json())
+  messaging.getGroups()
     .then((res) => {
-      console.log(res);
-      const groupSpace = document.getElementById('groups');
-      groupSpace.innerHTML = '';
-      res.forEach((group) => {
-        const newGroup = document.createElement('li');
-        newGroup.appendChild(document.createTextNode(JSON.stringify(group)));
-        groupSpace.appendChild(newGroup);
-      });
       groups = res;
+      showGroups()
     });
 }
 
 function createGroup() {
   const groupName = document.getElementById('group_name').value;
   const groupMembers = document.getElementById('group_member').value.split(',');
-  const payload = {
-    name: groupName,
-    members: groupMembers,
-    profilePic: null
-  };
-  fetch('/v1.0/groups/', {
-    method: 'post',
-    body: JSON.stringify(payload),
-    headers: getHeaders()
-  })
-    .then((res) => res.json())
+
+  messaging.createGroup(groupName, groupMembers)
     .then((res) => {
       console.log(res);
       getGroups();
     });
 }
 
-function sendAck(payload) {
-  if (!enableAck) return;
-  const [username] = getUserInfo();
-  let messages = JSON.parse(payload);
-  if (!Array.isArray(messages)) {
-    messages = [messages]
-  }
-  const acks = messages
-    .filter((msg) => msg.head.action === 'message')
-    .map((msg) => ({
-      _v: 2.0,
-      id: `${msg.id}_ack`,
-      meta: {
-        hash: 'md5:hash',
-        content_hash: 'md5:hash',
-        generate_ts: Date.now() / 1000
-      },
-      head: {
-        ...msg.head,
-        to: msg.head.from,
-        from: username,
-        action: 'state',
-        type: 'notification',
-        category: undefined
-      },
-      body: {
-        ids: [msg.id]
-      }
-    }));
-  acks.forEach((ack) => {
-    ws.send(JSON.stringify(ack));
-  });
-  console.log('Ack sent');
+function switchToEventTab() {
+  document.getElementById('div_group').style.display = 'none';
+  document.getElementById('event_viewer').style.display = 'block';
 }
 
-function sendMessage(version, medium) {
-  const [username] = getUserInfo();
-  function getChatId(to) {
-    const values = [username.replace('+', ''), to.replace('+', '')].sort();
-    return values.join('');
-  }
-  const msg = document.getElementById('msg').value;
-  const to = document.getElementById('to').value;
-  let sMessage;
-  if (version === 1) {
-    sMessage = {
-      msgId: getMsgId(to),
-      text: msg,
-      to,
-      chatId: getChatId(to),
-      type: 'text',
-      chatType: groups.filter((x) => x.groupId === to).length > 0 ? 'group' : 'INDIVIDUAL'
-    };
-  } else {
-    sMessage = {
-      _v: 2.0,
-      id: getMsgId(to),
-      head: {
-        type: groups.filter((x) => x.groupId === to).length > 0 ? 'group' : 'INDIVIDUAL',
-        to,
-        from: username,
-        chatid: getChatId(to), // to be deperciated, added for backward comptibility only
-        contentType: 'text',
-        action: 'message'
-      },
-      meta: {
-        hash: 'md5:hash',
-        content_hash: 'md5:hash',
-        generate_ts: Date.now()
-      },
-      body: {
-        text: msg
-      }
-    };
-  }
-  if (medium === 'ws') {
-    sendMessageViaSocket(sMessage);
-  } else {
-    sendMessageViaRest(sMessage);
-  }
+function switchToGroupTab() {
+  document.getElementById('div_group').style.display = 'block';
+  document.getElementById('event_viewer').style.display = 'none';
+}
+
+function showEventDetail(id) {
+  const event = events.get(id)
+  if (!event) return;
+  document.getElementById('json').textContent = JSON.stringify(event, undefined, 2)
+  switchToEventTab()
+}
+
+function displayEvent(message) {
+  const id = `${message.id}_${message.type}`
+  events.set(id, message)
   const msgSpace = document.getElementById('message');
   const newMsgItem = document.createElement('li');
-  newMsgItem.appendChild(document.createTextNode(`Send at ${Date.now()}`));
-  newMsgItem.appendChild(document.createTextNode(JSON.stringify(sMessage)));
+  newMsgItem.id = id;
+  newMsgItem.onclick = function onEventClick() {
+    showEventDetail(id)
+  }
+  newMsgItem.classList.add(message.type.toLowerCase())
+  const headElm = document.createElement('span')
+  headElm.textContent = message.type
+  newMsgItem.appendChild(headElm)
+  newMsgItem.appendChild(document.createElement('br'))
+  const contentElm = document.createElement('span')
+  contentElm.textContent = JSON.stringify(message.content || '')
+  newMsgItem.appendChild(contentElm)
   msgSpace.appendChild(newMsgItem);
 }
 
-function connectSocket() {
-  if (window.WebSocket) {
-    console.log('WebSocket object is supported in your browser');
+function sendMessage() {
 
-    const { protocol, hostname } = window.location;
-    console.log('protocol', protocol)
-    const socketUrl = `${protocol === 'https:' ? 'wss' : 'ws'}://${hostname}/v1.0/wss/`
-    const startTime = Date.now();
-    ws = new WebSocket(socketUrl);
-
-    ws.onopen = function onopen() {
-      console.log('connection time', Date.now() - startTime);
-      document.getElementById('status').innerText = 'Connected';
-      console.log('onopen');
-    };
-    ws.onmessage = function onmessage(e) {
-      if (e.data === "pong") return;
-      const msgSpace = document.getElementById('message');
-      const newMsgItem = document.createElement('li');
-
-      console.log(e.data);
-      sendAck(e.data);
-      newMsgItem.appendChild(document.createTextNode(`Receiver at ${Date.now()}`));
-      newMsgItem.appendChild(document.createTextNode(e.data));
-      msgSpace.appendChild(newMsgItem);
-      console.log(`echo from server : ${e.data}`);
-    };
-
-    ws.onclose = function onclose() {
-      console.log('onclose');
-      document.getElementById('status').innerText = 'Disconnected';
-      clearInterval(timer);
-      timer = null;
-    };
-    ws.onerror = function onerror() {
-      console.log('onerror');
-      clearInterval(timer);
-      timer = null;
-    };
-    timer = setInterval(() => {
-      ws.send("ping");
-    }, 30000)
-  } else {
-    console.log('WebSocket object is not supported in your browser');
-  }
-}
-
-function connect() {
-  const [username] = getUserInfo();
-  document.getElementById('username').innerText = username;
-  connectSocket();
 }
 
 function setupUI() {
@@ -295,18 +161,66 @@ function setupUI() {
       });
     };
   } else {
+    messaging = new Messaging({
+      get: getUserInfo
+    })
     document.getElementById('div_login').style.display = 'none';
     document.getElementById('div_loggedIn').style.display = 'block';
-
-    document.getElementById('msg_submit_v2_ws').onclick = () => sendMessage(2, 'ws');
-    document.getElementById('msg_submit_v1_ws').onclick = () => sendMessage(1, 'ws');
-
-    document.getElementById('msg_submit_v2_rest').onclick = () => sendMessage(2, 'rest');
-    document.getElementById('msg_submit_v1_rest').onclick = () => sendMessage(1, 'rest');
-
-    connect();
+    const [username] = getUserInfo();
+    document.getElementById('username').innerText = username;
+    messaging.connectSocket();
+    messaging.addEventListener('connection', (event) => {
+      document.getElementById('status').innerText = event.detail.status;
+    })
+    messaging.addEventListener('message', (event) => displayEvent(event.detail));
     document.getElementById('create_group').onclick = createGroup;
-    getGroups();
+    document.getElementById('channel').onchange = (e) => {
+      const event = new Message()
+      event.id = `local_${Date.now()}`
+      event.type = 'channel'
+      event.content = `Channel change from ${messaging.channel} to ${e.target.value}`
+      event.source = 'local';
+      messaging.updateMessageChannel(e.target.value)
+      displayEvent(event)
+    }
+    document.getElementById('version').onchange = e => {
+      const event = new Message()
+      event.id = `local_${Date.now()}`
+      event.type = 'version'
+      event.content = `Version change from ${messaging.message_version} to ${e.target.value}`
+      event.source = 'local';
+      messaging.updateMessageVersion(Number(e.target.value))
+      displayEvent(event)
+    }
+    document.getElementById('server-ack').onchange = e => {
+      const event = new Message()
+      event.id = `local_${Date.now()}`
+      event.type = 'server_ack'
+      event.content = `Server ack is ${e.target.checked ? 'enabled' : 'disabled'}`
+      event.source = 'local';
+      if (e.target.checked) {
+        messaging.enableServerAck();
+      } else {
+        messaging.disableServerAck()
+      }
+      displayEvent(event)
+    }
+    document.getElementById('client-ack').onchange = e => {
+      const event = new Message()
+      event.id = `local_${Date.now()}`
+      event.type = 'client-ack'
+      event.content = `Client ack is ${e.target.checked ? 'enabled' : 'disabled'}`
+      event.source = 'local';
+      if (e.target.checked) {
+        messaging.enableClientAck()
+      } else {
+        messaging.disableClientAck()
+      }
+      displayEvent(event)
+    }
+    document.getElementById('group_tab').onclick = () => switchToGroupTab();
+    document.getElementById('event_tab').onclick = () => switchToEventTab();
+    document.getElementById('msg_submit').onclick = () => sendMessage();
   }
 }
 
