@@ -6,20 +6,26 @@ message Message {
   enum Type {
     SERVER_ACK = 0;
     CLIENT_ACK = 1;
-    INDIVIDUAL = 2;
+    MESSAGE = 2;
     NOTIFICATION = 3;
-    GROUP = 4;
     CUSTOM = 10;
   }
   Type type = 3;
-  bool ephemeral = 4;
-  string source = 5;
-  string destination = 6;
-  uint64 timestamp = 7;
+  enum Channel {
+    UNKNOWN = 0;
+    INDIVIDUAL = 1;
+    GROUP = 2;
+    OTHER = 10;
+  }
+  Channel channel = 4;
+  bool ephemeral = 5;
+  string source = 6;
+  string destination = 7;
   bytes content = 8;
-  map<string, string> meta = 9;
-  string server_id = 10;
-  uint64 server_timestamp = 11;
+  uint64 timestamp = 9;
+  map<string, string> meta = 10;
+  string server_id = 20;
+  uint64 server_timestamp = 21;
 }
 
 message UserConnectionState {

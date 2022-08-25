@@ -6,10 +6,14 @@ const { getProtoDefination } = require('./util');
 const MESSAGE_TYPE = {
   SERVER_ACK: 'SERVER_ACK',
   CLIENT_ACK: 'CLIENT_ACK',
-  INDIVIDUAL: 'INDIVIDUAL',
+  MESSAGE: 'MESSAGE',
   NOTIFICATION: 'NOTIFICATION',
-  GROUP: 'GROUP',
   CUSTOM: 'CUSTOM'
+}
+const CHANNEL_TYPE = {
+  UNKNOWN: 'UNKNOWN',
+  INDIVIDUAL: 'INDIVIDUAL',
+  GROUP: 'GROUP',
 }
 
 class MessageEvent extends IEventArg {
@@ -27,8 +31,11 @@ class MessageEvent extends IEventArg {
   /** @type {string} */
   _id;
 
-  /** @type {number} */
+  /** @type {string} */
   _type = null;
+
+  /** @type {string} */
+  _channel = null;
 
   /** @type {bool} */
   _ephemeral = false;
@@ -64,19 +71,25 @@ class MessageEvent extends IEventArg {
     message._timestamp = getUTCEpoch();
     if (message._version >= 2.0) {
       message._id = json.id;
-      const { type, to, from, ephemeral, ...others } = json.head;
+      const { type, to, from, ephemeral, contentType, ...others } = json.head;
       message._source = from || options.source;
       message._destination = to;
-      message._type = type.toUpperCase();
+      message._channel = type.toUpperCase();
+      message._type = contentType.toUpperCase();
+      if (!Object.values(MESSAGE_TYPE).includes(message._type)) {
+        message._type = MESSAGE_TYPE.MESSAGE
+      }
       message._ephemeral = ephemeral;
       Object.entries(others)
         .forEach(([key, value]) => {
           message._meta[key] = `${value}`;
         })
+      message._meta.contentType = contentType;
       message._content = json.body
     } else {
       message._id = json.msgId;
-      message._type = (json.chatType || json.module).toUpperCase();
+      message._channel = (json.chatType || json.module).toUpperCase();
+      message._type = json.type.toUpperCase()
       message._source = json.from || options.source;
       message._destination = json.to;
       message._content = {
@@ -105,6 +118,7 @@ class MessageEvent extends IEventArg {
     message._id = json.id;
     message._content = json.content;
     message._type = json.type;
+    message._channel = json.channel;
     message._ephemeral = json.ephemeral;
     message._source = options.source || json.source;
     message._destination = json.destination;
@@ -128,9 +142,10 @@ class MessageEvent extends IEventArg {
       _v: version,
       id: this._id,
       head: {
-        type: this._type,
+        type: this._channel,
         from: this._source,
         to: this._destination,
+        contentType: this._type,
         ephemeral: this._ephemeral
       },
       body: body || {}
@@ -170,6 +185,7 @@ class MessageEvent extends IEventArg {
       version: this._version,
       id: this._id,
       type: messageDefination.Type[this._type],
+      channel: messageDefination.Channel[this._channel],
       ephemeral: this._ephemeral || false,
       source: this._source,
       destination: this._destination,
@@ -197,6 +213,7 @@ class MessageEvent extends IEventArg {
     ackMessage._server_id = this._server_id;
     ackMessage._server_timestamp = this._server_timestamp;
     ackMessage._type = MESSAGE_TYPE.SERVER_ACK;
+    ackMessage._channel = CHANNEL_TYPE.INDIVIDUAL;
     return ackMessage;
   }
 
@@ -218,7 +235,8 @@ class MessageEvent extends IEventArg {
    */
   set_server_timestamp(ts) {
     ts = ts || getUTCEpoch();
-    this._server_timestamp = Long.fromNumber(ts)
+    this._server_timestamp = Long.fromNumber(ts);
+    this._raw = null;
   }
 
   get server_timestamp() {
@@ -231,6 +249,10 @@ class MessageEvent extends IEventArg {
 
   get type() {
     return this._type;
+  }
+
+  get channel() {
+    return this._channel;
   }
 
   get ephemeral() {
@@ -248,5 +270,6 @@ class MessageEvent extends IEventArg {
 
 module.exports = {
   MESSAGE_TYPE,
+  CHANNEL_TYPE,
   MessageEvent
 }

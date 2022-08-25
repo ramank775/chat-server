@@ -24,6 +24,8 @@ export class Message {
 
   type;
 
+  channel;
+
   source;
 
   destination;
@@ -57,28 +59,36 @@ class MessageV3 extends Message {
           "version": { "type": "float", "id": 1 },
           "id": { "type": "string", "id": 2 },
           "type": { "type": "Type", "id": 3 },
-          "ephemeral": { "type": "bool", "id": 4 },
-          "source": { "type": "string", "id": 5 },
-          "destination": { "type": "string", "id": 6 },
-          "timestamp": { "type": "uint64", "id": 7 },
+          "channel": { "type": "Channel", "id": 4 },
+          "ephemeral": { "type": "bool", "id": 5 },
+          "source": { "type": "string", "id": 6 },
+          "destination": { "type": "string", "id": 7 },
           "content": { "type": "bytes", "id": 8 },
-          "meta": { "keyType": "string", "type": "string", "id": 9 },
-          "serverId": { "type": "string", "id": 10 },
-          "serverTimestamp": { "type": "uint64", "id": 11 }
+          "timestamp": { "type": "uint64", "id": 9 },
+          "meta": { "keyType": "string", "type": "string", "id": 10 },
+          "serverId": { "type": "string", "id": 20 },
+          "serverTimestamp": { "type": "uint64", "id": 21 }
         },
         "nested": {
           "Type": {
             "values": {
               "SERVER_ACK": 0,
               "CLIENT_ACK": 1,
-              "INDIVIDUAL": 2,
+              "MESSAGE": 2,
               "NOTIFICATION": 3,
-              "GROUP": 4,
               "CUSTOM": 10
+            }
+          },
+          "Channel": {
+            "values": {
+              "UNKNOWN": 0,
+              "INDIVIDUAL": 1,
+              "GROUP": 2,
+              "OTHER": 10
             }
           }
         }
-      },
+      }
     }
   };
 
@@ -117,7 +127,8 @@ class MessageV3 extends Message {
     const message = {
       version: 3.0,
       id: this.id,
-      type: MessageDef.Type[this._type],
+      type: MessageDef.Type[this.type],
+      channel: MessageDef.Channel[this.channel],
       ephemeral: this.ephemeral || false,
       source: this.source,
       destination: this.destination,
@@ -151,7 +162,8 @@ class MessageV2 extends Message {
     Object.assign(messageV2, {
       version: json._v,
       id: json.id,
-      type,
+      type: meta.contentType,
+      channel: type,
       source: from,
       destination: to,
       ephemeral,
@@ -166,7 +178,7 @@ class MessageV2 extends Message {
       _v: 2.1,
       id: this.id,
       head: {
-        type: this.type,
+        type: this.channel,
         from: this.source,
         to: this.destination,
         ephemeral: this.ephemeral

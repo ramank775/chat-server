@@ -257,19 +257,25 @@ class MessageDeliveryMS extends ServiceBase {
         }
         const error = errors[0];
         if (error.code === 404) {
+          await this.onDisconnect(receiver, server);
           await this.sendMessageWithRetry(receiver, messages, { trackid: trackId, saved, retry: retry + 1 })
           return;
         }
         const errorMessages = [];
         const deliveredMessages = [];
+        let hasNotFoundError = false;
         messages.forEach((m) => {
           const errMsg = error.messages.find((err) => err.sid === m.server_id)
           if (!errMsg) {
             deliveredMessages.push(m.id)
-          } else if (errMsg.code === 400) {
+          } else if (errMsg.code === 404) {
+            hasNotFoundError = true
             errorMessages.push(m)
           }
         })
+        if(hasNotFoundError) {
+          await this.onDisconnect(receiver, server);
+        }
         if (deliveredMessages.length) {
           await this.db.markMessageDelivered(receiver, deliveredMessages)
         }

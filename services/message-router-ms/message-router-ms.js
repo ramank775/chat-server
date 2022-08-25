@@ -1,5 +1,5 @@
 const eventStore = require('../../libs/event-store');
-const { MessageEvent, MESSAGE_TYPE } = require('../../libs/event-args');
+const { MessageEvent, MESSAGE_TYPE, CHANNEL_TYPE } = require('../../libs/event-args');
 const {
   ServiceBase,
   initDefaultOptions,
@@ -96,17 +96,22 @@ class MessageRouterMS extends ServiceBase {
    */
   async redirectMessage(message, key) {
     const start = Date.now();
-
-    switch (message.type) {
-      case MESSAGE_TYPE.GROUP:
-        await this.publish(EVENT_TYPE.GROUP_MESSAGE_EVENT, message, key);
-        break;
-      case MESSAGE_TYPE.NOTIFICATION:
-        await this.publish(EVENT_TYPE.SYSTEM_EVENT, message, key);
+    let event;
+    switch (message.channel) {
+      case CHANNEL_TYPE.GROUP:
+        event = EVENT_TYPE.GROUP_MESSAGE_EVENT
         break;
       default:
-        await this.publish(EVENT_TYPE.SEND_EVENT, message, key);
+        switch (message.type) {
+          case MESSAGE_TYPE.NOTIFICATION:
+            event = EVENT_TYPE.SYSTEM_EVENT
+            break;
+          default:
+            event = EVENT_TYPE.SEND_EVENT
+        }
+        break;
     }
+    await this.publish(event, message, key);
 
     this.log.info('Message redirected', { sid: message.server_id, latency: Date.now() - start });
   }

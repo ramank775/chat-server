@@ -1,5 +1,5 @@
 const eventStore = require('../../libs/event-store');
-const { MessageEvent } = require('../../libs/event-args');
+const { MessageEvent, MESSAGE_TYPE } = require('../../libs/event-args');
 const {
   ServiceBase,
   initDefaultOptions,
@@ -88,8 +88,16 @@ class GroupMessageRouterMS extends ServiceBase {
   async redirectMessage(message) {
     const start = Date.now();
     const users = await this.getGroupUsers(message.destination, message.source);
+    let event;
+    switch (message.type) {
+      case MESSAGE_TYPE.NOTIFICATION:
+        event = EVENT_TYPE.SYSTEM_EVENT;
+        break;
+      default:
+        event = EVENT_TYPE.SEND_EVENT;
+    }
     const promises = users.filter((x) => x !== message.source).map(async (user) => {
-      await this.publish(EVENT_TYPE.SEND_EVENT, message, user);
+      await this.publish(event, message, user);
     })
     await Promise.all(promises)
     this.log.info('Message redirected', { sid: message.server_id, latency: Date.now() - start });
