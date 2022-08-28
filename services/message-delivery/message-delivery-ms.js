@@ -304,38 +304,6 @@ class MessageDeliveryMS extends ServiceBase {
     await this.sendMessageWithRetry(user, messages, { saved: true, retry: 0 })
   }
 
-  async markMessagesAsSent(messages, failedMessages) {
-    const flattenFailedMsgs = failedMessages.reduce((acc, item) => {
-      if (!item || !(item && item.length)) return acc;
-      const user = item[0].META.to;
-      acc[user] = item.reduce((userMessages, msg) => {
-        userMessages[msg.META.id] = msg;
-        return userMessages;
-      }, {});
-      return acc;
-    }, {});
-
-    const deliveredMessages = messages.reduce((acc, msgs) => {
-      if (!msgs.length) return acc;
-      const user = msgs[0].META.to;
-      const failedMsgs = flattenFailedMsgs[user] || {};
-
-      acc[user] = acc[user] || [];
-      const msgIds = msgs.reduce((ids, msg) => {
-        if (!failedMsgs[msg.META.id]) {
-          ids.push(msg.META.id);
-        }
-        return ids;
-      }, []);
-      acc[user].push(...msgIds);
-      return acc;
-    }, {});
-
-    Object.entries(deliveredMessages).forEach(async ([user, ids]) => {
-      await this.db.markMessageDelivered(user, ids);
-    });
-  }
-
   async getServer(users) {
     const servers = await this.memCache.getAll(users);
     const result = {}
