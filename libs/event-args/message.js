@@ -1,5 +1,5 @@
 const Long = require('long');
-const { getUTCEpoch, shortuuid } = require('../../helper');
+const { getUTCTime, shortuuid } = require('../../helper');
 const { IEventArg } = require('../event-store');
 const { getProtoDefination } = require('./util');
 
@@ -68,7 +68,7 @@ class MessageEvent extends IEventArg {
     message._raw = payload;
     message._raw_format = 'json';
     message._version = json._v || 1.0;
-    message._timestamp = getUTCEpoch();
+    message._timestamp = getUTCTime();
     if (message._version >= 2.0) {
       message._id = json.id;
       const { type, to, from, ephemeral, contentType, ...others } = json.head;
@@ -239,7 +239,7 @@ class MessageEvent extends IEventArg {
    * @param {number} ts 
    */
   set_server_timestamp(ts) {
-    ts = ts || getUTCEpoch();
+    ts = ts || getUTCTime();
     this._server_timestamp = Long.fromNumber(ts);
     this._raw = null;
   }

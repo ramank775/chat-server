@@ -1,4 +1,4 @@
-const { shortuuid, getUTCEpoch } = require("../../helper");
+const { shortuuid, getUTCTime } = require("../../helper");
 const { MessageEvent, MESSAGE_TYPE, CHANNEL_TYPE } = require("../../libs/event-args");
 
 class GroupEvent extends MessageEvent {
@@ -8,7 +8,7 @@ class GroupEvent extends MessageEvent {
     this._channel = CHANNEL_TYPE.INDIVIDUAL;
     this._type = MESSAGE_TYPE.NOTIFICATION;
     this._id = shortuuid();
-    this._timestamp = getUTCEpoch();
+    this._timestamp = getUTCTime();
     this._ephemeral = false;
     this._destination = groupId;
     this._source = actor;

@@ -15,9 +15,14 @@ function extractInfoFromRequest(req, key = 'user', defaultValue = null) {
   return req.headers[key] || (req.state && req.state[key]) || defaultValue;
 }
 
-function getUTCEpoch() {
+function getUTCTime() {
   const now = new Date();
-  const utcMilllisecondsSinceEpoch = now.getTime() + now.getTimezoneOffset() * 60 * 1000;
+  const utc = now.getTime() + (now.getTimezoneOffset() * 60 * 1000);
+  return utc;
+}
+
+function getUTCEpoch() {
+  const utcMilllisecondsSinceEpoch = getUTCTime();
   const utcSecondsSinceEpoch = Math.round(utcMilllisecondsSinceEpoch / 1000);
   return utcSecondsSinceEpoch;
 }
@@ -36,6 +41,7 @@ module.exports = {
   uuidv4,
   extractInfoFromRequest,
   getUTCEpoch,
+  getUTCTime,
   shortuuid,
   getFilename,
   base64ToProtoBuffer,
