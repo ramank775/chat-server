@@ -8,7 +8,7 @@ const {
 } = require('../../libs/service-base');
 const { addHttpOptions, initHttpResource, HttpServiceBase } = require('../../libs/http-service-base');
 const EventStore = require('../../libs/event-store');
-const { uuidv4, shortuuid, extractInfoFromRequest, schemas, base64ToProtoBuffer } = require('../../helper');
+const { uuidv4, shortuuid, extractInfoFromRequest, schemas, base64ToProtoBuffer, getUTCEpoch } = require('../../helper');
 const { MessageEvent, ConnectionStateEvent, MESSAGE_TYPE } = require('../../libs/event-args');
 
 const asMain = require.main === module;
@@ -231,7 +231,7 @@ class Gateway extends HttpServiceBase {
               retry: meta.retry,
               saved: meta.saved,
               sid: message.server_id,
-              latency: Date.now() - message.server_timestamp,
+              latency: getUTCEpoch() - message.server_timestamp,
             })
           } catch (e) {
             uError.push({

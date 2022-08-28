@@ -277,7 +277,7 @@ class MessageDeliveryMS extends ServiceBase {
           await this.onDisconnect(receiver, server);
         }
         if (deliveredMessages.length) {
-          await this.db.markMessagesAsSent(receiver, deliveredMessages)
+          await this.db.markMessageSent(receiver, deliveredMessages)
         }
         if (errorMessages.length) {
           await this.sendMessageWithRetry(receiver, errorMessages, { trackid: trackId, saved, retry: retry + 1 })
