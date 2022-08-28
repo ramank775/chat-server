@@ -54,6 +54,17 @@ class IMessageDB {
 
   /**
    * @abstract
+   * Mark message as Sent
+   * @param {string} userId
+   * @param {string[]} messageIds
+   */
+  // eslint-disable-next-line no-unused-vars
+  async markMessageSent(userId, messageIds) {
+    throw new Error('Method not implemented')
+  }
+
+  /**
+   * @abstract
    * Initialize the database instance
    */
   async init() {

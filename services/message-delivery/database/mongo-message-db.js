@@ -3,6 +3,12 @@ const { IMessageDB } = require('./message-db');
 const { addMongodbOptions, initMongoClient } = require('../../../libs/mongo-utils');
 const { MessageEvent } = require('../../../libs/event-args')
 
+const MESSAGE_STATUS = {
+  UNDELIVERED: 0,
+  SENT: 1,
+  DELIVERED: 2
+}
+
 class MongoMessageDB extends IMessageDB {
 
   /** @type { import('mongodb').MongoClient } */
@@ -31,18 +37,31 @@ class MongoMessageDB extends IMessageDB {
       id: msg.id,
       user,
       payload: msg.toBinary(),
+      status: MESSAGE_STATUS.UNDELIVERED,
       expireAt
     }))
     await this.#collection.insertMany(msgs)
   }
 
   async getUndeliveredMessage(userId) {
-    const cursor = this.#collection.find({ user: userId }, { projection: { payload: 1 } });
+    const cursor = this.#collection.find({ user: userId, status: 0 }, { projection: { payload: 1 } });
     const messageEventCursor = cursor.map((doc) => {
       const binary = doc.payload.buffer
       return MessageEvent.fromBinary(binary)
     })
     return await messageEventCursor.toArray()
+  }
+
+  async markMessageSent(userId, messageIds) {
+    const expireAt = moment().add(7, 'days').toDate();
+    await this.#collection.updateMany({
+      user: userId, id: { $in: messageIds }
+    }, {
+      $set: {
+        status: MESSAGE_STATUS.SENT,
+        expireAt,
+      }
+    })
   }
 
   async markMessageDelivered(userId, messageIds) {
