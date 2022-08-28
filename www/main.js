@@ -75,12 +75,13 @@ function showGroups() {
   groupSpace.innerHTML = '';
   groups.forEach(g => {
     const newGroup = document.createElement('li');
-    newGroup.id = g.id
+    newGroup.id = g.groupId
     const name = document.createElement('span')
     name.textContent = g.name
     newGroup.appendChild(name)
     newGroup.onclick = function groupClick() {
-      document.getElementById('to').value = g.id
+      document.getElementById('to').value = g.groupId
+      document.getElementById('msg_channel').value = 'GROUP';
     }
     groupSpace.appendChild(newGroup)
   })
@@ -111,6 +112,7 @@ function switchToEventTab() {
 }
 
 function switchToGroupTab() {
+  getGroups();
   document.getElementById('div_group').style.display = 'block';
   document.getElementById('event_viewer').style.display = 'none';
 }
@@ -142,8 +144,16 @@ function displayEvent(message) {
   msgSpace.appendChild(newMsgItem);
 }
 
-function sendMessage() {
-
+async function sendMessage() {
+  const msg = new Message();
+  msg.channel = document.getElementById('msg_channel').value;
+  msg.type = document.getElementById('type').value;
+  msg.destination = document.getElementById('to').value;
+  msg.ephemeral = document.getElementById('ephemeral').checked;
+  msg.timestamp = Math.floor(Date.now() / 1000);
+  msg.content = JSON.parse(document.getElementById('content').value);
+  msg.meta = JSON.parse(document.getElementById('meta').value);
+  await messaging.send(msg);
 }
 
 function setupUI() {
@@ -192,6 +202,8 @@ function setupUI() {
       messaging.updateMessageVersion(Number(e.target.value))
       displayEvent(event)
     }
+    document.getElementById('server-ack').checked = messaging.server_ack;
+    document.getElementById('client-ack').checked = messaging.client_ack;
     document.getElementById('server-ack').onchange = e => {
       const event = new Message()
       event.id = `local_${Date.now()}`

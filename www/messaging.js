@@ -8,13 +8,16 @@ function getMsgId(to) {
 }
 
 function base64ToArrayBuffer(base64) {
-  const binaryString = window.atob(base64);
-  const len = binaryString.length;
-  const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i += 1) {
-    bytes[i] = binaryString.charCodeAt(i);
-  }
-  return bytes.buffer;
+  return new Uint8Array(window.atob(base64).split("").map((c) => c.charCodeAt(0)));
+}
+
+/**
+ * Convert buffer to base64 string
+ * @param {Uint8Array} data 
+ * @returns 
+ */
+function arrayBufferToBase64(data) {
+  return window.btoa(String.fromCharCode.apply(null, data));
 }
 
 export class Message {
@@ -98,31 +101,42 @@ class MessageV3 extends Message {
   static getProtoMessageType() {
     if (MessageV3._protoRoot == null) {
       // eslint-disable-next-line no-undef
-      MessageV3._protoRoot = protobuf.Type.fromJSON(MessageV3._protodef)
+      MessageV3._protoRoot = protobuf.Root.fromJSON(MessageV3._protodef)
     }
     return MessageV3._protoRoot.lookup('Message')
   }
 
+  static fromMessage(message) {
+    const messageV3 = new MessageV3();
+    Object.assign(messageV3, message)
+    return messageV3;
+  }
+
   static decode(data, base64) {
+    let buffer;
     if (base64) {
-      data = base64ToArrayBuffer(data)
+      buffer = base64ToArrayBuffer(data);
+    } else {
+      buffer = new Uint8Array(data);
     }
     const MessageDef = MessageV3.getProtoMessageType()
-    const incomming = MessageDef.decode(data)
+    const incomming = MessageDef.decode(buffer)
     const json = MessageDef.toObject(incomming, {
       enums: String
     });
     const messageV3 = new MessageV3()
+    if (json.content)
+      json.content = (new TextDecoder('utf-8')).decode(json.content)
     Object.assign(messageV3, json)
     return messageV3;
   }
 
   encode(base64 = false) {
     const MessageDef = MessageV3.getProtoMessageType()
-    let content = this._content;
-    if (typeof this._content === 'object') {
-      content = JSON.stringify(this._content)
-      content = (new TextEncoder()).encode(content)
+    let { content } = this;
+    if (typeof this.content === 'object') {
+      content = JSON.stringify(this.content)
+      content = (new TextEncoder('utf-8')).encode(content)
     }
     const message = {
       version: 3.0,
@@ -143,13 +157,19 @@ class MessageV3 extends Message {
     const temp = MessageDef.create(message)
     const buffer = MessageDef.encode(temp).finish()
     if (base64) {
-      return window.btoa(String.fromCharCode.apply(...buffer))
+      return arrayBufferToBase64(buffer);
     }
     return buffer
   }
 }
 
 class MessageV2 extends Message {
+  static fromMessage(message) {
+    const messageV2 = new MessageV2();
+    Object.assign(messageV2, message)
+    return messageV2;
+  }
+
   static decode(data) {
     const json = JSON.parse(data)
     const { type, to, from, ephemeral, ...others } = json.head;
@@ -160,7 +180,7 @@ class MessageV2 extends Message {
       })
     const messageV2 = new MessageV2()
     Object.assign(messageV2, {
-      version: json._v,
+      version: json._v || 2.1,
       id: json.id,
       type: meta.contentType,
       channel: type,
@@ -257,9 +277,10 @@ class MessageEncoder {
   }
 
   static decode(message, base64) {
-    if (message instanceof ArrayBuffer) {
+    if (base64 || message instanceof ArrayBuffer) {
       return MessageV3.decode(message, base64);
     }
+
     const json = JSON.parse(message)
     if (json._v >= 2.0) {
       return MessageV2.decode(message)
@@ -271,7 +292,7 @@ class MessageEncoder {
 
 // eslint-disable-next-line no-unused-vars, node/no-unsupported-features/es-syntax
 export class Messaging extends EventTarget {
-  _tokenManger;
+  _tokenManager;
 
   /** @type {WebSocket} */
   _ws;
@@ -280,19 +301,19 @@ export class Messaging extends EventTarget {
 
   message_version = 3.0;
 
-  server_ack = false;
+  server_ack = true;
 
-  client_ack = false;
+  client_ack = true;
 
   channel = 'ws';
 
   constructor(tokenManager) {
     super();
-    this._tokenManger = tokenManager;
+    this._tokenManager = tokenManager;
   }
 
   static async login(option) {
-    fetch('/v1.0/login', {
+    return fetch('/v1.0/login', {
       method: 'POST',
       headers: {
         'content-type': 'application/json'
@@ -308,11 +329,21 @@ export class Messaging extends EventTarget {
   }
 
   getMessageFormat() {
-    return this.message_version === 'v3' ? 'binary' : 'text'
+    return this.message_version === 3.0 ? 'binary' : 'text'
+  }
+
+  /**
+   * 
+   * @param {Message} message 
+   * @returns 
+   */
+  isClientAckRequired(message) {
+    if (!this.client_ack) return false
+    return !["SERVER_ACK", "CLIENT_ACK"].includes(message.type)
   }
 
   getHeaders() {
-    const [username, accesskey] = this._tokenManger.get();
+    const [username, accesskey] = this._tokenManager.get();
     return new Headers({
       'Content-Type': 'application/json',
       'user': username,
@@ -327,11 +358,12 @@ export class Messaging extends EventTarget {
     }
     if (window.WebSocket) {
       console.log('WebSocket object is supported in your browser');
-      const { protocol, hostname } = window.location;
-
-      const socketUrl = `${protocol === 'https:' ? 'wss' : 'ws'}://${hostname}/v1.0/wss/?ack=true`
+      const url = new URL('v1.0/wss/', window.location);
+      url.protocol = url.protocol === 'https:' ? 'wss' : 'ws';
+      url.searchParams.append('ack', this.server_ack);
+      url.searchParams.append('format', this.getMessageFormat())
       const startTime = Date.now();
-      this._ws = new WebSocket(socketUrl);
+      this._ws = new WebSocket(url);
       this._ws.binaryType = "arraybuffer";
       this._ws.onopen = () => {
         console.log('connection time', Date.now() - startTime);
@@ -342,13 +374,12 @@ export class Messaging extends EventTarget {
 
       this._ws.onmessage = (e) => {
         if (e.data === "pong") return;
-        const binary = e.data instanceof ArrayBuffer
-        const message = MessageEncoder.decode(e.data, binary)
+        const message = MessageEncoder.decode(e.data)
         const event = new CustomEvent('message', { detail: message });
         this.dispatchEvent(event)
-        if (this.client_ack) {
+        if (this.isClientAckRequired(message)) {
           const cack = new MessageV3()
-          cack.version = message.verison;
+          cack.version = message.version;
           cack.id = message.id;
           cack.timestamp = Math.floor(Date.now() / 1000);
           const [username] = this._tokenManager.get()
@@ -357,11 +388,12 @@ export class Messaging extends EventTarget {
           cack.ephemeral = true
           cack.content = null;
           cack.meta = {};
-
-          this._ws.send()
+          cack.channel = 'INDIVIDUAL';
+          cack.type = 'CLIENT_ACK';
+          this.sendViaWebSocket(cack);
         }
 
-        console.log(`echo from server : ${e.data}`);
+        console.log(`echo from server : ${message}`);
       };
 
       this._ws.onclose = () => {
@@ -397,12 +429,12 @@ export class Messaging extends EventTarget {
     url.searchParams.append('format', this.getMessageFormat())
     url.searchParams.append('ack', this.server_ack)
     const payload = [MessageEncoder.encode(message, this.message_version, true)]
-    fetch(url, {
+    return fetch(url, {
       method: 'POST',
       headers: this.getHeaders(),
-      body: JSON.stringify([JSON.stringify(message)])
+      body: JSON.stringify(payload)
     })
-      .then((resp) => resp.json(payload))
+      .then((resp) => resp.json())
       .then(({ acks }) => {
         if (!acks) return {}
         acks.forEach(ack => {
@@ -413,7 +445,13 @@ export class Messaging extends EventTarget {
       })
   }
 
+  /**
+   * Send message based
+   * @param {Message} message 
+   */
   async send(message) {
+    const [username] = this._tokenManager.get();
+    message.source = username;
     if (this.channel === 'ws') {
       this.sendViaWebSocket(message)
     } else {

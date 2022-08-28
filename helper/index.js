@@ -28,11 +28,16 @@ function getFilename(file) {
   return `${filename}.${uuidv4()}${ext}`;
 }
 
+function base64ToProtoBuffer(base64) {
+  return new Uint8Array(Buffer.from(base64, 'base64'));
+}
+
 module.exports = {
   uuidv4,
   extractInfoFromRequest,
   getUTCEpoch,
   shortuuid,
   getFilename,
+  base64ToProtoBuffer,
   schemas
 };

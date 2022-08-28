@@ -273,7 +273,7 @@ class MessageDeliveryMS extends ServiceBase {
             errorMessages.push(m)
           }
         })
-        if(hasNotFoundError) {
+        if (hasNotFoundError) {
           await this.onDisconnect(receiver, server);
         }
         if (deliveredMessages.length) {
@@ -289,9 +289,11 @@ class MessageDeliveryMS extends ServiceBase {
   }
 
   async sendOfflineMessage(messages, receiver) {
-    const promises = messages.map(async (m) => {
-      await this.eventStore.emit(this.events[EVENT_TYPE.OFFLINE_EVENT], m, receiver);
-    })
+    const promises = messages
+      .filter((m) => !m.ephemeral)
+      .map(async (m) => {
+        await this.eventStore.emit(this.events[EVENT_TYPE.OFFLINE_EVENT], m, receiver);
+      })
     await Promise.all(promises);
   }
 
@@ -314,7 +316,6 @@ class MessageDeliveryMS extends ServiceBase {
     }, {});
 
     const deliveredMessages = messages.reduce((acc, msgs) => {
-      // if(!msgs || !(msgs && msgs.length)) return acc;
       if (!msgs.length) return acc;
       const user = msgs[0].META.to;
       const failedMsgs = flattenFailedMsgs[user] || {};

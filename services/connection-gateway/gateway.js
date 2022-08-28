@@ -8,7 +8,7 @@ const {
 } = require('../../libs/service-base');
 const { addHttpOptions, initHttpResource, HttpServiceBase } = require('../../libs/http-service-base');
 const EventStore = require('../../libs/event-store');
-const { uuidv4, shortuuid, extractInfoFromRequest, schemas } = require('../../helper');
+const { uuidv4, shortuuid, extractInfoFromRequest, schemas, base64ToProtoBuffer } = require('../../helper');
 const { MessageEvent, ConnectionStateEvent, MESSAGE_TYPE } = require('../../libs/event-args');
 
 const asMain = require.main === module;
@@ -138,7 +138,8 @@ class Gateway extends HttpServiceBase {
 
   async newMessage(req, res) {
     const user = extractInfoFromRequest(req, 'user');
-    const { isbinary, ack } = req.query;
+    const { format, ack } = req.query;
+    const isbinary = format === 'binary';
     const messages = req.payload;
     const promises = messages.map(async (msg) => {
       let event;
@@ -146,7 +147,7 @@ class Gateway extends HttpServiceBase {
         source: user
       }
       if (isbinary) {
-        const bmsg = Buffer.from(msg, 'base64');
+        const bmsg = base64ToProtoBuffer(msg);
         event = MessageEvent.fromBinary(bmsg, options);
       } else {
         event = MessageEvent.fromString(msg, options);
@@ -190,7 +191,7 @@ class Gateway extends HttpServiceBase {
       message.set_server_timestamp();
       const event = message.type === MESSAGE_TYPE.CLIENT_ACK ? EVENT_TYPE.CLIENT_ACK : EVENT_TYPE.NEW_MESSAGE_EVENT;
       await this.publishEvent(event, message, message.destination);
-      if (ws.ackEnabled) {
+      if (ws.ackEnabled && event === EVENT_TYPE.NEW_MESSAGE_EVENT) {
         const ack = message.buildServerAckMessage()
         this.sendWebsocketMessage(user, ack)
       }
@@ -265,7 +266,7 @@ class Gateway extends HttpServiceBase {
    */
   sendWebsocketMessage(user, message) {
     const ws = this.userSocketMapping.get(user)
-    if (ws.isBinary) {
+    if (ws.isbinary) {
       ws.send(message.toBinary(), { isBinary: true })
     } else {
       ws.send(message.toString());

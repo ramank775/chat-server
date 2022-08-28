@@ -24,8 +24,8 @@ message Message {
   bytes content = 8;
   uint64 timestamp = 9;
   map<string, string> meta = 10;
-  string server_id = 20;
-  uint64 server_timestamp = 21;
+  string serverId = 20;
+  uint64 serverTimestamp = 21;
 }
 
 message UserConnectionState {

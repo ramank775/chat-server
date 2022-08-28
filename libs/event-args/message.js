@@ -123,10 +123,9 @@ class MessageEvent extends IEventArg {
     message._source = options.source || json.source;
     message._destination = json.destination;
     message._timestamp = json.timestamp;
-    message._content = json.content;
     message._meta = json.meta || {};
-    message._server_id = json.server_id;
-    message._server_timestamp = json.server_timestamp;
+    message._server_id = json.serverId;
+    message._server_timestamp = json.serverTimestamp;
     if (options.source) this._raw = null;
     return message;
   }
@@ -177,9 +176,15 @@ class MessageEvent extends IEventArg {
 
     const messageDefination = getProtoDefination(MessageEvent.#binary_resource_name);
     let content = this._content;
-    if (typeof this._content === 'object') {
+    if (Buffer.isBuffer(this._content)) {
+      content = this._content
+    } else if (this._content instanceof Uint8Array) {
+      content = Buffer.from(this._content)
+    } else if (typeof this._content === 'object') {
       content = JSON.stringify(this._content)
       content = Buffer.from(content, 'utf-8')
+    } else if (content) {
+      content = Buffer.from(content.toString(), 'utf-8')
     }
     const message = {
       version: this._version,
@@ -192,8 +197,8 @@ class MessageEvent extends IEventArg {
       timestamp: this._timestamp,
       content,
       meta: this._meta,
-      server_id: this._server_id,
-      server_timestamp: this._server_timestamp
+      serverId: this._server_id,
+      serverTimestamp: this._server_timestamp
     }
     const errorMessage = messageDefination.verify(message);
     if (errorMessage) {
