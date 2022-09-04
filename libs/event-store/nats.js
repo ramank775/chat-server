@@ -2,6 +2,8 @@ const nats = require('nats');
 const { shortuuid } = require('../../helper');
 const { IEventStore } = require('./iEventStore');
 
+/** @typedef {import('./iEventArg').IEventArg} IEventArg */
+
 function parseAuthOptions(options) {
   const authOptions = {}
   switch (options.natsAuthType) {
@@ -79,8 +81,8 @@ class NatsEventStore extends IEventStore {
   /** @type { string[] } */
   #subjects
 
-  /** @type {nats.Codec} */
-  #codec
+  /** @type {(topic: string) => IEventArg} */
+  #decodeMessageCb;
 
   constructor(context) {
     super();
@@ -88,7 +90,6 @@ class NatsEventStore extends IEventStore {
     this.#logger = context.log;
     this.#subjects = context.listenerEvents;
     this.#asyncStorage = context.asyncStorage;
-    this.#codec = nats.JSONCodec()
   }
 
   /**
@@ -113,10 +114,10 @@ class NatsEventStore extends IEventStore {
     return this.#jsc;
   }
 
-  async #createNatsConsumer() {
+  async #createNatsConsumer(decodeMessageCb) {
     nats.createInbox()
     const js = await this.#getJetStreamClient();
-
+    this.#decodeMessageCb = decodeMessageCb
     try {
       this.#logger.info('subscribing to consumer.');
       const promises = this.#subjects.map((subject) => {
@@ -159,20 +160,18 @@ class NatsEventStore extends IEventStore {
     const [topic, key, partition] = msg.subject.split('.', 3);
 
     await this.#asyncStorage.run(trackId, async () => {
-      const data = {
-        key,
-        value: this.#codec.decode(msg.data)
-      };
+      const Message = this.#decodeMessageCb(topic)
       const logInfo = {
         topic,
         partition,
         offset: msg.seq,
-        key: data.key
+        key
       };
-      this.#logger.info(`new data received`, { ...logInfo, ...(data.value.META || {}) });
+      this.#logger.info(`new data received`, logInfo);
       const sConsume = Date.now();
+      const message = Message.fromBinary(msg.data)
       try {
-        await this.on(topic, data.value);
+        await this.on(topic, message, key);
         msg.ack();
       } catch (e) {
         this.#logger.error(`Error while processing message`, { err: e });
@@ -195,14 +194,14 @@ class NatsEventStore extends IEventStore {
   async init(options) {
     await this.#getJetStreamClient();
     if (options.consumer) {
-      await this.#createNatsConsumer();
+      await this.#createNatsConsumer(options.decodeMessageCb);
     }
   }
 
   /**
    * Emit an new event to event store
    * @param {string} event Name of the event
-   * @param {*} args Event arguments
+   * @param {IEventArg} args Event arguments
    * @param {string} key
    */
   async emit(event, args, key) {
@@ -210,11 +209,10 @@ class NatsEventStore extends IEventStore {
     try {
       const start = Date.now();
       const jc = await this.#getJetStreamClient()
-      const data = this.#codec.encode(args)
       const headers = nats.headers()
       headers.append('track_id', trackId)
+      const data = args.toBinary()
       const response = await jc.publish(`${event}.${key}`, data, {
-        msgID: trackId,
         headers,
       });
       const elasped = Date.now() - start;
@@ -222,6 +220,7 @@ class NatsEventStore extends IEventStore {
         event,
         stream: response.stream,
         offset: response.seq,
+        duplicate: response.duplicate,
         key,
         produceIn: elasped
       });

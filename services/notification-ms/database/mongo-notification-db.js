@@ -50,7 +50,7 @@ class MongoNotificationDB extends INotificationDB {
   async getToken(username, options) {
     const record = await this.#collection.findOne(
       { username, deviceId: options.deviceId },
-      { projection: { _id: 0, notificationToken: 1 } }
+      { projection: { _id: 0, notificationToken: 1, messageVersion: 1 } }
     );
     return record;
   }

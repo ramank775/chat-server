@@ -48,6 +48,10 @@ class HttpServiceBase extends ServiceBase {
     this.baseRoute = this.options.baseRoute || '';
   }
 
+  get uri() {
+    return this.hapiServer.info.uri;
+  }
+
   async init() {
     const { asyncStorage } = this.context;
     const serverOptions = {
@@ -98,12 +102,12 @@ class HttpServiceBase extends ServiceBase {
       type: 'histogram',
       measurement: 'median'
     });
-    if(options && options.validate) {
+    if (options && options.validate) {
       options.validate.options = {
         abortEarly: false
       }
       options.validate.failAction = (_req, _h, error) => {
-        const errorMessage = error.details.map(({message}) => message).join('\n')
+        const errorMessage = error.details.map(({ message }) => message).join('\n')
         throw Boom.badRequest(errorMessage)
       }
     }

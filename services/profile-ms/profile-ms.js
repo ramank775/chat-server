@@ -9,6 +9,7 @@ const eventStore = require('../../libs/event-store');
 const { profileDB } = require('./database');
 const { addAuthProviderOptions, initializeAuthProvider } = require('./auth-provider')
 const { extractInfoFromRequest, schemas } = require('../../helper');
+const { LoginEvent } = require('../../libs/event-args');
 
 const asMain = require.main === module;
 
@@ -59,12 +60,13 @@ class ProfileMs extends HttpServiceBase {
       'POST',
       this.login.bind(this),
       {
-        validate:{
+        validate: {
           payload: Joi.object({
             username: Joi.string().required(),
             authToken: Joi.string(),
             notificationToken: Joi.string().required(),
-            deviceId: Joi.string().default('default')
+            deviceId: Joi.string().default('default'),
+            messageVersion: Joi.number().default(2.1),
           }).required(),
         }
       });
@@ -85,7 +87,7 @@ class ProfileMs extends HttpServiceBase {
       'GET',
       this.fetchProfile.bind(this),
       {
-        validate:{
+        validate: {
           headers: schemas.authHeaders
         }
       }
@@ -107,7 +109,7 @@ class ProfileMs extends HttpServiceBase {
       'POST',
       this.syncContact.bind(this),
       {
-        validate:{
+        validate: {
           headers: schemas.authHeaders,
           payload: Joi.object({
             users: Joi.array().items(Joi.string()).required()
@@ -153,7 +155,13 @@ class ProfileMs extends HttpServiceBase {
       await this.profileDB.create(profile);
     }
     const accesskey = await this.authProvider.generateAccessKey(username);
-    this.eventStore.emit(this.newLoginTopic, payload, username);
+    const loginMessage = new LoginEvent({
+      user: username,
+      deviceId: payload.deviceId,
+      notificationToken: payload.notificationToken,
+      messageVersion: payload.messageVersion,
+    })
+    this.eventStore.emit(this.newLoginTopic, loginMessage, username);
     return {
       status: true,
       username,

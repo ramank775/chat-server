@@ -3,6 +3,8 @@ const { Kafka, logLevel } = require('kafkajs');
 const { shortuuid } = require('../../helper');
 const { IEventStore } = require('./iEventStore');
 
+/** @typedef {import('./iEventArg').IEventArg} IEventArg */
+
 /**
  * Add standard kafka options
  * @param {commander} cmd
@@ -353,7 +355,7 @@ class KafkaEventStore extends IEventStore {
     return this.#producer;
   }
 
-  async #createKafkaConsumer() {
+  async #createKafkaConsumer(decodeMessageCb) {
     const kafka = this.#getKafkaInstance();
     const consumerOptions = parseKakfaConsumerOptions(this.#options);
     this.#consumer = kafka.consumer(consumerOptions);
@@ -387,17 +389,21 @@ class KafkaEventStore extends IEventStore {
             this.#asyncStorage.run(trackId, () => {
               const data = {
                 key: message.key ? message.key.toString() : null,
-                value: JSON.parse(message.value.toString())
+                value: message.value
               };
               const logInfo = {
                 topic,
                 partition,
                 offset: message.offset,
-                key: data.key
+                key: data.key,
               };
-              this.#logger.info(`new data received`, { ...logInfo, ...(data.value.META || {}) });
+              /** @type {import('./iEventArg').IEventArg} */
+              const Message = decodeMessageCb(topic)
+
+              this.#logger.info(`new data received`, logInfo);
               const sConsume = Date.now();
-              this.on(topic, data.value);
+              const eventArg = Message.fromBinary(data.value);
+              this.on(topic, eventArg, data.key);
               logInfo.latency = Date.now() - start;
               logInfo.consume_latency = Date.now() - sConsume;
               this.#logger.info('message consumed', logInfo);
@@ -421,14 +427,14 @@ class KafkaEventStore extends IEventStore {
       await this.#createKakfaProducer();
     }
     if (options.consumer) {
-      await this.#createKafkaConsumer();
+      await this.#createKafkaConsumer(options.decodeMessage);
     }
   }
 
   /**
    * Emit an new event to event store
    * @param {string} event Name of the event
-   * @param {*} args Event arguments
+   * @param {IEventArg} args Event arguments
    * @param {string} key
    */
   async emit(event, args, key) {
@@ -440,7 +446,7 @@ class KafkaEventStore extends IEventStore {
         messages: [
           {
             key,
-            value: JSON.stringify(args),
+            value: args.toBinary(),
             headers: {
               track_id: trackId
             }

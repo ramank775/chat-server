@@ -2,56 +2,183 @@
 <html lang="en">
 
 <head>
-	<meta charset="UTF-8">
-	<meta name="viewport" content="width=device-width, initial-scale=1.0">
-	<title>Document</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Document</title>
+  <!-- CSS only -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.0/dist/css/bootstrap.min.css" rel="stylesheet"
+    integrity="sha384-gH2yIJqKdNHPEq0n4Mqa/HGKIhSkIHeL5AyhkYV8i59U5AR6csBvApHHNl/vI1Bx" crossorigin="anonymous">
+  <style>
+    body {
+      padding: 5px
+    }
+
+    .footer {
+      padding-top: 5px;
+      position: absolute;
+      bottom: 0;
+      width: 100%;
+      background-color: #f5f5f5;
+    }
+
+    #div_msg {
+      height: 300px;
+      overflow-x: hidden;
+      overflow-y: auto;
+    }
+
+    .settings>span {
+      margin-left: 5px;
+    }
+  </style>
 </head>
 
-<div id="div_login" style="float: left; width: 48%">
-    <span>Login</span> <br>
-	<input type="text" name="login_username" id="login_username" placeholder="username"> <br />
-	<button id="login_submit">Login</button>
-</div>
-
-<!-- <div id="connection">
-	<input type="text" id="name" placeholder="your username">
-	<button onclick="connect()"> Connect </button>
-</div> -->
-<div id="div_loggedIn">
-	<div id="status"></div>
-	<div>
-		Username: <span id="username"></span>
-	</div>
-	<div id="div_msg">
-		<input type="text" id="msg" placeholder="Your msg to send..">
-		<input type="text" id="to" placeholder="to" >
-		<button id="msg_submit_v2_ws">Send Message V2 WS</button>
-    <button id="msg_submit_v1_ws">Send Message V1 WS</button>
-
-    <button id="msg_submit_v2_rest">Send Message V2 REST</button>
-    <button id="msg_submit_v1_rest">Send Message V1 REST</button>
-	</div>
-    <br />
-    <div id="div_group">
-        <input type="text" id="group_name" placeholder="Group Name" />
-        <input type="text" id="group_member" placeholder="csv string of group member" />
-        <button id="create_group">Create Group </button> 
-    </div>
-    <div>
-        <ul id="groups">
-        </ul>
-    </div>
-	<div>
-		<ul id="message">
-
-		</ul>
-	</div>
-
-</div>
-
-
 <body>
-	<script src="main.js"></script>
+  <div id="div_login" style="float: left; width: 48%">
+    <span>Login</span> <br>
+    <input type="text" name="login_username" id="login_username" placeholder="username"> <br />
+    <button id="login_submit">Login</button>
+  </div>
+
+  <div id="div_loggedIn">
+    <nav id="header" class="navbar navbar-default navbar-fixed-top">
+      <div>
+        Status:
+        <span id="status"></span>
+      </div>
+      <div>
+        Username: <span id="username"></span>
+      </div>
+    </nav>
+    <hr />
+    <div>
+      <div class="container">
+        <div class="form-horizontal">
+          <div>
+            <div class="form-group row">
+              <div class="col-md-2">
+                <label for="channel">Channel</label>
+                <select id="msg_channel" value="INDIVIDUAL">
+                  <option value="INDIVIDUAL" selected="selected">Individual</option>
+                  <option value="GROUP">Group</option>
+                  <option value="OTHER">Other</option>
+                </select>
+              </div>
+              <div class="col-md-3">
+                <label for="type">Message Type</label>
+                <select id="type" value="MESSAGE">
+                  <option value="MESSAGE" selected="selected">Message</option>
+                  <option value=" NOTIFICATION">Notification</option>
+                  <option value="CUSTOM">Custom</option>
+                </select>
+              </div>
+              <div class="col-md-2">
+                <label for="ephemeral">Ephemeral</label>
+                <input type="checkbox" name="ephemeral" id="ephemeral" value="true">
+              </div>
+              <div class="col-md-3">
+                <input type="text" id="to" placeholder="destination" />
+              </div>
+            </div>
+            <br />
+            <div class="form-group row">
+              <div class="col-md-6">
+                <label for="content">Content</label>
+                <textarea type="text" id="content" value="Message Content" cols="50"> </textarea>
+              </div>
+              <div class="col-md-5">
+                <label for="meta">Meta</label>
+                <textarea type="text" id="meta" placeholder="Message Meta" cols="40"> </textarea>
+              </div>
+              <div class="col-md-1">
+                <button id="msg_submit" class="btn uk-button btn-block btn-primary">Send Message</button>
+              </div>
+            </div>
+
+          </div>
+
+        </div>
+        <hr />
+        <div>
+          <span>Settings: </span>
+          <div class="justify-content-center settings">
+            <span>
+              <input type="checkbox" name="sever-ack" id="server-ack" value="true">
+              <label for="server-ack">Server Ack</label>
+            </span>
+            <span>
+              <input type="checkbox" name="clinet-ack" id="client-ack" value="true">
+              <label for="client-ack">Client Ack</label>
+            </span>
+            <span>
+              <label for="version">Version:</label>
+              <select name="version" id="version" value="3.0">
+                <option value="3.0" selected="selected">V3 (proto)</option>
+                <option value="2.0">V2 (Text)</option>
+                <option value="1.0">V1 (Text)</option>
+              </select>
+            </span>
+
+            <span>
+              <label for="channel">Channel:</label>
+              <select name="channel" id="channel" value="ws">
+                <option value="ws" selected="selected">Websocket</option>
+                <option value="rest">Rest</option>
+              </select>
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <hr />
+    <div id="body">
+      <div class="row">
+        <div class="col-md-8">
+          <span>Events:</span>
+          <div id="div_msg">
+            <ul id="message">
+
+            </ul>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div id="div_side">
+            <ul class="nav justify-content-center">
+              <li id="group_tab"> <a href="#">Groups </a> </li>
+              <li>|</li>
+              <li id="event_tab"> <a href="#">Event Viewer</a></li>
+            </ul>
+          </div>
+          <div id="div_group">
+            <div class="row">
+              <div class="col-md-10">
+                <input type="text" id="group_name" placeholder="Group Name" />
+                <br />
+                <input type="text" id="group_member" placeholder="csv string of group member" />
+              </div>
+              <div class="col-md-2">
+                <button id="create_group" class="btn btn-primary">Create Group </button>
+              </div>
+            </div>
+            <div>
+              <span>Groups:</span>
+              <ul id="groups">
+              </ul>
+            </div>
+          </div>
+          <div id="event_viewer">
+            <pre id="json"></pre>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+
+  <script src="//cdn.rawgit.com/dcodeIO/protobuf.js/6.X.X/dist/protobuf.min.js"></script>
+  <!-- <script type="module" src="messaging.js"></script> -->
+  <script type="module" src="main.js"></script>
 </body>
 
 </html>

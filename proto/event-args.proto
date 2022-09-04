@@ -1,0 +1,46 @@
+syntax = "proto3";
+
+message Message {
+  float version = 1;
+  string id = 2;
+  enum Type {
+    SERVER_ACK = 0;
+    CLIENT_ACK = 1;
+    MESSAGE = 2;
+    NOTIFICATION = 3;
+    CUSTOM = 10;
+  }
+  Type type = 3;
+  enum Channel {
+    UNKNOWN = 0;
+    INDIVIDUAL = 1;
+    GROUP = 2;
+    OTHER = 10;
+  }
+  Channel channel = 4;
+  bool ephemeral = 5;
+  string source = 6;
+  string destination = 7;
+  bytes content = 8;
+  uint64 timestamp = 9;
+  map<string, string> meta = 10;
+  string serverId = 20;
+  uint64 serverTimestamp = 21;
+}
+
+message UserConnectionState {
+  string user = 1;
+  enum State {
+    CONNECTED = 0;
+    DISCONNECTED = 2;
+  }
+  State state = 2;
+  string gateway = 3;
+}
+
+message Login {
+  string user = 1;
+  string deviceId = 2;
+  string notificationToken = 3;
+  float messageVersion = 4;
+}
