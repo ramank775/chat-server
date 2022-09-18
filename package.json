@@ -21,6 +21,7 @@
     "aws-sdk": "^2.1185.0",
     "commander": "^9.4.0",
     "firebase-admin": "^11.0.1",
+    "hot-shots": "^9.2.0",
     "ioredis": "^5.2.2",
     "joi": "^17.6.0",
     "kafkajs": "2.1.0",

@@ -76,15 +76,10 @@ class MessageRouterMS extends ServiceBase {
     this.eventStore = this.context.eventStore;
     this.events = this.context.events;
     this.maxRetryCount = this.options.messageMaxRetries;
-    this.redirectMessageMeter = this.statsClient.meter({
-      name: 'redirectMessage/sec',
-      type: 'meter'
-    });
   }
 
   init() {
     this.eventStore.on = (_, message, key) => {
-      this.redirectMessageMeter.mark();
       this.redirectMessage(message, key);
     };
   }

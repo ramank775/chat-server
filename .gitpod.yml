@@ -21,6 +21,8 @@ tasks:
     command: mkdir -p /workspace/data && mongod --dbpath /workspace/data
   - name: redis
     command: redis-server
+  - name: statsd
+    command: docker run -p 8125:8125 statsd/statsd
 
 vscode:
   extensions:
