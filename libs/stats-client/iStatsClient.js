@@ -55,7 +55,7 @@ class IStatsClient {
    * @returns
    */
   // eslint-disable-next-line no-unused-vars
-  timer(stats) {
+  timing(stats) {
     throw new Error("Not Implemented Exception")
   }
 }

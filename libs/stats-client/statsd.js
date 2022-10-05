@@ -62,7 +62,7 @@ class StatsDClient extends IStatsClient {
  * Add StatsD options
  * @param {import('commander').Command} cmd
  */
-async function initOptions(cmd) {
+function initOptions(cmd) {
   return cmd
     .option('--statsd-host', 'StatsD server host, default 127.0.0.1', '127.0.0.1')
     .option('--statsd-port', 'StatsD server port, default 8125', (c) => Number(c), 8125)

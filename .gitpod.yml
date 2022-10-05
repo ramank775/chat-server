@@ -22,7 +22,8 @@ tasks:
   - name: redis
     command: redis-server
   - name: statsd
-    command: docker run -p 8125:8125 statsd/statsd
+    init: chmod +x deployment/scripts/*.bash && ./deployment/scripts/setup.bash
+    command: ./deployment/scripts/init-statsd.bash
 
 vscode:
   extensions:

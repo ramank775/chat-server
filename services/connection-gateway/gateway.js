@@ -133,6 +133,17 @@ class Gateway extends HttpServiceBase {
     const { format, ack } = req.query;
     const isbinary = format === 'binary';
     const messages = req.payload;
+
+    this.statsClient.increment({
+      stat: 'in-message',
+      value: messages.length,
+      tags: {
+        channel: 'rest',
+        gateway: this.options.gatewayName,
+        user,
+      }
+    });
+
     const promises = messages.map(async (msg) => {
       let event;
       const options = {
@@ -163,8 +174,9 @@ class Gateway extends HttpServiceBase {
 
   async onMessage(payload, isBinary, user) {
     this.statsClient.increment({
-      stat: 'ws-in-message',
+      stat: 'in-message',
       tags: {
+        channel: 'websocket',
         gateway: this.options.gatewayName,
         user,
       }
@@ -207,7 +219,6 @@ class Gateway extends HttpServiceBase {
         user,
       }
     });
-    this.userConnectedCounter.inc(1);
     const message = ConnectionStateEvent.connect(user, this.options.gatewayName);
     await this.publishEvent(EVENT_TYPE.CONNECTION_EVENT, message, user);
   }
@@ -240,10 +251,11 @@ class Gateway extends HttpServiceBase {
             const message = MessageEvent.fromBinary(Buffer.from(m.raw));
             this.sendWebsocketMessage(receiver, message);
             this.statsClient.timing({
-              stat: 'ws-message-latency',
+              stat: 'message-latency',
               value: getUTCTime() - message.server_timestamp,
               tags: {
                 gateway: this.options.gatewayName,
+                channel: 'websocket',
                 user: receiver,
                 retry: meta.retry || 0,
                 saved: meta.saved || false,
@@ -264,10 +276,10 @@ class Gateway extends HttpServiceBase {
         })
         if (uError.length) {
           this.statsClient.increment({
-            stat: 'ws-out-message-error',
+            stat: 'out-message-error',
             value: uError.length,
-            sample_rate: 0.1,
             tags: {
+              channel: 'websocket',
               gateway: this.options.gatewayName,
               user: receiver,
               code: 500,
@@ -281,9 +293,9 @@ class Gateway extends HttpServiceBase {
           messages: messages.map((m) => ({ sid: m.sid }))
         });
         this.statsClient.increment({
-          stat: 'ws-out-message-error',
-          sample_rate: 0.1,
+          stat: 'out-message-error',
           tags: {
+            channel: 'websocket',
             gateway: this.options.gatewayName,
             user: receiver,
             code: 404,
@@ -309,8 +321,10 @@ class Gateway extends HttpServiceBase {
       ws.send(message.toString());
     }
     this.statsClient.increment({
-      stat: 'ws-out-message',
+      stat: 'out-message',
       tags: {
+        serverAck: message.isServerAck,
+        channel: 'websocket',
         gateway: this.options.gatewayName,
         user,
         format: ws.isbinary ? 'binary' : 'text',

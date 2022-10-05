@@ -314,12 +314,16 @@ class KafkaEventStore extends IEventStore {
   /** @type { string[] } */
   #listenerEvents
 
+  /** @type {import('../stats-client/iStatsClient').IStatsClient} */
+  statsClient;
+
   constructor(context) {
     super();
     this.#options = context.options;
     this.#logger = context.log;
     this.#listenerEvents = context.listenerEvents;
     this.#asyncStorage = context.asyncStorage;
+    this.statsClient = context.statsClient;
   }
 
   /**
@@ -383,31 +387,72 @@ class KafkaEventStore extends IEventStore {
         this.#logger.info(`Running consumer`);
         await this.#consumer.run({
           partitionsConsumedConcurrently: this.#listenerEvents.length,
-          eachMessage: ({ topic, partition, message }) => {
-            const start = Date.now();
+          eachMessage: async ({ topic, partition, message }) => {
+            const start = new Date();
             const trackId = message.headers.track_id.toString() || shortuuid();
-            this.#asyncStorage.run(trackId, () => {
-              const data = {
-                key: message.key ? message.key.toString() : null,
-                value: message.value
-              };
-              const logInfo = {
-                topic,
-                partition,
-                offset: message.offset,
-                key: data.key,
-              };
-              /** @type {import('./iEventArg').IEventArg} */
-              const Message = decodeMessageCb(topic)
+            const key = message.key ? message.key.toString() : null;
+            try {
+              await this.#asyncStorage.run(trackId, async () => {
+                const data = {
+                  key,
+                  value: message.value
+                };
+                const logInfo = {
+                  topic,
+                  partition,
+                  offset: message.offset,
+                  key: data.key,
+                };
+                /** @type {import('./iEventArg').IEventArg} */
+                const Message = decodeMessageCb(topic)
 
-              this.#logger.info(`new data received`, logInfo);
-              const sConsume = Date.now();
-              const eventArg = Message.fromBinary(data.value);
-              this.on(topic, eventArg, data.key);
-              logInfo.latency = Date.now() - start;
-              logInfo.consume_latency = Date.now() - sConsume;
-              this.#logger.info('message consumed', logInfo);
-            });
+                this.#logger.info(`new data received`, logInfo);
+                const sConsume = new Date();
+                const eventArg = Message.fromBinary(data.value);
+                await this.on(topic, eventArg, data.key);
+                this.statsClient.timing({
+                  stat: 'event-consumed-latency',
+                  value: sConsume,
+                  tags: {
+                    event: topic,
+                    partition,
+                    key,
+                    broker: 'kafka',
+                  }
+                });
+                this.statsClient.timing({
+                  stat: 'event-received-latency',
+                  value: start,
+                  tags: {
+                    event: topic,
+                    partition,
+                    key,
+                    broker: 'kafka'
+                  }
+                });
+                this.#logger.info('message consumed', logInfo);
+              });
+              this.statsClient.increment({
+                stat: 'event-received',
+                tags: {
+                  event: topic,
+                  partition,
+                  key,
+                  broker: 'kafka'
+                }
+              })
+            } catch (e) {
+              this.statsClient.increment({
+                stat: 'event-received-error',
+                tags: {
+                  event: topic,
+                  partition,
+                  key,
+                  broker: 'kafka'
+                }
+              })
+              throw e;
+            }
           }
         });
       } catch (error) {
@@ -440,7 +485,7 @@ class KafkaEventStore extends IEventStore {
   async emit(event, args, key) {
     const trackId = this.#asyncStorage.getStore() || shortuuid();
     try {
-      const start = Date.now();
+      const start = new Date();
       const [response] = await this.#producer.send({
         topic: event,
         messages: [
@@ -454,16 +499,40 @@ class KafkaEventStore extends IEventStore {
         ],
         acks: 1,
       });
-      const elasped = Date.now() - start;
+      this.statsClient.timing({
+        stat: 'event-emit-latency',
+        value: start,
+        tags: {
+          event,
+          key,
+          broker: 'kafka',
+        }
+      });
+      this.statsClient.increment({
+        stat: 'event-emit',
+        tags: {
+          event,
+          key,
+          broker: 'kafka'
+        }
+      });
+
       this.#logger.info(`Sucessfully produced message`, {
         event,
         partition: response.partition,
         offset: response.baseOffset,
         key,
-        produceIn: elasped
       });
     } catch (error) {
       this.#logger.error(`Error while producing message`, { error });
+      this.statsClient.increment({
+        stat: 'event-emit-error',
+        tags: {
+          event,
+          key,
+          broker: 'kafka'
+        }
+      });
       throw error;
     }
   }

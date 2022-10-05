@@ -63,7 +63,7 @@ class HttpServiceBase extends ServiceBase {
     this.httpServer = this.hapiServer.listener;
 
     this.hapiServer.ext('onRequest', async (req, h) => {
-      req.startTime = Date.now();
+      req.startTime = new Date();
       this.statsClient.increment({
         stat: 'req-count',
         tags: {
@@ -83,7 +83,6 @@ class HttpServiceBase extends ServiceBase {
         value: req.startTime,
         tags: {
           url: req.url.pathname,
-          track_id: req.trackId,
         }
       })
       return h.continue;

@@ -15,14 +15,14 @@ async function initDefaultResources(options) {
     asyncStorage
   };
   ctx = await initLogger(ctx);
-  ctx = await statsClient.initStatsClient(ctx);
+  ctx = await statsClient.initializeStatsClient(ctx);
   return ctx;
 }
 
 
 
 function initDefaultOptions() {
-  const cmd = new commander.Command('my name').allowUnknownOption();
+  let cmd = new commander.Command('my name').allowUnknownOption();
   cmd
     .option('--app-name <app-name>', 'application name')
     .option('--log-level <log-level>', 'logging level debug/info/error', 'info')
@@ -31,6 +31,7 @@ function initDefaultOptions() {
     cmd.help();
     process.exit(0);
   });
+  cmd = statsClient.addStatsClientOptions(cmd);
   return cmd;
 }
 
