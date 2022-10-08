@@ -161,8 +161,9 @@ class MessageDeliveryMS extends ServiceBase {
   async onConnect(user, server) {
     await this.memCache.set(user, server);
     this.sendPendingMessage(user);
-    this.statsClient.increment({
-      stat: 'user-connected',
+    this.statsClient.gauge({
+      stat: 'user.connected.count',
+      value: '+1',
       tags: {
         service: 'delivery-ms',
         user,
@@ -174,8 +175,9 @@ class MessageDeliveryMS extends ServiceBase {
     const exitingServer = await this.memCache.get(user);
     if (exitingServer === server) {
       await this.memCache.del(user);
-      this.statsClient.decrement({
-        stat: 'user-connected',
+      this.statsClient.gauge({
+        stat: 'user.connected.count',
+        value: -1,
         tags: {
           service: 'delivery-ms',
           user,

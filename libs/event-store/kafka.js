@@ -389,8 +389,17 @@ class KafkaEventStore extends IEventStore {
           partitionsConsumedConcurrently: this.#listenerEvents.length,
           eachMessage: async ({ topic, partition, message }) => {
             const start = new Date();
-            const trackId = message.headers.track_id.toString() || shortuuid();
             const key = message.key ? message.key.toString() : null;
+            this.statsClient.increment({
+              stat: 'event.receive.count',
+              tags: {
+                event: topic,
+                partition,
+                key,
+                broker: 'kafka'
+              }
+            });
+            const trackId = message.headers.track_id.toString() || shortuuid();
             try {
               await this.#asyncStorage.run(trackId, async () => {
                 const data = {
@@ -407,12 +416,12 @@ class KafkaEventStore extends IEventStore {
                 const Message = decodeMessageCb(topic)
 
                 this.#logger.info(`new data received`, logInfo);
-                const sConsume = new Date();
+                const sProcess = new Date();
                 const eventArg = Message.fromBinary(data.value);
                 await this.on(topic, eventArg, data.key);
                 this.statsClient.timing({
-                  stat: 'event-consumed-latency',
-                  value: sConsume,
+                  stat: 'event.process.latency',
+                  value: sProcess,
                   tags: {
                     event: topic,
                     partition,
@@ -420,38 +429,30 @@ class KafkaEventStore extends IEventStore {
                     broker: 'kafka',
                   }
                 });
-                this.statsClient.timing({
-                  stat: 'event-received-latency',
-                  value: start,
-                  tags: {
-                    event: topic,
-                    partition,
-                    key,
-                    broker: 'kafka'
-                  }
-                });
                 this.#logger.info('message consumed', logInfo);
               });
-              this.statsClient.increment({
-                stat: 'event-received',
-                tags: {
-                  event: topic,
-                  partition,
-                  key,
-                  broker: 'kafka'
-                }
-              })
             } catch (e) {
               this.statsClient.increment({
-                stat: 'event-received-error',
+                stat: 'event.process.error_count',
                 tags: {
                   event: topic,
                   partition,
                   key,
                   broker: 'kafka'
                 }
-              })
+              });
               throw e;
+            } finally {
+              this.statsClient.timing({
+                stat: 'event.consume.latency',
+                value: start,
+                tags: {
+                  event: topic,
+                  partition,
+                  key,
+                  broker: 'kafka'
+                }
+              });
             }
           }
         });
@@ -500,7 +501,7 @@ class KafkaEventStore extends IEventStore {
         acks: 1,
       });
       this.statsClient.timing({
-        stat: 'event-emit-latency',
+        stat: 'event.emit.latency',
         value: start,
         tags: {
           event,
@@ -509,7 +510,7 @@ class KafkaEventStore extends IEventStore {
         }
       });
       this.statsClient.increment({
-        stat: 'event-emit',
+        stat: 'event.emit.count',
         tags: {
           event,
           key,
@@ -526,7 +527,7 @@ class KafkaEventStore extends IEventStore {
     } catch (error) {
       this.#logger.error(`Error while producing message`, { error });
       this.statsClient.increment({
-        stat: 'event-emit-error',
+        stat: 'event.emit.error_count',
         tags: {
           event,
           key,

@@ -65,7 +65,7 @@ class HttpServiceBase extends ServiceBase {
     this.hapiServer.ext('onRequest', async (req, h) => {
       req.startTime = new Date();
       this.statsClient.increment({
-        stat: 'req-count',
+        stat: 'http.request.count',
         tags: {
           url: req.url.pathname,
         }
@@ -79,7 +79,7 @@ class HttpServiceBase extends ServiceBase {
 
     this.hapiServer.ext('onPreResponse', (req, h) => {
       this.statsClient.timing({
-        stat: 'req-latency',
+        stat: 'http.request.latency',
         value: req.startTime,
         tags: {
           url: req.url.pathname,

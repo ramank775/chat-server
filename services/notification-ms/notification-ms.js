@@ -120,14 +120,14 @@ class NotificationMS extends ServiceBase {
     await this.pns.push(record.notificationToken, payload)
       .then(() => {
         this.statsClient.increment({
-          stat: 'success-notificaton',
+          stat: 'notificaton.delivery.count',
           tags: {
             user,
           }
         });
       }).catch((err) => {
         this.statsClient.increment({
-          stat: 'failed-notificaton',
+          stat: 'notificaton.delivery.error_count',
           tags: {
             user,
           }

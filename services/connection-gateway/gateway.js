@@ -135,7 +135,7 @@ class Gateway extends HttpServiceBase {
     const messages = req.payload;
 
     this.statsClient.increment({
-      stat: 'in-message',
+      stat: 'message.received.count',
       value: messages.length,
       tags: {
         channel: 'rest',
@@ -174,7 +174,7 @@ class Gateway extends HttpServiceBase {
 
   async onMessage(payload, isBinary, user) {
     this.statsClient.increment({
-      stat: 'in-message',
+      stat: 'message.received.count',
       tags: {
         channel: 'websocket',
         gateway: this.options.gatewayName,
@@ -211,8 +211,9 @@ class Gateway extends HttpServiceBase {
 
   async onConnect(user, ws) {
     this.userSocketMapping.set(user, ws);
-    this.statsClient.increment({
-      stat: 'user-connected',
+    this.statsClient.gauge({
+      stat: 'user.connected.count',
+      value: '+1',
       tags: {
         service: 'gateway',
         gateway: this.options.gatewayName,
@@ -225,8 +226,9 @@ class Gateway extends HttpServiceBase {
 
   async onDisconnect(user) {
     this.userSocketMapping.delete(user);
-    this.statsClient.decrement({
-      stat: 'user-connected',
+    this.statsClient.gauge({
+      stat: 'user.connected.count',
+      value: -1,
       tags: {
         service: 'gateway',
         gateway: this.options.gatewayName,
@@ -251,7 +253,7 @@ class Gateway extends HttpServiceBase {
             const message = MessageEvent.fromBinary(Buffer.from(m.raw));
             this.sendWebsocketMessage(receiver, message);
             this.statsClient.timing({
-              stat: 'message-latency',
+              stat: 'message.delivery.latency',
               value: getUTCTime() - message.server_timestamp,
               tags: {
                 gateway: this.options.gatewayName,
@@ -276,7 +278,7 @@ class Gateway extends HttpServiceBase {
         })
         if (uError.length) {
           this.statsClient.increment({
-            stat: 'out-message-error',
+            stat: 'message.delivery.error_count',
             value: uError.length,
             tags: {
               channel: 'websocket',
@@ -293,7 +295,7 @@ class Gateway extends HttpServiceBase {
           messages: messages.map((m) => ({ sid: m.sid }))
         });
         this.statsClient.increment({
-          stat: 'out-message-error',
+          stat: 'message.delivery.error_count',
           tags: {
             channel: 'websocket',
             gateway: this.options.gatewayName,
@@ -321,7 +323,7 @@ class Gateway extends HttpServiceBase {
       ws.send(message.toString());
     }
     this.statsClient.increment({
-      stat: 'out-message',
+      stat: 'message.delivery.count',
       tags: {
         serverAck: message.isServerAck,
         channel: 'websocket',
