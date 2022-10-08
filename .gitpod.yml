@@ -21,6 +21,9 @@ tasks:
     command: mkdir -p /workspace/data && mongod --dbpath /workspace/data
   - name: redis
     command: redis-server
+  - name: statsd
+    init: chmod +x deployment/scripts/*.bash && ./deployment/scripts/setup.bash
+    command: ./deployment/scripts/init-statsd.bash
 
 vscode:
   extensions:

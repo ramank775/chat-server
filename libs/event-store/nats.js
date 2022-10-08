@@ -42,6 +42,7 @@ ${options.natsAuthNkey}
   }
   return authOptions;
 }
+
 function parseNatsOptions(options) {
   const servers = options.natsServerList.split(',')
   const authOptions = parseAuthOptions(options)
@@ -84,12 +85,16 @@ class NatsEventStore extends IEventStore {
   /** @type {(topic: string) => IEventArg} */
   #decodeMessageCb;
 
+  /** @type {import('../stats-client/iStatsClient').IStatsClient} */
+  statsClient;
+
   constructor(context) {
     super();
     this.#options = context.options;
     this.#logger = context.log;
     this.#subjects = context.listenerEvents;
     this.#asyncStorage = context.asyncStorage;
+    this.statsClient = context.statsClient;
   }
 
   /**
@@ -155,36 +160,72 @@ class NatsEventStore extends IEventStore {
   }
 
   async #eachMessage(msg) {
-    const start = Date.now();
-    const trackId = msg.headers.get('track_id') || shortuuid();
+    const start = new Date();
     const [topic, key, partition] = msg.subject.split('.', 3);
-
-    await this.#asyncStorage.run(trackId, async () => {
-      const Message = this.#decodeMessageCb(topic)
-      const logInfo = {
-        topic,
+    this.statsClient.increment({
+      stat: 'event.receive.count',
+      tags: {
+        event: topic,
         partition,
-        offset: msg.seq,
-        key
-      };
-      this.#logger.info(`new data received`, logInfo);
-      const sConsume = Date.now();
-      const message = Message.fromBinary(msg.data)
-      try {
-        await this.on(topic, message, key);
-        msg.ack();
-      } catch (e) {
-        this.#logger.error(`Error while processing message`, { err: e });
-        // TODO: wait to msg to have retryCount
-        if (msg.redelivered)
-          msg.term();
-        else
-          msg.nak();
+        key,
+        broker: 'nats'
       }
-      logInfo.latency = Date.now() - start;
-      logInfo.consume_latency = Date.now() - sConsume;
-      this.#logger.info('message consumed', logInfo);
-    });
+    })
+    const trackId = msg.headers.get('track_id') || shortuuid();
+    try {
+      await this.#asyncStorage.run(trackId, async () => {
+        const Message = this.#decodeMessageCb(topic)
+        const logInfo = {
+          topic,
+          partition,
+          offset: msg.seq,
+          key
+        };
+        this.#logger.info(`new data received`, logInfo);
+        const sProcess = new Date();
+        const message = Message.fromBinary(msg.data)
+        await this.on(topic, message, key);
+        this.statsClient.timing({
+          stat: 'event.process.latency',
+          value: sProcess,
+          tags: {
+            event: topic,
+            partition,
+            key,
+            broker: 'nats',
+          }
+        });
+        this.#logger.info('message consumed', logInfo);
+      });
+      msg.ack();
+    } catch (e) {
+      this.#logger.error(`Error while processing message`, { err: e });
+      // TODO: wait to msg to have retryCount
+      if (msg.redelivered)
+        msg.term();
+      else
+        msg.nak();
+      this.statsClient.increment({
+        stat: 'event.process.error_count',
+        tags: {
+          event: topic,
+          partition,
+          key,
+          broker: 'nats'
+        }
+      })
+    } finally {
+      this.statsClient.timing({
+        stat: 'event.consume.latency',
+        value: start,
+        tags: {
+          event: topic,
+          partition,
+          key,
+          broker: 'nats'
+        }
+      });
+    }
   }
 
   /**
@@ -207,7 +248,7 @@ class NatsEventStore extends IEventStore {
   async emit(event, args, key) {
     const trackId = this.#asyncStorage.getStore() || shortuuid();
     try {
-      const start = Date.now();
+      const start = new Date();
       const jc = await this.#getJetStreamClient()
       const headers = nats.headers()
       headers.append('track_id', trackId)
@@ -215,17 +256,41 @@ class NatsEventStore extends IEventStore {
       const response = await jc.publish(`${event}.${key}`, data, {
         headers,
       });
-      const elasped = Date.now() - start;
+      this.statsClient.timing({
+        stat: 'event.emit.latency',
+        value: start,
+        tags: {
+          event,
+          key,
+          broker: 'nats',
+        }
+      });
+      this.statsClient.increment({
+        stat: 'event.emit.count',
+        tags: {
+          event,
+          key,
+          broker: 'nats'
+        }
+      });
+
       this.#logger.info(`Sucessfully produced message`, {
         event,
         stream: response.stream,
         offset: response.seq,
         duplicate: response.duplicate,
         key,
-        produceIn: elasped
       });
     } catch (error) {
       this.#logger.error(`Error while producing message`, { error });
+      this.statsClient.increment({
+        stat: 'event.emit.error_count',
+        tags: {
+          event,
+          key,
+          broker: 'nats'
+        }
+      });
       throw error;
     }
   }

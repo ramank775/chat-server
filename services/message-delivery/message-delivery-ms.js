@@ -117,13 +117,6 @@ class MessageDeliveryMS extends ServiceBase {
     this.eventStore = this.context.eventStore;
     this.events = this.context.events;
     this.ackAlias = this.options.ackActionAlias;
-    this.userConnectedCounter = this.statsClient.counter({
-      name: 'userconnected'
-    });
-    this.getServerMeter = this.statsClient.meter({
-      name: 'getServer/sec',
-      type: 'meter'
-    });
   }
 
   init() {
@@ -168,14 +161,28 @@ class MessageDeliveryMS extends ServiceBase {
   async onConnect(user, server) {
     await this.memCache.set(user, server);
     this.sendPendingMessage(user);
-    this.userConnectedCounter.inc(1);
+    this.statsClient.gauge({
+      stat: 'user.connected.count',
+      value: '+1',
+      tags: {
+        service: 'delivery-ms',
+        user,
+      }
+    });
   }
 
   async onDisconnect(user, server) {
     const exitingServer = await this.memCache.get(user);
     if (exitingServer === server) {
       await this.memCache.del(user);
-      this.userConnectedCounter.dec(1);
+      this.statsClient.gauge({
+        stat: 'user.connected.count',
+        value: -1,
+        tags: {
+          service: 'delivery-ms',
+          user,
+        }
+      });
     }
   }
 

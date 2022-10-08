@@ -76,15 +76,10 @@ class MessageRouterMS extends ServiceBase {
     this.eventStore = this.context.eventStore;
     this.events = this.context.events;
     this.maxRetryCount = this.options.messageMaxRetries;
-    this.redirectMessageMeter = this.statsClient.meter({
-      name: 'redirectMessage/sec',
-      type: 'meter'
-    });
   }
 
   init() {
     this.eventStore.on = (_, message, key) => {
-      this.redirectMessageMeter.mark();
       this.redirectMessage(message, key);
     };
   }
@@ -95,7 +90,6 @@ class MessageRouterMS extends ServiceBase {
    * @param {string} key
    */
   async redirectMessage(message, key) {
-    const start = Date.now();
     let event;
     switch (message.channel) {
       case CHANNEL_TYPE.GROUP:
@@ -113,7 +107,7 @@ class MessageRouterMS extends ServiceBase {
     }
     await this.publish(event, message, key);
 
-    this.log.info('Message redirected', { sid: message.server_id, latency: Date.now() - start });
+    this.log.info('Message redirected', { sid: message.server_id, });
   }
 
   async publish(event, message, key) {

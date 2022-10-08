@@ -92,14 +92,6 @@ class Gateway extends HttpServiceBase {
     this.publishEvent = async (event, eventArgs, key) => {
       await eventStore.emit(events[event], eventArgs, key);
     };
-    this.userConnectedCounter = this.statsClient.counter({
-      name: 'userConnected'
-    });
-    this.newMessageMeter = this.statsClient.meter({
-      name: 'newMessage/sec',
-      type: 'meter'
-    });
-
     this.userSocketMapping = new Map();
   }
 
@@ -141,6 +133,17 @@ class Gateway extends HttpServiceBase {
     const { format, ack } = req.query;
     const isbinary = format === 'binary';
     const messages = req.payload;
+
+    this.statsClient.increment({
+      stat: 'message.received.count',
+      value: messages.length,
+      tags: {
+        channel: 'rest',
+        gateway: this.options.gatewayName,
+        user,
+      }
+    });
+
     const promises = messages.map(async (msg) => {
       let event;
       const options = {
@@ -170,6 +173,14 @@ class Gateway extends HttpServiceBase {
   }
 
   async onMessage(payload, isBinary, user) {
+    this.statsClient.increment({
+      stat: 'message.received.count',
+      tags: {
+        channel: 'websocket',
+        gateway: this.options.gatewayName,
+        user,
+      }
+    });
     const ws = this.userSocketMapping.get(user);
     if (!isBinary) {
       const msg = payload.toString();
@@ -180,7 +191,6 @@ class Gateway extends HttpServiceBase {
     }
     const trackId = shortuuid();
     this.context.asyncStorage.run(trackId, async () => {
-      this.newMessageMeter.mark();
       const options = {
         source: user
       }
@@ -201,14 +211,30 @@ class Gateway extends HttpServiceBase {
 
   async onConnect(user, ws) {
     this.userSocketMapping.set(user, ws);
-    this.userConnectedCounter.inc(1);
+    this.statsClient.gauge({
+      stat: 'user.connected.count',
+      value: '+1',
+      tags: {
+        service: 'gateway',
+        gateway: this.options.gatewayName,
+        user,
+      }
+    });
     const message = ConnectionStateEvent.connect(user, this.options.gatewayName);
     await this.publishEvent(EVENT_TYPE.CONNECTION_EVENT, message, user);
   }
 
   async onDisconnect(user) {
     this.userSocketMapping.delete(user);
-    this.userConnectedCounter.dec(1);
+    this.statsClient.gauge({
+      stat: 'user.connected.count',
+      value: -1,
+      tags: {
+        service: 'gateway',
+        gateway: this.options.gatewayName,
+        user,
+      }
+    });
     const message = ConnectionStateEvent.disconnect(user, this.options.gatewayName);
     await this.publishEvent(EVENT_TYPE.CONNECTION_EVENT, message, user);
   }
@@ -221,17 +247,22 @@ class Gateway extends HttpServiceBase {
       if (!messages.length) return;
       const ws = this.userSocketMapping.get(receiver);
       if (ws) {
-        const latencies = []
         const uError = []
         messages.forEach((m) => {
           try {
-            const message = MessageEvent.fromBinary(Buffer.from(m.raw))
-            this.sendWebsocketMessage(receiver, message)
-            latencies.push({
-              retry: meta.retry,
-              saved: meta.saved,
-              sid: message.server_id,
-              latency: getUTCTime() - message.server_timestamp,
+            const message = MessageEvent.fromBinary(Buffer.from(m.raw));
+            this.sendWebsocketMessage(receiver, message);
+            this.statsClient.timing({
+              stat: 'message.delivery.latency',
+              value: getUTCTime() - message.server_timestamp,
+              tags: {
+                gateway: this.options.gatewayName,
+                channel: 'websocket',
+                user: receiver,
+                retry: meta.retry || 0,
+                saved: meta.saved || false,
+                sid: message.server_id,
+              }
             })
           } catch (e) {
             uError.push({
@@ -245,13 +276,33 @@ class Gateway extends HttpServiceBase {
           receiver,
           messages: uError
         })
-        this.log.info(`Message delivery to user`, { latencies });
+        if (uError.length) {
+          this.statsClient.increment({
+            stat: 'message.delivery.error_count',
+            value: uError.length,
+            tags: {
+              channel: 'websocket',
+              gateway: this.options.gatewayName,
+              user: receiver,
+              code: 500,
+            }
+          })
+        }
       } else {
         errors.push({
           code: 404,
           receiver,
           messages: messages.map((m) => ({ sid: m.sid }))
         });
+        this.statsClient.increment({
+          stat: 'message.delivery.error_count',
+          tags: {
+            channel: 'websocket',
+            gateway: this.options.gatewayName,
+            user: receiver,
+            code: 404,
+          }
+        })
       }
     });
     return {
@@ -271,6 +322,16 @@ class Gateway extends HttpServiceBase {
     } else {
       ws.send(message.toString());
     }
+    this.statsClient.increment({
+      stat: 'message.delivery.count',
+      tags: {
+        serverAck: message.isServerAck,
+        channel: 'websocket',
+        gateway: this.options.gatewayName,
+        user,
+        format: ws.isbinary ? 'binary' : 'text',
+      }
+    });
   }
 
   async shutdown() {

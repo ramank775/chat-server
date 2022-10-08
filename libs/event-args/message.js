@@ -271,6 +271,10 @@ class MessageEvent extends IEventArg {
   get destination() {
     return this._destination;
   }
+
+  get isServerAck() {
+    return this.type === MESSAGE_TYPE.SERVER_ACK;
+  }
 }
 
 module.exports = {

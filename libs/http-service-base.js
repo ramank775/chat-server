@@ -63,20 +63,28 @@ class HttpServiceBase extends ServiceBase {
     this.httpServer = this.hapiServer.listener;
 
     this.hapiServer.ext('onRequest', async (req, h) => {
+      req.startTime = new Date();
+      this.statsClient.increment({
+        stat: 'http.request.count',
+        tags: {
+          url: req.url.pathname,
+        }
+      })
       const trackId = extractInfoFromRequest(req, 'x-request-id') || shortuuid();
+      req.trackId = trackId;
       asyncStorage.enterWith(trackId);
-      const meter = this.meterDict[req.url.pathname];
-      if (meter) meter.mark();
-      req.startTime = Date.now();
       this.log.info(`new request : ${req.url}`);
       return h.continue;
     });
 
     this.hapiServer.ext('onPreResponse', (req, h) => {
-      const timeElapsed = Date.now() - req.startTime;
-      const hist = this.histDict[req.url.pathname];
-      if (hist) hist.set(timeElapsed);
-      this.log.info(`${req.url.pathname} time elapsed ${timeElapsed}ms`);
+      this.statsClient.timing({
+        stat: 'http.request.latency',
+        value: req.startTime,
+        tags: {
+          url: req.url.pathname,
+        }
+      })
       return h.continue;
     });
 
@@ -93,15 +101,6 @@ class HttpServiceBase extends ServiceBase {
 
   addRoute(uri, method, handler, options = {}) {
     const path = `${this.baseRoute}${uri}`;
-    this.meterDict[path] = this.statsClient.meter({
-      name: `${path}/sec`,
-      type: 'meter'
-    });
-    this.histDict[path] = this.statsClient.metric({
-      name: path,
-      type: 'histogram',
-      measurement: 'median'
-    });
     if (options && options.validate) {
       options.validate.options = {
         abortEarly: false

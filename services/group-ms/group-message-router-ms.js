@@ -86,7 +86,6 @@ class GroupMessageRouterMS extends ServiceBase {
    * @param {string} key 
    */
   async redirectMessage(message) {
-    const start = Date.now();
     const users = await this.getGroupUsers(message.destination, message.source);
     let event;
     switch (message.type) {
@@ -100,7 +99,7 @@ class GroupMessageRouterMS extends ServiceBase {
       await this.publish(event, message, user);
     })
     await Promise.all(promises)
-    this.log.info('Message redirected', { sid: message.server_id, latency: Date.now() - start });
+    this.log.info('Message redirected', { sid: message.server_id });
   }
 
   async publish(event, message, key) {

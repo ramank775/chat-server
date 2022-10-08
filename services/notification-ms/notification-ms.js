@@ -75,15 +75,6 @@ class NotificationMS extends ServiceBase {
     /** @type {import('./pns/pn-service').IPushNotificationService} */
     this.pns = context.pns;
 
-    this.notificationMeter = this.statsClient.meter({
-      name: 'notificationMeter/sec',
-      type: 'meter'
-    });
-
-    this.failedNotificationMeter = this.statsClient.meter({
-      name: 'failedNotification/sec',
-      type: 'meter'
-    });
     /** @type {import('../../libs/event-store/iEventStore').IEventStore} */
     this.eventStore = this.context.eventStore;
     this.events = this.context.events;
@@ -126,10 +117,23 @@ class NotificationMS extends ServiceBase {
     const record = await this.notifDB.getToken(user, { deviceId: 'default' });
     if (!record) return;
     const payload = (record.messageVersion || 2.1) < 3 ? message.toString() : message.toBinary()
-    await this.pns.push(record.notificationToken, payload).catch((err) => {
-      this.failedNotificationMeter.mark();
-      this.log.error(`Error while sending push notification ${err}`, err);
-    });
+    await this.pns.push(record.notificationToken, payload)
+      .then(() => {
+        this.statsClient.increment({
+          stat: 'notificaton.delivery.count',
+          tags: {
+            user,
+          }
+        });
+      }).catch((err) => {
+        this.statsClient.increment({
+          stat: 'notificaton.delivery.error_count',
+          tags: {
+            user,
+          }
+        });
+        this.log.error(`Error while sending push notification ${err}`, err);
+      });
   }
 
   async shutdown() {
