@@ -1,0 +1,64 @@
+{{- if .Values.deliveryMs.enabled -}}
+{{- $serviceName := "message-delivery" -}}
+{{- $cacheType := .Values.deliveryMs.cacheType | default "local" -}}
+{{- $dbType := .Values.deliveryMs.dbType | default "mongo" -}}
+{{- $replica := .Values.deliveryMs.replica | default 1 -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $serviceName }}
+  labels:
+    - service: {{ $serviceName }}
+    {{- include "chatserverlabels" . | nindent 4 -}}
+spec:
+  replicas: {{ $replica }}
+  selector:
+    matchLabels:
+      - service: {{ $serviceName }}
+      {{- include "chatserverlabels" . | nindent 4 -}}
+  template:
+    metadata:
+      name:  {{ $serviceName }}
+      labels:
+        - service:  {{ $serviceName }}
+        {{- include "chatserverlabels" . | nindent 4 -}}
+    spec:
+      {{- with .Values.imagePullSecrets -}}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 -}}
+      {{- end -}}
+      serviceAccountName: {{ include "chatserver.serviceAccountName" . }}
+      containers:
+        - name:  {{ $serviceName }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 -}}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - node
+          args:
+            - /app/services/message-delivery/message-delivery-ms.js
+            - --app-name= {{ $serviceName }}
+            - --user-connection-state-topic={{ .Values.topic.connectionState }}
+            - --send-message-topic={{ .Values.topic.sendMessage }}
+            - --client-ack-topic={{ .Values.topic.ack }}
+            - --system-message-topic={{ .Values.topic.systemMessage }}
+            - --offline-message-topic={{ .Values.topic.offlineMessage }}
+            - --service-discovery-path=/app/discovery_service.json
+            - --cache-type={{ $cacheType }}
+            {{- if eq "redis" $cacheType -}}
+            - --redis-endpoint={{ .Values.deliveryMs.redis | default "redis:6379" }}
+            {{- end -}}
+            - --message-db={{ $dbType }}
+            {{- if eq "mongo" $dbType -}}
+            {{ include "mongo.opton" | nindent 12 }}
+            {{- end -}}
+            {{ include "eventStore.option" (dict "consumerGroup" "message-delivery") | nindent 12 }}
+          volumeMounts:
+            - name: service-discovery
+              mountPath: /app
+      volumes:
+        - name: service-discovery
+          configMap:
+            name: gateway-directory
+{{- end -}}

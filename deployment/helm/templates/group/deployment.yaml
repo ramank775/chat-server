@@ -1,0 +1,52 @@
+{{- if .Values.groupMs.enabled -}}
+{{- $serviceName := "group" -}}
+{{- $dbType := .Values.groupMs.dbType | default "mongo" -}}
+{{- $replica := .Values.groupMs.replicas | default 1 -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $serviceName }}
+  labels:
+    - service: {{ $serviceName }}
+    {{- include "chatserver.labels" . | nindent 4 -}}
+spec:
+  replicas: {{ $replica }}
+  selector:
+    matchLabels:
+      - service: {{ $serviceName }}
+      {{- include "chatserver.labels" . | nindent 4 -}}
+  template:
+    metadata:
+      name: {{ $serviceName }}
+      labels:
+        - service: {{ $serviceName }}
+        {{- include "chatserver.labels" . | nindent 4 -}}
+    spec:
+      {{- with .Values.imagePullSecrets -}}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 -}}
+      {{- end -}}
+      serviceAccountName: {{ include "chatserver.serviceAccountName" . }}
+      containers:
+        - name: {{ $serviceName }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 -}}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 80
+              protocol: tcp
+          command:
+            - node
+          args:
+            - /app/services/group-ms/group-ms.js
+            - --app-name=group
+            - --host=0.0.0.0
+            - --port=80        
+            - --system-message-topic={{ .Values.topic.systemMessage }}
+            - --group-db={{ $dbType }}
+            {{- if eq "mongo" $dbType -}}
+            {{ include "mongo.opton" | nindent 12 }}
+            {{- end -}}
+            {{ include "eventStore.option" (dict "consumerGroup" "group") | nindent 12 }}
+{{- end -}}
