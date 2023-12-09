@@ -46,6 +46,7 @@ class HttpServiceBase extends ServiceBase {
     this.histDict = {};
     this.httpServer = context.httpServer;
     this.baseRoute = this.options.baseRoute || '';
+    this.internalBaseRoute = '_internal';
   }
 
   get uri() {
@@ -114,6 +115,28 @@ class HttpServiceBase extends ServiceBase {
       method,
       path,
       handler,
+      options
+    });
+  }
+
+  addInternalRoute(uri, method, handler, options = {}) {
+    const path = `${this.internalBaseRoute}/${this.baseRoute}/${uri}`;
+    if (options && options.validate) {
+      options.validate.options = {
+        abortEarly: false
+      }
+      options.validate.failAction = (_req, _h, error) => {
+        const errorMessage = error.details.map(({ message }) => message).join('\n')
+        throw Boom.badRequest(errorMessage)
+      }
+    }
+    this.hapiServer.route({
+      method,
+      path,
+      handler: (req, res) => {
+        req.internal = true;
+        return handler(req, res)
+      },
       options
     });
   }

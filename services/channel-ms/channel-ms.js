@@ -8,7 +8,7 @@ const { addHttpOptions, initHttpResource, HttpServiceBase } = require('../../lib
 const { extractInfoFromRequest, schemas } = require('../../helper');
 const eventStore = require('../../libs/event-store');
 const { addDatabaseOptions, initializeDatabase } = require('./database');
-const { GroupEvent } = require('./group-event');
+const { ChannelEvent } = require('./channel-event');
 
 const asMain = require.main === module;
 
@@ -18,7 +18,7 @@ function parseOptions(argv) {
   cmd = addDatabaseOptions(cmd);
   cmd = eventStore.addEventStoreOptions(cmd);
   cmd = cmd.option(
-    '--system-message-topic <system-message-topic>',
+    '--new-message-topic <new-message-topic>',
     'Used by producer to produce new message for system message'
   )
   return cmd.parse(argv).opts();
@@ -31,11 +31,11 @@ async function initResource(options) {
     .then(eventStore.initializeEventStore({ producer: true }));
 }
 
-class GroupMs extends HttpServiceBase {
+class ChannelMs extends HttpServiceBase {
   constructor(context) {
     super(context);
-    /** @type {import('./database/group-db').IGroupDB} */
-    this.db = context.groupDb;
+    /** @type {import('./database/channel-db').IChannelDB} */
+    this.db = context.channelDb;
     /** @type {import('../../libs/event-store/iEventStore').IEventStore} */
     this.eventStore = this.context.eventStore;
   }
@@ -51,7 +51,7 @@ class GroupMs extends HttpServiceBase {
     this.addRoute(
       '/get',
       'GET',
-      this.getGroups.bind(this)
+      this.getChannels.bind(this)
     );
 
     /**
@@ -62,13 +62,35 @@ class GroupMs extends HttpServiceBase {
     this.addRoute(
       '/create',
       'POST',
-      this.createGroup.bind(this)
+      this.createChannel.bind(this)
+    );
+
+    /**
+     * @deprecated
+     * Route in depreceated in favour for new route `POST /:chanenl_id/members`
+     * This will be removed in next major release @version v3.x
+     */
+    this.addRoute(
+      '/{channelId}/add',
+      'POST',
+      this.addMembers.bind(this)
+    );
+
+    /**
+     * @deprecated
+     * Route in depreceated in favour for new route `DELETE /:channel_id/members`
+     * This will be removed in next major release @version v3.x
+     */
+    this.addRoute(
+      '/{channelId}/remove',
+      'POST',
+      this.removeMembers.bind(this)
     );
 
     this.addRoute(
       '/',
       'GET',
-      this.getGroups.bind(this),
+      this.getChannels.bind(this),
       {
         validate: {
           headers: schemas.authHeaders
@@ -79,12 +101,13 @@ class GroupMs extends HttpServiceBase {
     this.addRoute(
       '/',
       'POST',
-      this.createGroup.bind(this),
+      this.createChannel.bind(this),
       {
         validate: {
           headers: schemas.authHeaders,
           payload: Joi.object({
             name: Joi.string().required(),
+            type: Joi.string().required(),
             members: Joi.array().items(Joi.string()).max(100).required(),
             profilePic: Joi.string().allow(null)
           })
@@ -93,50 +116,28 @@ class GroupMs extends HttpServiceBase {
     );
 
     this.addRoute(
-      '/{groupId}',
+      '/{channelId}',
       'GET',
-      this.getGroupInfo.bind(this),
+      this.getChannelInfo.bind(this),
       {
         validate: {
           headers: schemas.authHeaders,
           params: Joi.object({
-            groupId: Joi.string().required()
+            channelId: Joi.string().required()
           })
         }
       }
     );
 
-    /**
-     * @deprecated
-     * Route in depreceated in favour for new route `POST /:group_id/members`
-     * This will be removed in next major release @version v3.x
-     */
     this.addRoute(
-      '/{groupId}/add',
-      'POST',
-      this.addMembers.bind(this)
-    );
-
-    /**
-     * @deprecated
-     * Route in depreceated in favour for new route `DELETE /:group_id/members`
-     * This will be removed in next major release @version v3.x
-     */
-    this.addRoute(
-      '/{groupId}/remove',
-      'POST',
-      this.removeMembers.bind(this)
-    );
-
-    this.addRoute(
-      '/{groupId}/members',
+      '/{channelId}/members',
       'POST',
       this.addMembers.bind(this),
       {
         validate: {
           headers: schemas.authHeaders,
           params: Joi.object({
-            groupId: Joi.string().required()
+            channelId: Joi.string().required()
           }),
           payload: Joi.object({
             members: Joi.array().items(Joi.string()).max(50)
@@ -146,14 +147,14 @@ class GroupMs extends HttpServiceBase {
     );
 
     this.addRoute(
-      '/{groupId}/members',
+      '/{channelId}/members',
       'DELETE',
       this.removeMembers.bind(this),
       {
         validate: {
           headers: schemas.authHeaders,
           params: Joi.object({
-            groupId: Joi.string().required()
+            channelId: Joi.string().required()
           }),
           payload: Joi.object({
             member: Joi.string()
@@ -161,29 +162,44 @@ class GroupMs extends HttpServiceBase {
         }
       }
     );
+
+    this.addInternalRoute(
+      '/{channelId}',
+      'GET',
+      this.getChannelInfo.bind(this),
+      {
+        validate: {
+          params: Joi.object({
+            channelId: Joi.string().required(),
+          })
+        }
+      }
+    )
   }
 
-  async getGroups(req) {
+  async getChannels(req) {
     const user = extractInfoFromRequest(req, 'user');
-    const groups = await this.db.getMemberGroups(user)
-    return groups || [];
+    const { type } = req.query;
+    const channels = await this.db.getMemberChannels(user, type || 'group')
+    return channels || [];
   }
 
-  async getGroupInfo(req, res) {
+  async getChannelInfo(req, res) {
     const user = extractInfoFromRequest(req, 'user');
-    const { groupId } = req.params;
-    const group = await this.db.getGroupInfo(groupId, user);
-    if (!group) {
+    const { channelId } = req.params;
+    const channel = await this.db.getChannelInfo(channelId, user);
+    if (!channel) {
       return res.response({ status: false }).code(404);
     }
-    return group;
+    return channel;
   }
 
-  async createGroup(req) {
-    const { name, members, profilePic } = req.payload;
+  async createChannel(req) {
+    const { name, type, members, profilePic } = req.payload;
     const user = extractInfoFromRequest(req, 'user');
     const payload = {
       name,
+      type: type || 'group',
       members: [],
       profilePic,
     };
@@ -191,22 +207,27 @@ class GroupMs extends HttpServiceBase {
       members.push(user);
     }
     members.forEach((member) => {
-      payload.members.push({ username: member, role: member === user ? 'admin' : 'user' });
+      payload.members.push({
+        username: member,
+        role: member === user ? 'admin' : 'user',
+        since: Date.now()
+      });
     });
-    const groupId = await this.db.create(payload)
-    const event = new GroupEvent(groupId, 'add', user)
+    const channelId = await this.db.create(payload)
+    const event = new ChannelEvent(channelId, 'add', user)
     event.newMembers(payload.members)
     this.sendNotification(event, members);
     return {
-      groupId
+      groupId: channelId,
+      channelId
     };
   }
 
   async addMembers(req, res) {
     const user = extractInfoFromRequest(req, 'user');
-    const { groupId } = req.params;
-    const group = await this.db.getGroupInfo(groupId, user);
-    if (!group) {
+    const { channelId } = req.params;
+    const channel = await this.db.getChannelInfo(channelId, user);
+    if (!channel) {
       return res.response({ status: false }).code(404);
     }
     const { members } = req.payload;
@@ -215,63 +236,66 @@ class GroupMs extends HttpServiceBase {
         status: true
       };
     }
-    const newMembers = members.map((member) => ({ username: member, role: 'user' }));
-    await this.db.addMember(groupId, user, newMembers);
-    const existingMembers = group.members.map((member) => member.username);
+    const newMembers = members.map((member) => ({
+      username: member,
+      role: 'user',
+      since: Date.now()
+    }));
+    await this.db.addMember(channelId, newMembers);
+    const existingMembers = channel.members.map((member) => member.username);
     const receivers = [...new Set(existingMembers.concat(members))];
-    const event = new GroupEvent(groupId, 'add', user);
+    const event = new ChannelEvent(channelId, 'add', user);
     event.newMembers(newMembers)
-    this.sendNotification(event, receivers);
+    event.set_recipients(receivers)
+    this.sendNotification(event);
     return { status: true };
   }
 
   async removeMembers(req, res) {
     const user = extractInfoFromRequest(req, 'user');
     const { member } = req.payload;
-    const { groupId } = req.params;
-    const group = await this.db.getGroupInfo(groupId, user)
-    if (!group) {
+    const { channelId } = req.params;
+    const channel = await this.db.getChannelInfo(channelId, user)
+    if (!channel) {
       return res.response({ status: false }).code(404);
     }
     const isSelf = user === member;
-    const self = group.members.find((x) => x.username === user);
+    const self = channel.members.find((x) => x.username === user);
     if (!isSelf && self.role !== 'admin') {
       return {
         status: false
       };
     }
 
-    await this.db.removeMember(groupId, user, [member]);
+    await this.db.removeMember(channelId, [member]);
 
     if (isSelf && self.role === 'admin') {
-      const admin = group.members.find((x) => x.username !== user && x.role === 'admin');
+      const admin = channel.members.find((x) => x.username !== user && x.role === 'admin');
       if (!admin) {
-        const nextAdmin = group.members.find((x) => x.username !== user);
+        const nextAdmin = channel.members.find((x) => x.username !== user);
         if (nextAdmin) {
           nextAdmin.role = 'admin';
-          await this.db.updateMemberRole(groupId, nextAdmin.username, nextAdmin.role);
+          await this.db.updateMemberRole(channelId, nextAdmin.username, nextAdmin.role);
         }
       }
     }
-    const event = new GroupEvent(groupId, 'remove', user)
-    event.removedMembers([member])
-    this.sendNotification(event, group.members.map((u) => u.username));
+    const event = new ChannelEvent(channelId, 'remove', user);
+    event.removedMembers([member]);
+    event.set_recipients(channel.members.map((u) => u.username));
+    this.sendNotification(event);
     return {
       status: true
     };
   }
 
   /**
-   * Send Group action update to all group members
-   * @param {GroupEvent} notification
+   * Send Channel action update to all channel members
+   * @param {ChannelEvent} notification
    * @param {string[]} receivers
    */
-  async sendNotification(notification, receivers) {
-    const { systemMessageTopic } = this.options;
-    const promises = receivers.map(async (r) => {
-      await this.eventStore.emit(systemMessageTopic, notification, r);
-    })
-    await Promise.all(promises)
+  async sendNotification(notification) {
+    const { newMessageTopic } = this.options;
+    await this.eventStore.emit(newMessageTopic, notification, notification.id);
   }
 
   async shutdown() {
@@ -286,11 +310,11 @@ if (asMain) {
   const options = parseOptions(argv);
   initResource(options)
     .then(async (context) => {
-      await new GroupMs(context).run();
+      await new ChannelMs(context).run();
     })
     .catch(async (error) => {
       // eslint-disable-next-line no-console
-      console.error('Failed to initialized Group MS', error);
+      console.error('Failed to initialized Channel MS', error);
       process.exit(1);
     });
 }

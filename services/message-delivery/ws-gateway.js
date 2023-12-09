@@ -1,5 +1,4 @@
-const webSocker = require('ws');
-const Joi = require('joi');
+const WebSocket = require('ws');
 const URL = require('url');
 const {
   initDefaultOptions,
@@ -8,7 +7,7 @@ const {
 } = require('../../libs/service-base');
 const { addHttpOptions, initHttpResource, HttpServiceBase } = require('../../libs/http-service-base');
 const EventStore = require('../../libs/event-store');
-const { uuidv4, shortuuid, extractInfoFromRequest, schemas, base64ToProtoBuffer, getUTCTime } = require('../../helper');
+const { uuidv4, shortuuid, getUTCTime } = require('../../helper');
 const { MessageEvent, ConnectionStateEvent, MESSAGE_TYPE } = require('../../libs/event-args');
 
 const asMain = require.main === module;
@@ -17,6 +16,7 @@ const EVENT_TYPE = {
   CONNECTION_EVENT: 'connection-state',
   NEW_MESSAGE_EVENT: 'new-message',
   CLIENT_ACK: 'client-ack',
+  OFFLINE_EVENT: 'offline-event',
 }
 
 async function prepareListEvent(context) {
@@ -98,24 +98,11 @@ class Gateway extends HttpServiceBase {
   async init() {
     await super.init();
     this.initWebsocket();
-
     this.addRoute('/send', 'post', this.sendRestMessage.bind(this));
-
-    this.addRoute(
-      '/messages',
-      'post',
-      this.newMessage.bind(this),
-      {
-        validate: {
-          headers: schemas.authHeaders,
-          payload: Joi.array().items(Joi.string()).min(1).required()
-        }
-      }
-    );
   }
 
   initWebsocket() {
-    const wss = new webSocker.Server({ server: this.httpServer });
+    const wss = new WebSocket.Server({ server: this.httpServer });
     this.context.wss = wss;
     wss.on('connection', (ws, request) => {
       const user = getUserInfoFromRequest(request);
@@ -126,50 +113,6 @@ class Gateway extends HttpServiceBase {
       ws.on('message', (payload, isBinary) => this.onMessage(payload, isBinary, user));
       ws.on('close', () => this.onDisconnect(user));
     });
-  }
-
-  async newMessage(req, res) {
-    const user = extractInfoFromRequest(req, 'user');
-    const { format, ack } = req.query;
-    const isbinary = format === 'binary';
-    const messages = req.payload;
-
-    this.statsClient.increment({
-      stat: 'message.received.count',
-      value: messages.length,
-      tags: {
-        channel: 'rest',
-        gateway: this.options.gatewayName,
-        user,
-      }
-    });
-
-    const promises = messages.map(async (msg) => {
-      let event;
-      const options = {
-        source: user
-      }
-      if (isbinary) {
-        const bmsg = base64ToProtoBuffer(msg);
-        event = MessageEvent.fromBinary(bmsg, options);
-      } else {
-        event = MessageEvent.fromString(msg, options);
-      }
-      event.set_server_id();
-      event.set_server_timestamp();
-      await this.publishEvent(EVENT_TYPE.NEW_MESSAGE_EVENT, event, event.destination);
-      if (ack) {
-        return event.buildServerAckMessage()
-      }
-    })
-    const acks = await Promise.all(promises);
-    const response = ack ? {
-      acks: acks.map((m) => (isbinary ?
-        m.toBinary().toString('base64')
-        : m.toString()
-      ))
-    } : {}
-    return res.response(response).code(201);
   }
 
   async onMessage(payload, isBinary, user) {
@@ -317,10 +260,13 @@ class Gateway extends HttpServiceBase {
    */
   sendWebsocketMessage(user, message) {
     const ws = this.userSocketMapping.get(user)
+    const options = {
+      ignore: ['recipients'],
+    };
     if (ws.isbinary) {
-      ws.send(message.toBinary(), { isBinary: true })
+      ws.send(message.toBinary(options), { isBinary: true })
     } else {
-      ws.send(message.toString());
+      ws.send(message.toString(options));
     }
     this.statsClient.increment({
       stat: 'message.delivery.count',

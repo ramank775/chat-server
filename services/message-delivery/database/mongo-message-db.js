@@ -3,12 +3,6 @@ const { IMessageDB } = require('./message-db');
 const { addMongodbOptions, initMongoClient } = require('../../../libs/mongo-utils');
 const { MessageEvent } = require('../../../libs/event-args')
 
-const MESSAGE_STATUS = {
-  UNDELIVERED: 0,
-  SENT: 1,
-  DELIVERED: 2
-}
-
 class MongoMessageDB extends IMessageDB {
 
   /** @type { import('mongodb').MongoClient } */
@@ -28,23 +22,48 @@ class MongoMessageDB extends IMessageDB {
 
   /**
    * Save messages in database
-   * @param {string} user
    * @param {MessageEvent[]} messages 
    */
-  async save(user, messages) {
+  async save(messages) {
     const expireAt = moment().add(30, 'days').toDate()
     const msgs = messages.map(msg => ({
       id: msg.id,
-      user,
-      payload: msg.toBinary(),
-      status: MESSAGE_STATUS.UNDELIVERED,
+      chat: msg.destination,
+      payload: msg.toBinary({
+        ignore: ['recipients']
+      }),
+      delivery: {
+        [msg.source]: new Date(),
+      },
+      recievedAt: msg.server_timestamp,
       expireAt
     }))
     await this.#collection.insertMany(msgs)
   }
 
-  async getUndeliveredMessage(userId) {
-    const cursor = this.#collection.find({ user: userId, status: 0 }, { projection: { payload: 1 } });
+  /**
+   * Get Pending Messages
+   * @param {{id: string, since: number, until: number }} chats
+   * @param {string} source
+   * @return {Promise<MessageEvent[]>}
+   */
+  async getUndeliveredMessage(chats, source) {
+    const query = chats.map((chat) => ({
+      chat: chat.id,
+      recievedAt: {
+        $gte: chat.since || -1,
+        $lte: chat.until || Date.now()
+      },
+      [`delivery.${source}`]: { $exists: false },
+    }))
+    const cursor = this.#collection.find({
+      $or: query,
+    }, {
+      sort: {
+        _id: 1,
+      },
+      projection: { payload: 1 }
+    });
     const messageEventCursor = cursor.map((doc) => {
       const binary = doc.payload.buffer
       return MessageEvent.fromBinary(binary)
@@ -52,22 +71,18 @@ class MongoMessageDB extends IMessageDB {
     return await messageEventCursor.toArray()
   }
 
-  async markMessageSent(userId, messageIds) {
-    const expireAt = moment().add(7, 'days').toDate();
+  /**
+   * @abstract
+   * Mark message as delivered
+   * @param {string} source
+   * @param {string[]} messageIds
+   */
+  async markMessageDelivered(messageIds, source) {
     await this.#collection.updateMany({
-      user: userId, id: { $in: messageIds }
+      id: { $in: messageIds }
     }, {
-      $set: {
-        status: MESSAGE_STATUS.SENT,
-        expireAt,
-      }
-    })
-  }
-
-  async markMessageDelivered(userId, messageIds) {
-    await this.#collection.deleteMany(
-      { user: userId, id: { $in: messageIds } }
-    );
+      $set: { [`delivery.${source}`]: new Date() }
+    });
   }
 
   /**

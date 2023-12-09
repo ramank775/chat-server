@@ -2,36 +2,37 @@
 
 /**
  * @abstract
- * Interface for Group Database
+ * Interface for Channel Database
  */
- class IGroupDB {
+ class IChannelDB {
 
   /**
-   * Group Database interface
+   * Channel Database interface
    * @param {*} context 
    */
   // eslint-disable-next-line no-unused-vars
   constructor(context) {
-    if (this.constructor === IGroupDB) {
+    if (this.constructor === IChannelDB) {
       throw new Error("Abstract classes can't be instantiated.");
     }
   }
 
    /**
     * @abstract
-   * Get all the groups of a member
+   * Get all the channels of a member
    * @param {string} memberId
+   * @param {string|null} type
    * @returns {Promise<[]>}
    */
   // eslint-disable-next-line no-unused-vars
-    async getMemberGroups(memberId) {
+    async getMemberChannels(memberId, type = null) {
       throw new Error('Method not implemented')
     }
   
   /**
    * @abstract
-   * Create new User group
-   * @param {{name: string; members: {username: string, role: string}[]; profilePic: string|null}} payload
+   * Create new Channel
+   * @param {{name: string; type: string; members: {username: string, role: string}[]; profilePic: string|null}} payload
    * @returns {Promise<string>}
    */
   // eslint-disable-next-line no-unused-vars
@@ -40,35 +41,34 @@
   }
 
   /**
-   * Get Group info
-   * @param {string} groupId 
-   * @param {string} memberId
+   * Get Channel info
+   * @param {string} channelId 
+   * @param {string|null} memberId
+   * @returns {Promise<{name: string; type: string; members: {username: string, role: string}[]; profilePic: string|null}>}
    */
   // eslint-disable-next-line no-unused-vars
-  async getGroupInfo(groupId, memberId) {
+  async getChannelInfo(channelId, memberId) {
     throw new Error('Method not implemented')
   }
 
   /**
    * @abstract
-   * Add Member to existing group
-   * @param {string} groupId
-   * @param {string} memberId
+   * Add Member to existing channel
+   * @param {string} channelId
    * @param {{username: string; role: string}} newMembers
    */
   // eslint-disable-next-line no-unused-vars
-  async addMember(groupId, memberId, newMembers) {
+  async addMember(channelId, newMembers) {
     throw new Error('Method not implemented')
   }
 
   /**
-   * Remove member from the group
-   * @param {string} groupId 
-   * @param {string} memberId
+   * Remove member from the channel
+   * @param {string} channelId 
    * @param {string[]} exitMemberIds
    */
   // eslint-disable-next-line no-unused-vars
-  async removeMember(groupId, memberId, exitMemberIds) {
+  async removeMember(channelId, exitMemberIds) {
     throw new Error('Method not implemented')
   }
 
@@ -76,12 +76,11 @@
   /**
    * @abstract
    * Update Member role
-   * @param {string} groupId 
-   * @param {string} memberId 
+   * @param {string} channelId 
    * @param {string} role 
    */
   // eslint-disable-next-line no-unused-vars
-   async updateMemberRole(groupId, memberId, role) {
+   async updateMemberRole(channelId, role) {
      throw new Error('Not implemented Exception')
    }
 
@@ -103,5 +102,5 @@
 }
 
 module.exports = {
-  IGroupDB
+  IChannelDB
 }
