@@ -30,7 +30,7 @@
     {
       "type": "node",
       "request": "launch",
-      "name": "Launch Message Delivery MS",
+      "name": "Launch Message Delivery Worker",
       "program": "${workspaceFolder}/services/message-delivery/message-delivery-worker.js",
       "args": [
         "--app-name=message-delivery",
@@ -47,7 +47,7 @@
         "--kafka-sasl-password=${KAFKA_SASL_PASSWORD}",
         "--nats-server-list=${NATS_SERVER_LIST}",
         "--nats-consumer-group=${CONSUMER_GROUP_MESSAGE_DELIVERY}",
-        
+        "--channel-ms-endpoint=http://127.0.0.1:4002"
       ],
       "envFile": "${workspaceFolder}/.env",
       "autoAttachChildProcesses": true

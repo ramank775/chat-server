@@ -94,15 +94,21 @@ class MessageDeliveryWorker extends ServiceBase {
    */
   async onMessage(message) {
     if (!message.hasRecipients()) {
-      const channel = await this.channelClient.getChannelInfo(message.destination)
+      let channel = await this.channelClient.getChannelInfo(message.destination)
       if (!channel) {
-        this.log.info(`No channel found against ${message.distination}`)
-        return;
+        this.log.info(`No channel found against ${message.destination}`)
+        if (message.channel === CHANNEL_TYPE.INDIVIDUAL) {
+          this.log.info(`Channel is of type individual, using destination as recipient`);
+          channel = {
+            members: [{
+              username: message.destination
+            }]
+          };
+        } else {
+          return;
+        }
       }
       const recipients = channel.members.map((member) => member.username)
-      if (!recipients.length && message.channel === CHANNEL_TYPE.INDIVIDUAL) {
-        recipients.push(message.destination);
-      }
       message.setRecipients(recipients);
     }
     await this.deliveryManager.dispatch(message);

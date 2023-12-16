@@ -220,8 +220,6 @@ class Gateway extends HttpServiceBase {
             gateway: this.options.gatewayName,
             channel: 'websocket',
             user,
-            retry: message.meta.retry || 0,
-            saved: message.meta.saved || false,
             sid: message.server_id,
           }
         })

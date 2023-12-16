@@ -24,7 +24,7 @@ message Message {
   bytes content = 8;
   uint64 timestamp = 9;
   map<string, string> meta = 10;
-  optional repeated string recipients = 11;
+  repeated string recipients = 11;
   string serverId = 20;
   uint64 serverTimestamp = 21;
 }

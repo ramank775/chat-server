@@ -6,8 +6,15 @@ class ChannelServiceClient {
   }
 
   async getChannelInfo(channelId) {
-    const { members } = await this._client.get(`/${channelId}`);
-    return members;
+    try {
+      const channel = await this._client.get(`/_internal/${channelId}`);
+      return channel;
+    } catch (e) {
+      if (e.code === 'ERR_BAD_REQUEST') {
+        return null;
+      }
+      throw new Error(e.message || e);
+    }
   }
 }
 

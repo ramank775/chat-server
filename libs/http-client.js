@@ -3,7 +3,7 @@ const axios = require('axios');
 class HttpClient {
   constructor(baseUrl) {
     this._client = axios.create({
-      baseUrl,
+      baseURL: baseUrl,
     });
   }
 

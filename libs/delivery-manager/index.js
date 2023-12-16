@@ -73,7 +73,7 @@ class DeliveryManager {
       this._handleOfflineMessage(msg)
       return;
     }
-    const servers = await this._redis.getAll(recipients)
+    const servers = await this._redis.mget(recipients)
     const recipientGroups = servers.reduce((acc, value, idx) => {
       value = value || 'offline';
       if (!acc.has(value)) {

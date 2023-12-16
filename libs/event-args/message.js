@@ -260,7 +260,7 @@ class MessageEvent extends IEventArg {
       serverId: this._server_id,
       serverTimestamp: this._server_timestamp
     }
-    (options?.ignore || []).forEach((prop) => {
+    options?.ignore?.forEach((prop) => {
       delete message[prop]
     })
     const errorMessage = messageDefination.verify(message);
