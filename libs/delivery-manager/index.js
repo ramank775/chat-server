@@ -55,7 +55,7 @@ class DeliveryManager {
     });
     await this._subscriber.psubscribe(`msg:${this.serverId}:*`)
 
-    setInterval(this._handleAlivePing, 700);
+    setInterval(this._handleAlivePing.bind(this), 700);
   }
 
   async userJoin(user) {

@@ -86,7 +86,7 @@ class MessageDeliveryWorker extends ServiceBase {
     this.eventStore.on = async (event, message, key) => {
       this.onMessage(message, key);
     };
-    this.deliveredMessages.handleOfflineMessage = this.handleOfflineMessage;
+    this.deliveryManager.offlineMessageHandler = this.handleOfflineMessage.bind(this);
   }
 
   /**

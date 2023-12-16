@@ -1,11 +1,14 @@
-const AWS = require('aws-sdk');
-const { IFileStorage } = require('./file-storage')
+const { S3Client, PutObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3')
+const { getSignedUrl } = require('@aws-sdk/s3-request-presigner')
+const { IFileStorage } = require('./file-storage');
 
 class S3FileStorage extends IFileStorage {
   #options;
 
-  /** @type {AWS.S3} */
+  /** @type {S3Client} */
   #client;
+
+  #urlExpireTime
 
   /**
    * Group Database interface
@@ -13,6 +16,7 @@ class S3FileStorage extends IFileStorage {
    */
   constructor(context) {
     super(context);
+    this.#urlExpireTime = context.options.urlExpireTime;
     this.#options = {
       baseDir: context.options.baseUploadDir,
       accessKeyId: context.options.s3AccessKeyId,
@@ -20,7 +24,7 @@ class S3FileStorage extends IFileStorage {
       region: context.options.s3Region,
       expireTime: context.options.urlExpireTime,
       bucketName:  context.options.s3BucketName
-    }
+    };
   }
 
   /**
@@ -35,19 +39,25 @@ class S3FileStorage extends IFileStorage {
       Key: key,
       Expires: this.#options.expireTime
     };
+    let command
     if (payload.operation === 'upload') {
       params.ContentType = payload.contentType;
+      command = new PutObjectCommand(params);
+    } else {
+      command = new GetObjectCommand(params);
     }
-    const operation = payload.operation === 'upload'? 'putObject' : 'getObject';
-    const preSignedURL = this.#client.getSignedUrl(operation, params);
-    return preSignedURL;
+
+    const url = await getSignedUrl(this.#client, command, {
+      expiresIn: this.#urlExpireTime,
+    });
+    return url;
   }
 
   /**
    * Initialize the file storage instance
    */
   async init() {
-    this.#client = new AWS.S3({
+    this.#client = new S3Client({
       credentials: {
         accessKeyId: this.#options.accessKeyId,
         secretAccessKey: this.#options.secretAccessKey,

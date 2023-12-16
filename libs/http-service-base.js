@@ -46,7 +46,7 @@ class HttpServiceBase extends ServiceBase {
     this.histDict = {};
     this.httpServer = context.httpServer;
     this.baseRoute = this.options.baseRoute || '';
-    this.internalBaseRoute = '_internal';
+    this.internalBaseRoute = '/_internal';
   }
 
   get uri() {
@@ -120,7 +120,7 @@ class HttpServiceBase extends ServiceBase {
   }
 
   addInternalRoute(uri, method, handler, options = {}) {
-    const path = `${this.internalBaseRoute}/${this.baseRoute}/${uri}`;
+    const path = `${this.internalBaseRoute}${this.baseRoute}${uri}`;
     if (options && options.validate) {
       options.validate.options = {
         abortEarly: false
