@@ -6,9 +6,8 @@ const {
   resolveEnvVariables
 } = require('../../libs/service-base');
 const ChannelServiceClient = require('../../libs/channel-service-client');
-const { shortuuid } = require('../../helper');
-const { MessageEvent } = require('../../libs/event-args');
-const DeliveryManager = require('./delivery-manager')
+const { MessageEvent, CHANNEL_TYPE } = require('../../libs/event-args');
+const DeliveryManager = require('../../libs/delivery-manager')
 
 const asMain = require.main === module;
 
@@ -75,11 +74,11 @@ class MessageDeliveryWorker extends ServiceBase {
     /** @type {import('../../libs/event-store/iEventStore').IEventStore} */
     this.eventStore = this.context.eventStore;
     this.events = this.context.events;
-    
+
     /** @type { import('../../libs/channel-service-client').ChannelServiceClient } */
     this.channelClient = this.context.channelServiceClient;
-    
-    /** @type { import('./delivery-manager').DeliveryManager } */
+
+    /** @type { import('../../libs/delivery-manager').DeliveryManager } */
     this.deliveryManager = this.context.deliveryManager;
   }
 
@@ -87,8 +86,7 @@ class MessageDeliveryWorker extends ServiceBase {
     this.eventStore.on = async (event, message, key) => {
       this.onMessage(message, key);
     };
-
-    this.deliveredMessages.handleOfflineMessage = this.handleOfflineMessage
+    this.deliveredMessages.handleOfflineMessage = this.handleOfflineMessage;
   }
 
   /**
@@ -102,98 +100,27 @@ class MessageDeliveryWorker extends ServiceBase {
         return;
       }
       const recipients = channel.members.map((member) => member.username)
+      if (!recipients.length && message.channel === CHANNEL_TYPE.INDIVIDUAL) {
+        recipients.push(message.destination);
+      }
       message.setRecipients(recipients);
     }
     await this.deliveryManager.dispatch(message);
   }
 
   /**
-   * 
-   * @param {import('../../libs/event-args').MessageEvent} value 
-   * @param {string} receiver
+   * Handle offline message delivery
+   * @param {import('../../libs/event-args').MessageEvent}  message 
    */
-  async sendMessage(value, receiver) {
-    await this.sendMessageWithRetry(receiver, [value], { saved: false, retry: 0 })
-  }
-
-  async sendMessageWithRetry(receiver, messages, { trackid = null, saved = false, retry = 0 }) {
-    if (retry > this.maxRetryCount) return
-    const servers = await this.getServer([receiver])
-    const server = servers[receiver]
-    if (!server) {
-      if (saved) return
-      await this.handleOfflineMessage(messages, receiver);
+  async handleOfflineMessage(message) {
+    if (message.ephemeral) {
       return
     }
-    const url = await this.discoveryService.getServiceUrl(server);
-    const trackId = trackid || this.context.asyncStorage.getStore() || shortuuid();
-    const body = {
-      items: [{
-        receiver,
-        meta: {
-          saved,
-          retry
-        },
-        messages: messages.map((m) => ({ sid: m.server_id, raw: m.toBinary() }))
-      }]
-    }
-    fetch(`${url}/send`, {
-      method: 'post',
-      body: JSON.stringify(body),
-      headers: {
-        'Content-Type': 'application/json',
-        'x-request-id': trackId
-      }
-    })
-      .then((res) => res.json())
-      .then(async ({ errors }) => {
-        if (!(errors && errors.length)) {
-          return;
-        }
-        const error = errors[0];
-        if (error.code === 404) {
-          await this.onDisconnect(receiver, server);
-          await this.sendMessageWithRetry(receiver, messages, { trackid: trackId, saved, retry: retry + 1 })
-          return;
-        }
-        const errorMessages = [];
-        const deliveredMessages = [];
-        let hasNotFoundError = false;
-        messages.forEach((m) => {
-          const errMsg = error.messages.find((err) => err.sid === m.server_id)
-          if (!errMsg) {
-            deliveredMessages.push(m.id)
-          } else if (errMsg.code === 404) {
-            hasNotFoundError = true
-            errorMessages.push(m)
-          }
-        })
-        if (hasNotFoundError) {
-          await this.onDisconnect(receiver, server);
-        }
-        if (deliveredMessages.length) {
-          await this.db.markMessageSent(receiver, deliveredMessages)
-        }
-        if (errorMessages.length) {
-          await this.sendMessageWithRetry(receiver, errorMessages, { trackid: trackId, saved, retry: retry + 1 })
-        }
-      })
-      .catch((e) => {
-        this.log.error('Error while sending messages', e);
-      });
-  }
-
-  /**
-   * Handle offline message delivery
-   * @param {import('../../libs/event-args').MessageEvent[]}  messages 
-   */
-  async handleOfflineMessage(messages) {
-    const promises = messages
-      .filter((m) => !m.ephemeral)
-      .map(async (m) => {
-        await this.eventStore.emit(this.events[EVENT_TYPE.OFFLINE_EVENT], m, m.destination);
-      })
-    await Promise.all(promises);
+    await this.eventStore.emit(
+      this.events[EVENT_TYPE.OFFLINE_EVENT],
+      message,
+      message.destination
+    );
   }
 
   async shutdown() {

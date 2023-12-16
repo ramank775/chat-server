@@ -47,10 +47,6 @@ function parseOptions(argv) {
       'Used as gateway server idenitifer for the user connected to this server.'
     )
     .option(
-      '--user-connection-state-topic <user-connection-state-topic>',
-      'Used by producer to produce message when a user connected/disconnected to server'
-    )
-    .option(
       '--new-message-topic <new-message-topic>',
       'Used by producer to produce new message for each new incoming message'
     )
@@ -74,7 +70,7 @@ class RestGateway extends HttpServiceBase {
   async init() {
     await super.init();
     this.addRoute(
-      '/messages',
+      '/',
       'get',
       this.getMessage.bind(this),
       {
@@ -84,7 +80,7 @@ class RestGateway extends HttpServiceBase {
       }
     );
     this.addRoute(
-      '/messages',
+      '/',
       'post',
       this.newMessage.bind(this),
       {

@@ -8,12 +8,12 @@ const {
 const { addHttpOptions, initHttpResource, HttpServiceBase } = require('../../libs/http-service-base');
 const EventStore = require('../../libs/event-store');
 const { uuidv4, shortuuid, getUTCTime } = require('../../helper');
-const { MessageEvent, ConnectionStateEvent, MESSAGE_TYPE } = require('../../libs/event-args');
+const { MessageEvent, MESSAGE_TYPE } = require('../../libs/event-args');
+const DeliveryManager = require('../../libs/delivery-manager');
 
 const asMain = require.main === module;
 
 const EVENT_TYPE = {
-  CONNECTION_EVENT: 'connection-state',
   NEW_MESSAGE_EVENT: 'new-message',
   CLIENT_ACK: 'client-ack',
   OFFLINE_EVENT: 'offline-event',
@@ -22,9 +22,9 @@ const EVENT_TYPE = {
 async function prepareListEvent(context) {
   const { options } = context;
   const eventName = {
-    [EVENT_TYPE.CONNECTION_EVENT]: options.userConnectionStateTopic,
     [EVENT_TYPE.NEW_MESSAGE_EVENT]: options.newMessageTopic,
     [EVENT_TYPE.CLIENT_ACK]: options.clientAckTopic,
+    [EVENT_TYPE.OFFLINE_EVENT]: options.offlineMessageTopic,
   };
   context.events = eventName;
   return context;
@@ -34,7 +34,8 @@ async function initResources(options) {
   const context = await initDefaultResources(options)
     .then(prepareListEvent)
     .then(initHttpResource)
-    .then(EventStore.initializeEventStore({ producer: true }));
+    .then(EventStore.initializeEventStore({ producer: true }))
+    .then(DeliveryManager.init);
 
   return context;
 }
@@ -43,14 +44,11 @@ function parseOptions(argv) {
   let cmd = initDefaultOptions();
   cmd = addHttpOptions(cmd);
   cmd = EventStore.addEventStoreOptions(cmd);
+  cmd = DeliveryManager.addOptions(cmd);
   cmd
     .option(
-      '--gateway-name <app-name>',
+      '--gateway-name <gateway-name>',
       'Used as gateway server idenitifer for the user connected to this server.'
-    )
-    .option(
-      '--user-connection-state-topic <user-connection-state-topic>',
-      'Used by producer to produce message when a user connected/disconnected to server'
     )
     .option(
       '--new-message-topic <new-message-topic>',
@@ -59,7 +57,11 @@ function parseOptions(argv) {
     .option(
       '--client-ack-topic <client-ack-topic>',
       'Used by producer to produce for ack message received by client.'
-    );
+    )
+    .option(
+      '--offline-message-topic <offline-message-topic>',
+      'Used by producer to produce new message for offline'
+    )
   return cmd.parse(argv).opts();
 }
 
@@ -93,12 +95,17 @@ class Gateway extends HttpServiceBase {
       await eventStore.emit(events[event], eventArgs, key);
     };
     this.userSocketMapping = new Map();
+
+    /** @type { import('../../libs/delivery-manager').DeliveryManager } */
+    this.deliveryManager = context.deliveryManager;
   }
 
   async init() {
     await super.init();
     this.initWebsocket();
-    this.addRoute('/send', 'post', this.sendRestMessage.bind(this));
+    this.deliveryManager.offlineMessageHandler = () => { }
+    this.deliveryManager.messageHandler = this.messageHandler.bind(this)
+    await this.deliveryManager.startConsumer();
   }
 
   initWebsocket() {
@@ -163,8 +170,7 @@ class Gateway extends HttpServiceBase {
         user,
       }
     });
-    const message = ConnectionStateEvent.connect(user, this.options.gatewayName);
-    await this.publishEvent(EVENT_TYPE.CONNECTION_EVENT, message, user);
+    await this.deliveryManager.userJoin(user);
   }
 
   async onDisconnect(user) {
@@ -178,79 +184,15 @@ class Gateway extends HttpServiceBase {
         user,
       }
     });
-    const message = ConnectionStateEvent.disconnect(user, this.options.gatewayName);
-    await this.publishEvent(EVENT_TYPE.CONNECTION_EVENT, message, user);
+    await this.deliveryManager.userLeft(user);
   }
 
-  async sendRestMessage(req, _res) {
-    const items = req.payload.items || [];
-    const errors = [];
-    items.forEach((item) => {
-      const { receiver, messages, meta } = item
-      if (!messages.length) return;
-      const ws = this.userSocketMapping.get(receiver);
-      if (ws) {
-        const uError = []
-        messages.forEach((m) => {
-          try {
-            const message = MessageEvent.fromBinary(Buffer.from(m.raw));
-            this.sendWebsocketMessage(receiver, message);
-            this.statsClient.timing({
-              stat: 'message.delivery.latency',
-              value: getUTCTime() - message.server_timestamp,
-              tags: {
-                gateway: this.options.gatewayName,
-                channel: 'websocket',
-                user: receiver,
-                retry: meta.retry || 0,
-                saved: meta.saved || false,
-                sid: message.server_id,
-              }
-            })
-          } catch (e) {
-            uError.push({
-              code: 500,
-              error: e,
-              sid: m.sid
-            });
-          }
-        })
-        errors.push({
-          receiver,
-          messages: uError
-        })
-        if (uError.length) {
-          this.statsClient.increment({
-            stat: 'message.delivery.error_count',
-            value: uError.length,
-            tags: {
-              channel: 'websocket',
-              gateway: this.options.gatewayName,
-              user: receiver,
-              code: 500,
-            }
-          })
-        }
-      } else {
-        errors.push({
-          code: 404,
-          receiver,
-          messages: messages.map((m) => ({ sid: m.sid }))
-        });
-        this.statsClient.increment({
-          stat: 'message.delivery.error_count',
-          tags: {
-            channel: 'websocket',
-            gateway: this.options.gatewayName,
-            user: receiver,
-            code: 404,
-          }
-        })
-      }
+  async messageHandler(msg) {
+    const failure = msg.recipients.filter((rcpt) => {
+      const success = this.sendWebsocketMessage(rcpt, msg);
+      return !success
     });
-    return {
-      errors
-    };
+    return failure;
   }
 
   /**
@@ -260,24 +202,59 @@ class Gateway extends HttpServiceBase {
    */
   sendWebsocketMessage(user, message) {
     const ws = this.userSocketMapping.get(user)
-    const options = {
-      ignore: ['recipients'],
-    };
-    if (ws.isbinary) {
-      ws.send(message.toBinary(options), { isBinary: true })
-    } else {
-      ws.send(message.toString(options));
-    }
-    this.statsClient.increment({
-      stat: 'message.delivery.count',
-      tags: {
-        serverAck: message.isServerAck,
-        channel: 'websocket',
-        gateway: this.options.gatewayName,
-        user,
-        format: ws.isbinary ? 'binary' : 'text',
+    let errorCode = 404;
+    if (ws) {
+      try {
+        const options = {
+          ignore: ['recipients'],
+        };
+        if (ws.isbinary) {
+          ws.send(message.toBinary(options), { isBinary: true })
+        } else {
+          ws.send(message.toString(options));
+        }
+        this.statsClient.timing({
+          stat: 'message.delivery.latency',
+          value: getUTCTime() - message.server_timestamp,
+          tags: {
+            gateway: this.options.gatewayName,
+            channel: 'websocket',
+            user,
+            retry: message.meta.retry || 0,
+            saved: message.meta.saved || false,
+            sid: message.server_id,
+          }
+        })
+        this.statsClient.increment({
+          stat: 'message.delivery.count',
+          tags: {
+            serverAck: message.isServerAck,
+            channel: 'websocket',
+            gateway: this.options.gatewayName,
+            user,
+            format: ws.isbinary ? 'binary' : 'text',
+          }
+        });
+        errorCode = null
+      } catch (e) {
+        this.log.error('Error while sending websocket message', {
+          err: e
+        });
+        errorCode = 500
       }
-    });
+    }
+    if (errorCode) {
+      this.statsClient.increment({
+        stat: 'message.delivery.error_count',
+        tags: {
+          channel: 'websocket',
+          gateway: this.options.gatewayName,
+          user,
+          code: errorCode,
+        }
+      });
+    }
+    return errorCode == null;
   }
 
   async shutdown() {

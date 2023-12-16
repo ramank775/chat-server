@@ -143,6 +143,24 @@ class MessageEvent extends IEventArg {
     return message;
   }
 
+  clone() {
+    const cloneMessage = new MessageEvent();
+    cloneMessage._version = this._version;
+    cloneMessage._id = this._id;
+    cloneMessage._type = this._type;
+    cloneMessage._channel = this._channel;
+    cloneMessage._ephemeral = this._ephemeral;
+    cloneMessage._source = this._source;
+    cloneMessage._destination = this._destination;
+    cloneMessage._timestamp = this._timestamp;
+    cloneMessage._content = this._content;
+    cloneMessage._meta = this._meta;
+    cloneMessage._recipients = this._recipients;
+    cloneMessage._server_id = this._server_id;
+    cloneMessage._server_timestamp = this._server_timestamp;
+    return cloneMessage;
+  }
+
   /**
    * Convert to JSON Object
    * @param {SerializationOption} options 
@@ -242,9 +260,9 @@ class MessageEvent extends IEventArg {
       serverId: this._server_id,
       serverTimestamp: this._server_timestamp
     }
-      (options?.ignore || []).forEach((prop) => {
-        delete message[prop]
-      })
+    (options?.ignore || []).forEach((prop) => {
+      delete message[prop]
+    })
     const errorMessage = messageDefination.verify(message);
     if (errorMessage) {
       throw new Error(errorMessage)
