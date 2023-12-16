@@ -20,7 +20,6 @@ function prepareMongoOptions(options) {
     auth,
     sslCert: clientCertificate,
     sslKey: clientCertificate,
-    useUnifiedTopology: true
   };
   let url = options.mongoUrl;
   if (options.mongoSslEnable) {
