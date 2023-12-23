@@ -86,7 +86,9 @@ class RestGateway extends HttpServiceBase {
       {
         validate: {
           headers: schemas.authHeaders,
-          payload: Joi.array().items(Joi.string()).min(1).required()
+          payload: Joi.array().items(
+            Joi.any()
+          ).min(1).required()
         }
       }
     );

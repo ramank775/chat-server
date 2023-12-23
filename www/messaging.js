@@ -212,7 +212,7 @@ class MessageV2 extends Message {
       }
       message.head[key] = value;
     })
-    return JSON.stringify(message);
+    return message;
   }
 }
 

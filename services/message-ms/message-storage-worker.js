@@ -5,6 +5,7 @@ const {
   initDefaultResources,
   resolveEnvVariables,
 } = require('../../libs/service-base');
+const { MessageEvent } = require('../../libs/event-args');
 const Database = require('./database');
 
 const asMain = require.main === module;

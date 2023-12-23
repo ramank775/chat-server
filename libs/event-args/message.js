@@ -80,7 +80,7 @@ class MessageEvent extends IEventArg {
       message._source = from || options.source;
       message._destination = to;
       message._channel = type.toUpperCase();
-      message._type = contentType.toUpperCase();
+      message._type = contentType?.toUpperCase();
       if (!Object.values(MESSAGE_TYPE).includes(message._type)) {
         message._type = MESSAGE_TYPE.MESSAGE
       }
@@ -89,7 +89,7 @@ class MessageEvent extends IEventArg {
         .forEach(([key, value]) => {
           message._meta[key] = `${value}`;
         })
-      message._meta.contentType = contentType;
+      message._meta.contentType = contentType || message._type;
       message._content = payload.body
     } else {
       message._id = payload.msgId;
