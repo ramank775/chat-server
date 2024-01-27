@@ -1,0 +1,70 @@
+{{- if .Values.notificationMs.enabled -}}
+{{ $serviceName := "notification" }}
+{{ $dbType := .Values.notificationMs.dbType | default "mongo" }}
+{{ $pushNotificationProvider := .Values.notificationMs.pushNotificationProvider | default "firebase" }}
+{{ $replica := .Values.notificationMs.replica | default 1 }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $serviceName }}
+  labels:
+    - service: {{ $serviceName }}
+    {{- include "chatserver.labels" . | nindent 4 -}}
+spec:
+  replicas: {{ $replica }}
+  selector:
+    matchLabels:
+      - service: {{ $serviceName }}
+      {{- include "chatserver.selectorLabels" . | nindent 6 -}}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations -}}
+      annotations:
+        {{- toYaml . | nindent 8 -}}
+      {{- end -}}
+      labels:
+        - service: {{ $serviceName }}
+        {{- include "chatserver.selectorLabels" . | nindent 8 -}}
+    spec:
+      {{- with .Values.imagePullSecrets -}}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 -}}
+      {{- end -}}
+      serviceName: {{ $serviceName }}
+      serviceAccountName: {{ include "chatserver.serviceAccountName" . }}
+      containers:
+        - name: {{ $serviceName }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 -}}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 80
+              protocol: tcp
+          command:
+            - node
+          args:
+            - /app/services/notification-ms/notification-ms.js
+            - --app-name="${hostname}"
+            - --new-login-topic={{ .Values.topics.login }}
+            - --offline-message-topic={{ .Values.topics.offlineMessage }}
+            - --pn-service={{ $pushNotificationProvider }}
+            {{- if eq "firebase" $pushNotificationProvider -}}
+            - --firebase-admin-credential-json-path=/app/service.json
+            - --firebase-pn-ttl={{ .Values.notificationMs.pushNotificationTTL | default 86400 }}
+            {{- end -}}
+            - --offline-msg-initial={{ .Values.notificationMs.offlineMessagePrefix }}
+            - --notification-db={{ $dbType }}
+            {{- if eq "mongo" $dbType -}}
+            {{ include "mongo.option" . | nindent 12  }}
+            {{- end -}}
+            {{ include "eventBroker.options" (dict "consumerGroup" "notification" ) | nindent 12 }}
+          volumeMounts:
+            - name: firebase-cred
+              mountPath: /app
+      volumes:
+        - name: firebase-cred
+          configMap:
+            name: firebase-admin-cred
+            
+{{- end -}}

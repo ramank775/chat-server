@@ -1,0 +1,10 @@
+{{- if .Values.groupMs.enabled -}}
+{{- $serviceName := "message-router" -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $serviceName }}
+  labels:
+    - service: {{ $serviceName }}
+    {{- include "chatserver.labels" . | nindent 4 -}}
+{{- end -}}

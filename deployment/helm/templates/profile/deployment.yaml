@@ -1,0 +1,57 @@
+{{- .Values.profileMs.enabled -}}
+{{- $serviceName := "file" -}}
+{{- $authDBType := .Values.profileMs.authDBType | default "mongo" -}}
+{{- $profileDBType := .Values.profileMs.profileDBType | default "mongo" -}}
+{{- $authProvider := .Values.profileMs.authProvider | default "firebase" -}}
+{{ $replica := .Values.profileMs.replica | default 1 }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $serviceName }}
+  labels:
+    - service: {{ $serviceName }}
+    {{- include "chatserver.labels" . | nindent 4 -}}
+spec:
+  replicas: {{ $replica }}
+  selector:
+    matchLabels:
+      - service: {{ $serviceName }}
+      {{- include "chatserver.labels" . | nindent 4 -}}
+  template:
+    metadata:
+      name: {{ $serviceName }}
+      labels:
+        - service: {{ $serviceName }}
+        {{- include "chatserver.labels" . | nindent 4 -}}
+    spec:
+      {{- with .Values.imagePullSecrets -}}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 -}}
+      {{- end -}}
+      serviceAccountName: {{ include "chatserver.serviceAccountName" . }}
+      containers:
+        - name: {{ $serviceName }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 -}}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 80
+              protocol: tcp
+          command:
+            - node
+          args:
+            - /app/services/profile-ms/profile-ms.js
+            - --app-name={{ $serviceName }}
+            - --host=0.0.0.0
+            - --port=80
+            - --new-login-topic={{ .Values.topic.login }}
+            - --auth-provider={{ $authProvider }}
+            - --firebase-project-id={{ .Values.firebase.projectId }}
+            - --auth-db={{ $authDBType }}
+            - --profile-db={{ $profileDBType }}
+            {{- if eq "mongo" $authDBType || if eq "mongo" $profileDBType -}}
+            {{ include "mongo.opton" | nindent 12 }}
+            {{- end -}}
+            {{ include "eventStore.option" (dict "consumerGroup" "profile") | nindent 12 }}
+{{- end -}}

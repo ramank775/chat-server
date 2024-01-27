@@ -1,0 +1,44 @@
+{{- if .Values.nginx.enabled -}}
+{{ $replica := .Values.nginx.replica | default 1 }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx
+  labels:
+    - service: "nginx"
+    {{- include "chatserver.labels" . | nindent 4 -}}
+spec:
+  replicas: {{ $replica }}
+  selector:
+    matchLabels:
+      - service: "nginx"
+      {{- include "chatserver.labels" . | nindent 4 -}}
+  template:
+    metadata:
+      name: nginx
+      labels:
+        - service: "nginx"
+        {{- include "chatserver.labels" . | nindent 4 -}}
+    spec:
+      {{- with .Values.imagePullSecrets -}}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 -}}
+      {{- end -}}
+      serviceAccountName: {{ include "chatserver.serviceAccountName" . }}
+      containers:
+        - name: nginx
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 -}}
+          image: "{{ .Values.nginx.image.repository | default nginx}}:{{ .Values.nginx.image.tag | default latest }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 80
+              protocol: tcp
+          volumeMounts:
+            - name: config
+              mountPath: /etc/nginx
+      volumes:
+        - name: config
+          configMap:
+            name: nginxConfig
+{{- end -}}

@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "chatserver.fullname" . }}-test-connection"
+  labels:
+    {{- include "chatserver.labels" . | nindent 4 }}
+  annotations:
+    "chatserver.sh/hook": test
+spec:
+  containers:
+    - name: wget
+      image: busybox
+      command: ['wget']
+      args: ['{{ include "chatserver.fullname" . }}:{{ .Values.service.port }}/healthz']
+  restartPolicy: Never

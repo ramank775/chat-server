@@ -1,0 +1,61 @@
+{{- if .Values.fileMs.enabled -}}
+{{- $serviceName := "file" -}}
+{{- $storageType := .Values.fileMs.storageType | default "s3" -}}
+{{- $uploadDir := .Values.fileMs.uploadDir | default "/"  -}}
+{{- $urlExpiryTime := .Values.fileMs.urlExpiryTime | default 3600 -}}
+{{- $metadataDBType := .Values.fileMs.metadataDBType | default "mongo" -}}
+{{- $replica := .Values.fileMs.replicas | default 1 -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $serviceName }}
+  labels:
+    - service: {{ $serviceName }}
+    {{- include "chatserver.labels" . | nindent 4 -}}
+spec:
+  replicas: {{ $$replica }}
+  selector:
+    matchLabels:
+      - service: {{ $serviceName }}
+      {{- include "chatserver.labels" . | nindent 4 -}}
+  template:
+    metadata:
+      name: {{ $serviceName }}
+      labels:
+        - service: {{ $serviceName }}
+        {{- include "chatserver.labels" . | nindent 4 -}}
+    spec:
+      {{- with .Values.imagePullSecrets -}}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 -}}
+      {{- end -}}
+      serviceAccountName: {{ include "chatserver.serviceAccountName" . }}
+      containers:
+        - name: {{ $serviceName }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 -}}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 80
+              protocol: tcp
+          command:
+            - node
+          args:
+            - /app/services/file-ms/file-ms.js
+            - --app-name={{ $serviceName }}
+            - --host=0.0.0.0
+            - --port=80
+            - --file-metadata-db={{ $metadataDBType }}
+            - --file-storage={{ $storageType }}
+            {{- if eq "s3" $storageType -}}
+            - --s3-bucket-name={{ .Values.s3.bucket }}
+            - --s3-secret-access-key={{ .Values.s3.secretAccessKey }}
+            - --s3-access-key-id={{ .Values.s3.accessKeyId }}
+            {{- end -}}
+            - --base-upload-dir={{ $uploadDir }}
+            - --url-expire-time={{ $urlExpiryTime }}
+            {{- if eq "mongo"  $metadataDBType -}}
+            {{ include "mongo.opton" | nindent 12 }}
+            {{- end -}}
+{{- end -}}

@@ -1,0 +1,53 @@
+{{- if .Values.groupMs.enabled -}}
+{{- $serviceName := "group-message-router" -}}
+{{- $dbType := .Values.groupMs.dbType | default "mongo" -}}
+{{- $replica := .Values.groupMs.routerReplicas | default 1 -}}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $serviceName }}
+  labels:
+    - service: {{ $serviceName }}
+    {{- include "chatserver.labels" . | nindent 4 -}}
+spec:
+  replicas: {{ $replica }}
+  selector:
+    matchLabels:
+      - service: {{ $serviceName }}
+      {{- include "chatserver.selectorLabels" . | nindent 6 -}}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations -}}
+      annotations:
+        {{- toYaml . | nindent 8 -}}
+      {{- end -}}
+      labels:
+        - service: {{ $serviceName }}
+        {{- include "chatserver.selectorLabels" . | nindent 8 -}}
+    spec:
+      {{- with .Values.imagePullSecrets -}}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 -}}
+      {{- end -}}
+      serviceName: {{ $serviceName }}
+      serviceAccountName: {{ include "chatserver.serviceAccountName" . }}
+      containers:
+        - name: {{ $serviceName }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 -}}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - node
+          args:
+            - /app/services/group-ms/group-message-router-ms.js
+            - --app-name="${hostname}"
+            - --new-group-message-topic={{ .Values.topics.groupMessage }}
+            - --send-message-topic={{ .Values.topics.sendMessage }}
+            - --system-message-topic={{ .Values.topic.systemMessage }}
+            - --group-db={{ $dbType }}
+            {{- if eq "mongo" $dbType -}}
+            {{ include "mongo.option" . | nindent 12  }}
+            {{- end -}}
+            {{ include "eventBroker.options" (dict "consumerGroup" "group-message-router" ) | nindent 12 }}
+{{- end -}}
