@@ -8,6 +8,7 @@ const { addHttpOptions, initHttpResource, HttpServiceBase } = require('../../lib
 const EventStore = require('../../libs/event-store');
 const { extractInfoFromRequest, schemas, base64ToProtoBuffer } = require('../../helper');
 const { MessageEvent, MESSAGE_TYPE } = require('../../libs/event-args');
+const Database = require('./database');
 
 const asMain = require.main === module;
 
@@ -41,6 +42,7 @@ function parseOptions(argv) {
   let cmd = initDefaultOptions();
   cmd = addHttpOptions(cmd);
   cmd = EventStore.addEventStoreOptions(cmd);
+  cmd = Database.addDatabaseOptions(cmd);
   cmd
     .option(
       '--gateway-name <app-name>',
@@ -196,4 +198,10 @@ if (asMain) {
       console.error('Failed to initialized Rest Gatway', error);
       process.exit(1);
     });
+}
+
+module.exports = {
+  RestGateway,
+  parseOptions,
+  initResources
 }

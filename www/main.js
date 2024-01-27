@@ -8,7 +8,7 @@ import { Messaging, Message } from './messaging.js';
 /* eslint-disable no-console */
 
 // eslint-disable-next-line
-let groups = [];
+let channels = [];
 
 const events = new Map();
 // eslint-disable-next-line no-var
@@ -73,14 +73,14 @@ function isLogin() {
 function showGroups() {
   const groupSpace = document.getElementById('groups')
   groupSpace.innerHTML = '';
-  groups.forEach(g => {
+  channels.forEach(g => {
     const newGroup = document.createElement('li');
-    newGroup.id = g.groupId
+    newGroup.id = g.channelId
     const name = document.createElement('span')
     name.textContent = g.name
     newGroup.appendChild(name)
     newGroup.onclick = function groupClick() {
-      document.getElementById('to').value = g.groupId
+      document.getElementById('to').value = g.channelId
       document.getElementById('msg_channel').value = 'GROUP';
     }
     groupSpace.appendChild(newGroup)
@@ -90,7 +90,7 @@ function showGroups() {
 function getGroups() {
   messaging.getGroups()
     .then((res) => {
-      groups = res;
+      channels = res;
       showGroups()
     });
 }

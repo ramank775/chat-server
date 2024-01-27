@@ -1,4 +1,4 @@
-const { IFileMetadataDB } = require('./file-metadata-db');
+const { IMediaMetadataDB } = require('./media-metadata-db');
 const mongodb = require('./mongo-file-db')
 
 const DATABASE_IMPL = [
@@ -11,7 +11,7 @@ const DATABASE_IMPL = [
  * @returns {import('commander').Command}
  */
 function addOptions(cmd) {
-  cmd = cmd.option('--file-metadata-db <file-metadata-db>', 'Which database implementation to use (mongo)', 'mongo');
+  cmd = cmd.option('--media-metadata-db <media-metadata-db>', 'Which database implementation to use (mongo)', 'mongo');
   DATABASE_IMPL.forEach(impl => {
     cmd = impl.addOptions(cmd)
   })
@@ -26,11 +26,11 @@ function addOptions(cmd) {
  */
 function getDatabaseImpl(context) {
   const {
-    options: { fileMetadataDb }
+    options: { mediaMetadataDb }
   } = context;
-  const store = DATABASE_IMPL.find((s) => s.code === fileMetadataDb);
+  const store = DATABASE_IMPL.find((s) => s.code === mediaMetadataDb);
   if (!store) {
-    throw new Error(`${fileMetadataDb} is not a registered database implementation for Group database`);
+    throw new Error(`${mediaMetadataDb} is not a registered database implementation for media metadata database`);
   }
   return store;
 }
@@ -43,13 +43,13 @@ async function initialize(context) {
   const impl = getDatabaseImpl(context)
   const db = new impl.Implementation(context);
   await db.init();
-  context.fileMetadataDB = db;
+  context.db = db;
   return context;
 }
 
 
 module.exports = {
-  IFileMetadataDB,
-  addDatabaseOptions: addOptions,
-  initializeDatabase: initialize
+  IMediaMetadataDB,
+  addOptions,
+  initialize
 }

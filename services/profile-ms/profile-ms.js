@@ -71,17 +71,6 @@ class ProfileMs extends HttpServiceBase {
         }
       });
 
-    /**
-     * @deprecated
-     * Route is deprecated in favour of new Route `GET - /`
-     * This will be removed in next major release @version v3.x
-     */
-    this.addRoute(
-      '/get',
-      'GET',
-      this.fetchProfile.bind(this)
-    );
-
     this.addRoute(
       '/',
       'GET',
@@ -91,17 +80,6 @@ class ProfileMs extends HttpServiceBase {
           headers: schemas.authHeaders
         }
       }
-    );
-
-    /**
-     * @deprecated
-     * Route is deprecated in favour of new Route `POST - /contactbook/sync`
-     * This will be removed in next major release @version v3.x
-     */
-    this.addRoute(
-      '/user/sync',
-      'POST',
-      this.syncContact.bind(this)
     );
 
     this.addRoute(
@@ -205,4 +183,10 @@ if (asMain) {
       console.error('Failed to initialized Profile MS', error);
       process.exit(1);
     });
+}
+
+module.exports = {
+  ProfileMs,
+  parseOptions,
+  initResource,
 }

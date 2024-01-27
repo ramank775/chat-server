@@ -140,22 +140,20 @@ class Gateway extends HttpServiceBase {
       }
     }
     const trackId = shortuuid();
-    this.context.asyncStorage.run(trackId, async () => {
-      const options = {
-        source: user
-      }
-      const message = isBinary ?
-        MessageEvent.fromBinary(payload, options)
-        : MessageEvent.fromString(payload.toString(), options)
-      message.set_server_id(trackId);
-      message.set_server_timestamp();
-      const event = message.type === MESSAGE_TYPE.CLIENT_ACK ? EVENT_TYPE.CLIENT_ACK : EVENT_TYPE.NEW_MESSAGE_EVENT;
-      await this.publishEvent(event, message, message.destination);
-      if (ws.ackEnabled && event === EVENT_TYPE.NEW_MESSAGE_EVENT) {
-        const ack = message.buildServerAckMessage()
-        this.sendWebsocketMessage(user, ack)
-      }
-    });
+    const options = {
+      source: user
+    }
+    const message = isBinary ?
+      MessageEvent.fromBinary(payload, options)
+      : MessageEvent.fromString(payload.toString(), options)
+    message.set_server_id(trackId);
+    message.set_server_timestamp();
+    const event = message.type === MESSAGE_TYPE.CLIENT_ACK ? EVENT_TYPE.CLIENT_ACK : EVENT_TYPE.NEW_MESSAGE_EVENT;
+    await this.publishEvent(event, message, message.destination);
+    if (ws.ackEnabled && event === EVENT_TYPE.NEW_MESSAGE_EVENT) {
+      const ack = message.buildServerAckMessage()
+      this.sendWebsocketMessage(user, ack)
+    }
 
   }
 
@@ -276,3 +274,9 @@ if (asMain) {
       process.exit(1);
     });
 }
+
+module.exports = {
+  Gateway,
+  parseOptions,
+  initResources,
+};

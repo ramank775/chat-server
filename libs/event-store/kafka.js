@@ -1,6 +1,5 @@
 const fs = require('fs');
 const { Kafka, logLevel } = require('kafkajs');
-const { shortuuid } = require('../../helper');
 const { IEventStore } = require('./iEventStore');
 
 /** @typedef {import('./iEventArg').IEventArg} IEventArg */
@@ -300,9 +299,6 @@ class KafkaEventStore extends IEventStore {
   /** @type {Kafka} */
   #kafka;
 
-  /** @type {import('node:async_hooks').AsyncLocalStorage} */
-  #asyncStorage;
-
   /** @type {import('kafkajs').Producer} */
   #producer;
 
@@ -322,7 +318,6 @@ class KafkaEventStore extends IEventStore {
     this.#options = context.options;
     this.#logger = context.log;
     this.#listenerEvents = context.listenerEvents;
-    this.#asyncStorage = context.asyncStorage;
     this.statsClient = context.statsClient;
   }
 
@@ -399,38 +394,35 @@ class KafkaEventStore extends IEventStore {
                 broker: 'kafka'
               }
             });
-            const trackId = message.headers.track_id.toString() || shortuuid();
             try {
-              await this.#asyncStorage.run(trackId, async () => {
-                const data = {
-                  key,
-                  value: message.value
-                };
-                const logInfo = {
-                  topic,
-                  partition,
-                  offset: message.offset,
-                  key: data.key,
-                };
-                /** @type {import('./iEventArg').IEventArg} */
-                const Message = decodeMessageCb(topic)
+              const data = {
+                key,
+                value: message.value
+              };
+              const logInfo = {
+                topic,
+                partition,
+                offset: message.offset,
+                key: data.key,
+              };
+              /** @type {import('./iEventArg').IEventArg} */
+              const Message = decodeMessageCb(topic)
 
-                this.#logger.info(`new data received`, logInfo);
-                const sProcess = new Date();
-                const eventArg = Message.fromBinary(data.value);
-                await this.on(topic, eventArg, data.key);
-                this.statsClient.timing({
-                  stat: 'event.process.latency',
-                  value: sProcess,
-                  tags: {
-                    event: topic,
-                    partition,
-                    key,
-                    broker: 'kafka',
-                  }
-                });
-                this.#logger.info('message consumed', logInfo);
+              this.#logger.info(`new data received`, logInfo);
+              const sProcess = new Date();
+              const eventArg = Message.fromBinary(data.value);
+              await this.on(topic, eventArg, data.key);
+              this.statsClient.timing({
+                stat: 'event.process.latency',
+                value: sProcess,
+                tags: {
+                  event: topic,
+                  partition,
+                  key,
+                  broker: 'kafka',
+                }
               });
+              this.#logger.info('message consumed', logInfo);
             } catch (e) {
               this.statsClient.increment({
                 stat: 'event.process.error_count',
@@ -484,7 +476,6 @@ class KafkaEventStore extends IEventStore {
    * @param {string} key
    */
   async emit(event, args, key) {
-    const trackId = this.#asyncStorage.getStore() || shortuuid();
     try {
       const start = new Date();
       const [response] = await this.#producer.send({
@@ -493,9 +484,6 @@ class KafkaEventStore extends IEventStore {
           {
             key,
             value: args.toBinary(),
-            headers: {
-              track_id: trackId
-            }
           }
         ],
         acks: 1,

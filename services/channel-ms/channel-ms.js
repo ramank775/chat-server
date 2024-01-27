@@ -43,50 +43,6 @@ class ChannelMs extends HttpServiceBase {
   async init() {
     await super.init();
 
-    /**
-     * @deprecated
-     * Route is deprecated in favour of new route `GET - /`
-     * This will be removed in next major release @version v3.x
-     */
-    this.addRoute(
-      '/get',
-      'GET',
-      this.getChannels.bind(this)
-    );
-
-    /**
-     * @deprecated
-     * Route is deprecated in favour of new route `POST - /`
-     * This will be removed in next major release @version v3.x
-     */
-    this.addRoute(
-      '/create',
-      'POST',
-      this.createChannel.bind(this)
-    );
-
-    /**
-     * @deprecated
-     * Route in depreceated in favour for new route `POST /:chanenl_id/members`
-     * This will be removed in next major release @version v3.x
-     */
-    this.addRoute(
-      '/{channelId}/add',
-      'POST',
-      this.addMembers.bind(this)
-    );
-
-    /**
-     * @deprecated
-     * Route in depreceated in favour for new route `DELETE /:channel_id/members`
-     * This will be removed in next major release @version v3.x
-     */
-    this.addRoute(
-      '/{channelId}/remove',
-      'POST',
-      this.removeMembers.bind(this)
-    );
-
     this.addRoute(
       '/',
       'GET',
@@ -317,4 +273,10 @@ if (asMain) {
       console.error('Failed to initialized Channel MS', error);
       process.exit(1);
     });
+}
+
+module.exports = {
+  ChannelMs,
+  parseOptions,
+  initResource
 }

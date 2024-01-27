@@ -148,3 +148,9 @@ if (asMain) {
       process.exit(1);
     });
 }
+
+module.exports = {
+  MessageDeliveryWorker,
+  parseOptions,
+  initResources
+}

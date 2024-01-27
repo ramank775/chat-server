@@ -358,7 +358,7 @@ export class Messaging extends EventTarget {
     }
     if (window.WebSocket) {
       console.log('WebSocket object is supported in your browser');
-      const url = new URL('v1.0/wss/', window.location);
+      const url = new URL('v1.0/wss', window.location);
       url.protocol = url.protocol === 'https:' ? 'wss' : 'ws';
       url.searchParams.append('ack', this.server_ack);
       url.searchParams.append('format', this.getMessageFormat())
@@ -460,7 +460,7 @@ export class Messaging extends EventTarget {
   }
 
   async getGroups() {
-    return fetch('/v1.0/groups/', {
+    return fetch('/v1.0/channels', {
       headers: this.getHeaders()
     })
       .then((res) => res.json());
@@ -470,9 +470,10 @@ export class Messaging extends EventTarget {
     const payload = {
       name,
       members,
+      type: 'group',
       profilePic: null
     };
-    return fetch('/v1.0/groups/', {
+    return fetch('/v1.0/channels', {
       method: 'post',
       body: JSON.stringify(payload),
       headers: this.getHeaders()

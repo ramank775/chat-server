@@ -120,3 +120,9 @@ if (asMain) {
       process.exit(1);
     });
 }
+
+module.exports = {
+  MessageStorageWorker,
+  parseOptions,
+  initResources
+}

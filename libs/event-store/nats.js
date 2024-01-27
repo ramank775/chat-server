@@ -1,5 +1,4 @@
 const nats = require('nats');
-const { shortuuid } = require('../../helper');
 const { IEventStore } = require('./iEventStore');
 
 /** @typedef {import('./iEventArg').IEventArg} IEventArg */
@@ -68,9 +67,6 @@ class NatsEventStore extends IEventStore {
   /** @type {nats.NatsConnection} */
   #nc;
 
-  /** @type {import('node:async_hooks').AsyncLocalStorage} */
-  #asyncStorage;
-
   /** @type {nats.JetStreamClient} */
   #jsc;
 
@@ -93,7 +89,6 @@ class NatsEventStore extends IEventStore {
     this.#options = context.options;
     this.#logger = context.log;
     this.#subjects = context.listenerEvents;
-    this.#asyncStorage = context.asyncStorage;
     this.statsClient = context.statsClient;
   }
 
@@ -171,32 +166,29 @@ class NatsEventStore extends IEventStore {
         broker: 'nats'
       }
     })
-    const trackId = msg.headers.get('track_id') || shortuuid();
     try {
-      await this.#asyncStorage.run(trackId, async () => {
-        const Message = this.#decodeMessageCb(topic)
-        const logInfo = {
-          topic,
+      const Message = this.#decodeMessageCb(topic)
+      const logInfo = {
+        topic,
+        partition,
+        offset: msg.seq,
+        key
+      };
+      this.#logger.info(`new data received`, logInfo);
+      const sProcess = new Date();
+      const message = Message.fromBinary(msg.data)
+      await this.on(topic, message, key);
+      this.statsClient.timing({
+        stat: 'event.process.latency',
+        value: sProcess,
+        tags: {
+          event: topic,
           partition,
-          offset: msg.seq,
-          key
-        };
-        this.#logger.info(`new data received`, logInfo);
-        const sProcess = new Date();
-        const message = Message.fromBinary(msg.data)
-        await this.on(topic, message, key);
-        this.statsClient.timing({
-          stat: 'event.process.latency',
-          value: sProcess,
-          tags: {
-            event: topic,
-            partition,
-            key,
-            broker: 'nats',
-          }
-        });
-        this.#logger.info('message consumed', logInfo);
+          key,
+          broker: 'nats',
+        }
       });
+      this.#logger.info('message consumed', logInfo);
       msg.ack();
     } catch (e) {
       this.#logger.error(`Error while processing message`, { err: e });
@@ -246,12 +238,10 @@ class NatsEventStore extends IEventStore {
    * @param {string} key
    */
   async emit(event, args, key) {
-    const trackId = this.#asyncStorage.getStore() || shortuuid();
     try {
       const start = new Date();
       const jc = await this.#getJetStreamClient()
       const headers = nats.headers()
-      headers.append('track_id', trackId)
       const data = args.toBinary()
       const response = await jc.publish(`${event}.${key}`, data, {
         headers,

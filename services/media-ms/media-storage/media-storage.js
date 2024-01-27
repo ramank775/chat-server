@@ -4,7 +4,7 @@
  * @abstract
  * Interface for File Database
  */
- class IFileMetadataDB {
+ class IMediaStorage {
 
   /**
    * Group Database interface
@@ -12,39 +12,21 @@
    */
   // eslint-disable-next-line no-unused-vars
   constructor(context) {
-    if (this.constructor === IFileMetadataDB) {
+    if (this.constructor === IMediaStorage) {
       throw new Error("Abstract classes can't be instantiated.");
     }
   }
 
   /**
    * @abstract
-   * Create new File record
-   * @param {{category: string; owner: string; contentType: string;}} payload
+   * Get Signed URL
+   * @param {{fileId: string; category: string; contentType: string, operation: 'upload'|'download'}} payload
    * @returns {Promise<string>}
    */
-  // eslint-disable-next-line no-unused-vars
-  async createRecord(payload) {
+   // eslint-disable-next-line no-unused-vars
+  async getSignedUrl(payload) {
     throw new Error('Method not implemented')
   }
-
-  /**
-   * Get File record
-   * @param {string} fileId 
-   */
-  // eslint-disable-next-line no-unused-vars
-  async getRecord(fileId) {
-    throw new Error('Method not implemented')
-  }
-
-  /**
-   * Update File status
-   */
-  // eslint-disable-next-line no-unused-vars
-  async updateFileStatus(fileId, status){
-    throw new Error('Method not implemented')
-  }
-
 
   /**
    * @abstract
@@ -64,5 +46,5 @@
 }
 
 module.exports = {
-  IFileMetadataDB
+  IMediaStorage
 }

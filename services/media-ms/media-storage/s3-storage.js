@@ -1,8 +1,8 @@
 const { S3Client, PutObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3')
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner')
-const { IFileStorage } = require('./file-storage');
+const { IMediaStorage } = require('./media-storage');
 
-class S3FileStorage extends IFileStorage {
+class S3Storage extends IMediaStorage {
   #options;
 
   /** @type {S3Client} */
@@ -88,5 +88,5 @@ function addFileServiceOptions(cmd) {
 module.exports = {
   code: 's3',
   addOptions: addFileServiceOptions,
-  Implementation: S3FileStorage,
+  Implementation: S3Storage,
 }

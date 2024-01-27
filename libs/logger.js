@@ -42,13 +42,12 @@ function isDebugEnabled() {
   return l.toLowerCase() === 'debug';
 };
 
-winston.init = function init(options, asyncStorage) {
+winston.init = function init(options) {
   const formatter = winston.format((info) => {
     const result = { ...info };
     result.pid = process.pid;
     result.appName = options.appName;
     result.timeMillis = Date.now();
-    result.track_id = asyncStorage.getStore();
     return result;
   });
   const configure = {};

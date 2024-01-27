@@ -9,9 +9,9 @@
       "name": "Launch Gateway MS",
       "program": "${workspaceFolder}/services/connection-gateway/ws-gateway.js",
       "args": [
-        "--app-name=ws-gateway-1",
+        "--app-name=ws-gateway",
         "--debug",
-        "--gateway-name=gateway-1",
+        "--gateway-name=ws-gateway-1",
         "--event-store=${EVENT_STORE}",
         "--client-ack-topic=${TOPIC_CLIENT_ACK_MESSAGE}",
         "--new-message-topic=${TOPIC_NEW_MESSAGE}",
@@ -58,7 +58,7 @@
       "name": "Launch Message MS",
       "program": "${workspaceFolder}/services/message-ms/message-ms.js",
       "args": [
-        "--app-name=message-ms-1",
+        "--app-name=message-ms",
         "--debug",
         "--port=4003",
         "--gateway-name=message-ms-1",
@@ -103,7 +103,7 @@
       "name": "Launch Channel MS",
       "program": "${workspaceFolder}/services/channel-ms/channel-ms.js",
       "args": [
-        "--app-name=channel-ms-1",
+        "--app-name=channel-ms",
         "--debug",
         "--port=4002",
         "--mongo-url=mongodb://localhost:27017/chat",
@@ -122,7 +122,7 @@
       "name": "Launch profile MS",
       "program": "${workspaceFolder}/services/profile-ms/profile-ms.js",
       "args": [
-        "--app-name=profile-ms-1",
+        "--app-name=profile-ms",
         "--debug",
         "--port=4000",
         "--auth-provider=${AUTH_PROVIDER}",
@@ -145,7 +145,7 @@
       "name": "Launch notification MS",
       "program": "${workspaceFolder}/services/notification-ms/notification-ms.js",
       "args": [
-        "--app-name=notification-ms-1",
+        "--app-name=notification-ms",
         "--debug",
         "--mongo-url=${MONGO_URL}",
         "--pn-service=${PN_SERVICE}",
@@ -168,19 +168,19 @@
     {
       "type": "node",
       "request": "launch",
-      "name": "Launch file MS",
-      "program": "${workspaceFolder}/services/file-ms/file-ms.js",
+      "name": "Launch Media Metadata MS",
+      "program": "${workspaceFolder}/services/media-ms/media-metadata-ms.js",
       "args": [
-        "--app-name=file-ms-1",
+        "--app-name=media-metadata-ms",
         "--debug",
         "--port=4001",
-        "--file-metadata-db=mongo",
+        "--media-metadata-db=mongo",
         "--mongo-url=mongodb://localhost:27017/chat",
         "--base-upload-dir=/workspace/upload",
         "--s3-access-key-id=${S3_ACCESS_KEY_ID}",
         "--s3-secret-access-key=${S3_SECRET_ACCESS_KEY}",
         "--s3-bucket-name=${S3_BUCKET_NAME}",
-        "--file-storage=s3",
+        "--media-storage=s3",
       ],
       "envFile": "${workspaceFolder}/.env",
       "autoAttachChildProcesses": true

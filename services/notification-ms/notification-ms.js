@@ -155,3 +155,9 @@ if (asMain) {
       process.exit(1);
     });
 }
+
+module.exports = {
+  NotificationMS,
+  parseOptions,
+  initResources,
+}

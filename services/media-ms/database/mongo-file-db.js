@@ -1,9 +1,9 @@
 const { ObjectId } = require('mongodb');
-const { IFileMetadataDB } = require('./file-metadata-db');
+const { IMediaMetadataDB } = require('./media-metadata-db');
 const { addMongodbOptions, initMongoClient } = require('../../../libs/mongo-utils');
 
 
-class MongoFileStore extends IFileMetadataDB {
+class MongoFileStore extends IMediaMetadataDB {
 
   /** @type { import('mongodb').MongoClient } */
   #client;

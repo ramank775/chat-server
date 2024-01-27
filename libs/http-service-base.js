@@ -54,7 +54,6 @@ class HttpServiceBase extends ServiceBase {
   }
 
   async init() {
-    const { asyncStorage } = this.context;
     const serverOptions = {
       port: this.options.port,
       host: this.options.host,
@@ -73,7 +72,6 @@ class HttpServiceBase extends ServiceBase {
       })
       const trackId = extractInfoFromRequest(req, 'x-request-id') || shortuuid();
       req.trackId = trackId;
-      asyncStorage.enterWith(trackId);
       this.log.info(`new request : ${req.url}`);
       return h.continue;
     });

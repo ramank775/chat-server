@@ -11,6 +11,9 @@ class DeliveryManager {
   /** @type {Redis} */
   _subscriber;
 
+  /** @type {number} */
+  maxRetry;
+
   /** @type {(msg: MessageEvent) => Promise<void> } */
   offlineMessageHandler;
 
@@ -40,13 +43,13 @@ class DeliveryManager {
   }
 
   constructor(options) {
-    this._redis = new Redis(options.redisEndpoint);
-    this.serverId = options.server_id;
+    this._redis = options.redis || new Redis(options.redisEndpoint);
+    this.serverId = options.serverId;
     this.maxRetry = options.maxRetry || 3;
   }
 
-  async startConsumer() {
-    this._subscriber = new Redis(this._redis.options);
+  async startConsumer(redis = null) {
+    this._subscriber = redis  || new Redis(this._redis.options);
     this._subscriber.on('pmessageBuffer', async (pattern, key, value) => {
       const msg = MessageEvent.fromBinary(value);
       const [, retryStr] = key.toString().split('|');

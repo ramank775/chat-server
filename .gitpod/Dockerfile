@@ -3,6 +3,13 @@ FROM gitpod/workspace-mongodb
 ARG NATS_VERSION="v2.8.3"
 ARG KAFKA_VERSION="3.2.0"
 ARG NATS_CLI_VERSION="0.0.33"
+ARG NODE_VERSION="18"
+
+RUN bash -c 'VERSION="${NODE_VERSION}" \
+    && source $HOME/.nvm/nvm.sh && nvm install $VERSION \
+    && nvm use $VERSION && nvm alias default $VERSION'
+
+RUN echo "nvm use default &>/dev/null" >> ~/.bashrc.d/51-nvm-fix
 
 COPY .gitpod/load.nginx.conf /etc/nginx/nginx.conf
 
