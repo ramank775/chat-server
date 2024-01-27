@@ -1,5 +1,5 @@
-const { IGroupDB } = require('./group-db');
-const mongodb = require('./mongo-group-db')
+const { IChannelDB } = require('./channel-db');
+const mongodb = require('./mongo-channel-db')
 
 const DATABASE_IMPL = [
   mongodb
@@ -11,7 +11,7 @@ const DATABASE_IMPL = [
  * @returns {import('commander').Command}
  */
 function addOptions(cmd) {
-  cmd = cmd.option('--group-db <group-db>', 'Which database implementation to use (mongo)', 'mongo');
+  cmd = cmd.option('--channel-db <channel-db>', 'Which database implementation to use (mongo)', 'mongo');
   DATABASE_IMPL.forEach(impl => {
     cmd = impl.addOptions(cmd)
   })
@@ -21,16 +21,16 @@ function addOptions(cmd) {
 /**
  * @private
  * Get the database implementation as per the context options
- * @param {{options: {groupDb: string}}} context
+ * @param {{options: {channelDb: string}}} context
  * @returns
  */
 function getDatabaseImpl(context) {
   const {
-    options: { groupDb }
+    options: { channelDb }
   } = context;
-  const store = DATABASE_IMPL.find((s) => s.code === groupDb);
+  const store = DATABASE_IMPL.find((s) => s.code === channelDb);
   if (!store) {
-    throw new Error(`${groupDb} is not a registered database implementation for Group database`);
+    throw new Error(`${channelDb} is not a registered database implementation for Channel database`);
   }
   return store;
 }
@@ -43,13 +43,13 @@ async function initialize(context) {
   const impl = getDatabaseImpl(context)
   const db = new impl.Implementation(context);
   await db.init();
-  context.groupDb = db;
+  context.channelDb = db;
   return context;
 }
 
 
 module.exports = {
-  IGroupDB,
+  IChannelDB,
   addDatabaseOptions: addOptions,
   initializeDatabase: initialize
 }

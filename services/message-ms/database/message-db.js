@@ -22,44 +22,33 @@ class IMessageDB {
   /**
    * @abstract
    * Save messages
-   * @param {string} user
    * @param {MessageEvent[]} messages
    */
   // eslint-disable-next-line no-unused-vars
-  async save(user, messages) {
+  async save(messages) {
     throw new Error('Method not implemented')
   }
 
   /**
    * @abstract
    * Get Pending Messages
-   * @param {string} userId
+   * @param {{id: string, since: number, until: number }} chats
+   * @param {string} source
    * @return {Promise<MessageEvent[]>}
    */
   // eslint-disable-next-line no-unused-vars
-  async getUndeliveredMessage(userId) {
+  async getUndeliveredMessage(chats, source) {
     throw new Error('Method not implemented')
   }
 
   /**
    * @abstract
    * Mark message as delivered
-   * @param {string} userId
    * @param {string[]} messageIds
+   * @param {string} source
    */
   // eslint-disable-next-line no-unused-vars
-  async markMessageDelivered(userId, messageIds) {
-    throw new Error('Method not implemented')
-  }
-
-  /**
-   * @abstract
-   * Mark message as Sent
-   * @param {string} userId
-   * @param {string[]} messageIds
-   */
-  // eslint-disable-next-line no-unused-vars
-  async markMessageSent(userId, messageIds) {
+  async markMessageDelivered(messageIds, source) {
     throw new Error('Method not implemented')
   }
 

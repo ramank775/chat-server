@@ -1,7 +1,7 @@
 const { shortuuid, getUTCTime } = require("../../helper");
 const { MessageEvent, MESSAGE_TYPE, CHANNEL_TYPE } = require("../../libs/event-args");
 
-class GroupEvent extends MessageEvent {
+class ChannelEvent extends MessageEvent {
   constructor(groupId, action, actor) {
     super();
     this._version = 3.0;
@@ -31,5 +31,5 @@ class GroupEvent extends MessageEvent {
 }
 
 module.exports = {
-  GroupEvent
+  ChannelEvent
 }

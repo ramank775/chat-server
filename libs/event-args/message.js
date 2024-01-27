@@ -16,6 +16,12 @@ const CHANNEL_TYPE = {
   GROUP: 'GROUP',
 }
 
+/**
+ * @typedef {Object} SerializationOption
+ * @property {number | null} version
+ * @property {string[] | null} ignore
+ */
+
 class MessageEvent extends IEventArg {
   static #binary_resource_name = 'Message';
 
@@ -55,27 +61,26 @@ class MessageEvent extends IEventArg {
   /** @type {Record<string, string>} */
   _meta = {}
 
+  /** @type {string[]|null} */
+  _recipients = null;
+
   /** @type {string} */
   _server_id;
 
   /** @type {Long} */
   _server_timestamp;
 
-  static fromString(payload, options) {
-    if (!options) options = {}
-    const json = JSON.parse(payload);
+  static fromObject(payload, options) {
     const message = new MessageEvent();
-    message._raw = payload;
-    message._raw_format = 'json';
-    message._version = json._v || 1.0;
+    message._version = payload._v || 1.0;
     message._timestamp = getUTCTime();
     if (message._version >= 2.0) {
-      message._id = json.id;
-      const { type, to, from, ephemeral, contentType, ...others } = json.head;
+      message._id = payload.id;
+      const { type, to, from, ephemeral, contentType, ...others } = payload.head;
       message._source = from || options.source;
       message._destination = to;
       message._channel = type.toUpperCase();
-      message._type = contentType.toUpperCase();
+      message._type = contentType?.toUpperCase();
       if (!Object.values(MESSAGE_TYPE).includes(message._type)) {
         message._type = MESSAGE_TYPE.MESSAGE
       }
@@ -84,22 +89,29 @@ class MessageEvent extends IEventArg {
         .forEach(([key, value]) => {
           message._meta[key] = `${value}`;
         })
-      message._meta.contentType = contentType;
-      message._content = json.body
+      message._meta.contentType = contentType || message._type;
+      message._content = payload.body
     } else {
-      message._id = json.msgId;
-      message._channel = (json.chatType || json.module).toUpperCase();
-      message._type = json.type.toUpperCase()
-      message._source = json.from || options.source;
-      message._destination = json.to;
+      message._id = payload.msgId;
+      message._channel = (payload.chatType || payload.module).toUpperCase();
+      message._type = payload.type.toUpperCase()
+      message._source = payload.from || options.source;
+      message._destination = payload.to;
       message._content = {
-        text: json.text
+        text: payload.text
       }
-      message._meta.chatid = json.chatId || json.chatid;
-      message._meta.action = json.action;
-      message._meta.state = json.state;
+      message._meta.chatid = payload.chatId || payload.chatid;
+      message._meta.action = payload.action;
+      message._meta.state = payload.state;
     }
+    message._recipients = payload.recipients
     return message;
+  }
+
+  static fromString(payload, options) {
+    if (!options) options = {}
+    const json = JSON.parse(payload);
+    return MessageEvent.fromObject(json);
   }
 
   static fromBinary(payload, options) {
@@ -122,6 +134,7 @@ class MessageEvent extends IEventArg {
     message._ephemeral = json.ephemeral;
     message._source = options.source || json.source;
     message._destination = json.destination;
+    message._recipients = json.recipients;
     message._timestamp = json.timestamp;
     message._meta = json.meta || {};
     message._server_id = json.serverId;
@@ -130,13 +143,37 @@ class MessageEvent extends IEventArg {
     return message;
   }
 
-  toString(version = 2.1) {
+  clone() {
+    const cloneMessage = new MessageEvent();
+    cloneMessage._version = this._version;
+    cloneMessage._id = this._id;
+    cloneMessage._type = this._type;
+    cloneMessage._channel = this._channel;
+    cloneMessage._ephemeral = this._ephemeral;
+    cloneMessage._source = this._source;
+    cloneMessage._destination = this._destination;
+    cloneMessage._timestamp = this._timestamp;
+    cloneMessage._content = this._content;
+    cloneMessage._meta = this._meta;
+    cloneMessage._recipients = this._recipients;
+    cloneMessage._server_id = this._server_id;
+    cloneMessage._server_timestamp = this._server_timestamp;
+    return cloneMessage;
+  }
+
+  /**
+   * Convert to JSON Object
+   * @param {SerializationOption} options 
+   * @returns 
+   */
+  toObject(options = {}) {
     let body = this._content
     if (typeof this._content === 'string') {
       body = JSON.parse(this._content)
     } else if (Buffer.isBuffer(this._content)) {
       body = JSON.parse(this._content.toString('utf-8'))
     }
+    const version = options?.version || 2.1;
     const message = {
       _v: version,
       id: this._id,
@@ -167,10 +204,32 @@ class MessageEvent extends IEventArg {
     message.module = message.head.type;
     message.action = message.head.action;
     message.chatType = message.head.type;
+
+    message.recipients = message._recipients;
+
+    (options?.ignore || []).forEach((prop) => {
+      delete message[prop]
+    })
+
+    return message;
+  }
+
+  /**
+   * Serialize as string
+   * @param {SerializationOption} options 
+   * @returns 
+   */
+  toString(options = {}) {
+    const message = this.toObject(options);
     return JSON.stringify(message)
   }
 
-  toBinary() {
+  /**
+   * Serialize as binary
+   * @param {SerializationOption} options 
+   * @returns 
+   */
+  toBinary(options = {}) {
     if (this._raw && this._raw_format === 'binary')
       return this._raw;
 
@@ -194,12 +253,16 @@ class MessageEvent extends IEventArg {
       ephemeral: this._ephemeral || false,
       source: this._source,
       destination: this._destination,
+      recipients: this._recipients,
       timestamp: this._timestamp,
       content,
       meta: this._meta,
       serverId: this._server_id,
       serverTimestamp: this._server_timestamp
     }
+    options?.ignore?.forEach((prop) => {
+      delete message[prop]
+    })
     const errorMessage = messageDefination.verify(message);
     if (errorMessage) {
       throw new Error(errorMessage)
@@ -220,6 +283,18 @@ class MessageEvent extends IEventArg {
     ackMessage._type = MESSAGE_TYPE.SERVER_ACK;
     ackMessage._channel = CHANNEL_TYPE.INDIVIDUAL;
     return ackMessage;
+  }
+
+  setRecipients(recipients) {
+    if (!Array.isArray(recipients)) {
+      throw new Error('Recipients should be an array');
+    }
+    this._recipients = recipients;
+    this._raw = null;
+  }
+
+  hasRecipients() {
+    return Boolean(this._recipients && this._recipients.length);
   }
 
   /**
@@ -270,6 +345,10 @@ class MessageEvent extends IEventArg {
 
   get destination() {
     return this._destination;
+  }
+
+  get recipients() {
+    return this._recipients;
   }
 
   get isServerAck() {

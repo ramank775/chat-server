@@ -12,12 +12,14 @@
     "prepare": "husky install"
   },
   "engines": {
-    "node": ">16.0.0"
+    "node": ">=18.0.0"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.474.0",
+    "@aws-sdk/s3-request-presigner": "^3.474.0",
     "@hapi/boom": "^10.0.1",
     "@hapi/hapi": "^21.3.2",
-    "aws-sdk": "^2.1454.0",
+    "axios": "^1.6.2",
     "commander": "^11.0.0",
     "firebase-admin": "^11.10.1",
     "hot-shots": "^10.0.0",
@@ -28,7 +30,6 @@
     "moment": "^2.29.4",
     "mongodb": "^6.0.0",
     "nats": "^2.16.0",
-    "node-fetch": "^2.6.6",
     "protobufjs": "^7.2.5",
     "short-uuid": "^4.2.2",
     "winston": "^3.10.0",

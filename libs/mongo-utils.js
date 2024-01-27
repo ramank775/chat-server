@@ -17,11 +17,9 @@ function prepareMongoOptions(options) {
     ? { username: options.mongoUser, password: options.mongoPassword }
     : null;
   const dbOptions = {
-    useNewUrlParser: true,
     auth,
     sslCert: clientCertificate,
     sslKey: clientCertificate,
-    useUnifiedTopology: true
   };
   let url = options.mongoUrl;
   if (options.mongoSslEnable) {
