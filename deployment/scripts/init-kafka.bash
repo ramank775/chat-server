@@ -1,11 +1,13 @@
 #!/bin/bash
 
-start_zookeeper() {
-    bin/zookeeper-server-start.sh -daemon config/zookeeper.properties > /dev/null 2>&1 &
-}
+# start_zookeeper() {
+#     bin/zookeeper-server-start.sh -daemon config/zookeeper.properties > /dev/null 2>&1 &
+# }
 
 start_kafka_server() {
-    bin/kafka-server-start.sh -daemon config/server.properties > /dev/null 2>&1 &
+  KAFKA_CLUSTER_ID="$(bin/kafka-storage.sh random-uuid)"
+  bin/kafka-storage.sh format -t $KAFKA_CLUSTER_ID -c config/kraft/server.properties
+  bin/kafka-server-start.sh -daemon config/kraft/server.properties > /dev/null 2>&1 &
 }
 
 
@@ -28,17 +30,19 @@ echo "ENV FILE" $ENV_FILE
 
 source $ENV_FILE
 
-ZOOKER_ENDPOINT=${ZOOKER_ENDPOINT:-localhost:2181};
+KAFKA_CLUSTER_ID="$(bin/kafka-storage.sh random-uuid)"
 
-echo $ZOOKER_ENDPOINT
+# ZOOKER_ENDPOINT=${ZOOKER_ENDPOINT:-localhost:2181};
+
+# echo $ZOOKER_ENDPOINT
 
 cd $KAFKA_HOME;
 
 echo ${pwd}
 
-start_zookeeper;
+# start_zookeeper;
 
-sleep 2s;
+# sleep 2s;
 
 start_kafka_server;
 
