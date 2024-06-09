@@ -2,9 +2,8 @@ FROM node:18-alpine3.14
 
 WORKDIR /app
 
-COPY package.json /app
-COPY yarn.lock /app
+COPY package*.json /app
 
-RUN yarn install
+RUN npm ci
 
 COPY . /app/
