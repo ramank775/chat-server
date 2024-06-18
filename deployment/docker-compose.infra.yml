@@ -4,7 +4,6 @@ networks:
   vartalap:
 
 services:
-
   nginx:
     ports:
       - "8080:80"
@@ -15,14 +14,14 @@ services:
         max-size: "100m"
 
   redis:
-    image: redis:6.2
+    image: redis:7.2
     logging:
       options:
         max-size: "50m"
     networks:
       - vartalap
 
-  gateway:
+  ws-gateway:
     networks:
       - vartalap
     logging:
@@ -45,7 +44,29 @@ services:
       restart_policy:
         condition: on-failure
 
-  message_router:
+  message:
+    networks:
+      - vartalap
+    logging:
+      options:
+        max-size: "100m"
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+
+  message-storage:
+    networks:
+      - vartalap
+    logging:
+      options:
+        max-size: "100m"
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+
+  channel:
     networks:
       - vartalap
     logging:
@@ -67,28 +88,6 @@ services:
       restart_policy:
         condition: on-failure
 
-  group:
-    networks:
-      - vartalap
-    logging:
-      options:
-        max-size: "100m"
-    deploy:
-      replicas: 1
-      restart_policy:
-        condition: on-failure
-
-  group_message_router:
-    networks:
-      - vartalap
-    logging:
-      options:
-        max-size: "100m"
-    deploy:
-      replicas: 1
-      restart_policy:
-        condition: on-failure
-
   notification:
     networks:
       - vartalap
@@ -100,10 +99,13 @@ services:
       restart_policy:
         condition: on-failure
 
-  file:
+  media-metadata-ms:
     networks:
       - vartalap
     logging:
       options:
         max-size: "100m"
     deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
