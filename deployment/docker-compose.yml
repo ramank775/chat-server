@@ -4,19 +4,19 @@ services:
   nginx:
     image: nginx:stable
     volumes:
-      - ${CONFIG_DIR}/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ${CONFIG_DIR}/nginx/nginx.docker.conf:/etc/nginx/nginx.conf:ro
 
   ws-gateway:
     image: ramank775/chatserver:${CHAT_SERVER_TAG}
     entrypoint: node
-    command: /app/services/connection-gateway/gateway.js --host=0.0.0.0 --app-name=ws-gateway --gateway-name=ws-gateway-1 --new-message-topic=${TOPIC_NEW_MESSAGE} --client-ack-topic=${TOPIC_CLIENT_ACK_MESSAGE} --offline-message-topic=${TOPIC_OFFLINE_MESSAGE} --event-store=${EVENT_STORE} --kafka-client-id=${GATEWAY_CLIENT_ID:-gateway-1} --kafka-consumer-group=${CONSUMER_GROUP_GATEWAY} --kafka-broker-list='${BROKER_LIST}' --kafka-security-protocol=${KAFKA_SECURITY_PROTOCOL} --kafka-sasl-username=${KAFKA_SASL_USERNAME} --kafka-sasl-password=${KAFKA_SASL_PASSWORD} --nats-server-list=${NATS_SERVER_LIST} --nats-auth-type=${NATS_AUTH} --nats-auth-user=${NATS_USER} --nats-auth-pass=${NATS_PASS} --nats-auth-token=${NATS_AUTH_TOKEN} --nats-auth-nkey=${NATS_NKEY} --nats-auth-jwt=${NATS_USER_JWT} --redis-endpoint=${REDIS_ENDPOINT}
+    command: /app/services/connection-gateway/ws-gateway.js --host=0.0.0.0 --app-name=ws-gateway --gateway-name=ws-gateway-1 --new-message-topic=${TOPIC_NEW_MESSAGE} --client-ack-topic=${TOPIC_CLIENT_ACK_MESSAGE} --offline-message-topic=${TOPIC_OFFLINE_MESSAGE} --event-store=${EVENT_STORE} --kafka-client-id=${GATEWAY_CLIENT_ID:-gateway-1} --kafka-consumer-group=${CONSUMER_GROUP_GATEWAY} --kafka-broker-list='${BROKER_LIST}' --kafka-security-protocol=${KAFKA_SECURITY_PROTOCOL} --kafka-sasl-username=${KAFKA_SASL_USERNAME} --kafka-sasl-password=${KAFKA_SASL_PASSWORD} --nats-server-list=${NATS_SERVER_LIST} --nats-auth-type=${NATS_AUTH} --nats-auth-user=${NATS_USER} --nats-auth-pass=${NATS_PASS} --nats-auth-token=${NATS_AUTH_TOKEN} --nats-auth-nkey=${NATS_NKEY} --nats-auth-jwt=${NATS_USER_JWT} --nats-consumer-group=${CONSUMER_GROUP_GATEWAY} --redis-endpoint=${REDIS_ENDPOINT}
 
   message-delivery:
     image: ramank775/chatserver:${CHAT_SERVER_TAG}
     volumes:
       - '${CONFIG_DIR}/discovery_service/services.json:/app/discovery_service.json'
     entrypoint: node
-    command: /app/services/message-delivery/message-delivery-ms.js --app-name=message-delivery --new-message-topic=${TOPIC_NEW_MESSAGE} --offline-message-topic=${TOPIC_OFFLINE_MESSAGE} --event-store=${EVENT_STORE} --kafka-client-id=${MESSAGE_DELIVERY_CLIENT_ID:-message-delivery-1} --kafka-consumer-group=${CONSUMER_GROUP_MESSAGE_DELIVERY} --kafka-broker-list=${BROKER_LIST} --kafka-security-protocol=${KAFKA_SECURITY_PROTOCOL} --kafka-sasl-username=${KAFKA_SASL_USERNAME} --kafka-sasl-password=${KAFKA_SASL_PASSWORD} --nats-server-list=${NATS_SERVER_LIST} --nats-auth-type=${NATS_AUTH} --nats-auth-user=${NATS_USER} --nats-auth-pass=${NATS_PASS} --nats-auth-token=${NATS_AUTH_TOKEN} --nats-auth-nkey=${NATS_NKEY} --nats-auth-jwt=${NATS_USER_JWT} --nats-consumer-group=${CONSUMER_GROUP_MESSAGE_DELIVERY} --redis-endpoint=${REDIS_ENDPOINT} --channel-ms-endpoint=http://channel:4002
+    command: /app/services/message-delivery/message-delivery-worker.js --app-name=message-delivery --new-message-topic=${TOPIC_NEW_MESSAGE} --offline-message-topic=${TOPIC_OFFLINE_MESSAGE} --event-store=${EVENT_STORE} --kafka-client-id=${MESSAGE_DELIVERY_CLIENT_ID:-message-delivery-1} --kafka-consumer-group=${CONSUMER_GROUP_MESSAGE_DELIVERY} --kafka-broker-list=${BROKER_LIST} --kafka-security-protocol=${KAFKA_SECURITY_PROTOCOL} --kafka-sasl-username=${KAFKA_SASL_USERNAME} --kafka-sasl-password=${KAFKA_SASL_PASSWORD} --nats-server-list=${NATS_SERVER_LIST} --nats-auth-type=${NATS_AUTH} --nats-auth-user=${NATS_USER} --nats-auth-pass=${NATS_PASS} --nats-auth-token=${NATS_AUTH_TOKEN} --nats-auth-nkey=${NATS_NKEY} --nats-auth-jwt=${NATS_USER_JWT} --nats-consumer-group=${CONSUMER_GROUP_MESSAGE_DELIVERY} --redis-endpoint=${REDIS_ENDPOINT} --channel-ms-endpoint=http://channel:4002
 
   message:
     image: ramank775/chatserver:${CHAT_SERVER_TAG}

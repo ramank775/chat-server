@@ -3,10 +3,50 @@ version: "3.9"
 networks:
   vartalap:
 
+volumes:
+  nats-data:
+  mongo-data:
+  kafka-data:
+
 services:
+  nats:
+    image: nats:2.10-alpine3.18
+    command: nats-server -c /config/nats.conf
+    volumes:
+      - ./config/nats:/config
+      - nats-data:/data
+    networks:
+      - vartalap
+
+  kafka:
+    image: bitnami/kafka:latest
+    environment:
+      - KAFKA_CFG_NODE_ID=0
+      - KAFKA_CFG_PROCESS_ROLES=controller,broker
+      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093
+      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      - KAFKA_CFG_CONTROLLER_QUORUM_VOTERS=0@kafka:9093
+      - KAFKA_CFG_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=true
+    volumes:
+      - kafka-data:/bitnami/kafka/data
+    networks:
+      - vartalap
+
+  mongo:
+    image: mongo:7.0
+    volumes:
+      - mongo-data:/data/db
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_USER}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_PASSWORD}
+      - MONGO_INITDB_DATABASE=chat
+    networks:
+      - vartalap
+
   nginx:
     ports:
-      - "8080:80"
+      - "8081:80"
     networks:
       - vartalap
     logging:
