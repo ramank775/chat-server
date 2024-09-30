@@ -28,18 +28,21 @@ class FirebasePushNotificationService extends IPushNotificationService {
    * @param {Object} payload
    */
   async push(token, payload) {
-    const chatPayload = {
-      data: {
-        message: payload,
-      },
-    };
     const options = {
       priority: 'high',
       timeToLive: this.#ttl,
     };
-    await this.#messaging.sendToDevice(token, chatPayload, options).then((response) => {
-      this.#logger.info('Push notification sent successfully', response);
-    });
+    await this.#messaging
+      .send({
+        token: token,
+        data: {
+          message: payload,
+        },
+        android: options,
+      })
+      .then((response) => {
+        this.#logger.info('Push notification sent successfully', response);
+      });
   }
 
   /**
