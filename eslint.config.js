@@ -29,7 +29,7 @@ module.exports = [
       '@stylistic/js': eslintStylisticJs,
     },
     rules: {
-      prettier: 'error',
+      'prettier/prettier': 'error',
       'no-console': 'warn',
       'consistent-return': 'off',
       'no-process-exit': 'off',

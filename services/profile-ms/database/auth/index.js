@@ -9,11 +9,7 @@ const DATABASE_IMPL = [mongodb];
  * @returns {import('commander').Command}
  */
 function addOptions(cmd) {
-  cmd = cmd.option(
-    '--auth-db <profile-db>',
-    'Which database implementation to use (mongo)',
-    'mongo'
-  );
+  cmd = cmd.option('--auth-db <auth-db>', 'Which database implementation to use (mongo)', 'mongo');
   DATABASE_IMPL.forEach((impl) => {
     cmd = impl.addOptions(cmd);
   });
@@ -23,18 +19,16 @@ function addOptions(cmd) {
 /**
  * @private
  * Get the database implementation as per the context options
- * @param {{options: {profileDb: string}}} context
+ * @param {{options: {authDb: string}}} context
  * @returns
  */
 function getDatabaseImpl(context) {
   const {
-    options: { profileDb },
+    options: { authDb },
   } = context;
-  const store = DATABASE_IMPL.find((s) => s.code === profileDb);
+  const store = DATABASE_IMPL.find((s) => s.code === authDb);
   if (!store) {
-    throw new Error(
-      `${profileDb} is not a registered database implementation for profile database`
-    );
+    throw new Error(`${authDb} is not a registered database implementation for profile database`);
   }
   return store;
 }
