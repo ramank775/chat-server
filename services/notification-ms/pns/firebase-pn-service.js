@@ -30,7 +30,7 @@ class FirebasePushNotificationService extends IPushNotificationService {
   async push(token, payload) {
     const options = {
       priority: 'high',
-      timeToLive: this.#ttl,
+      ttl: this.#ttl,
     };
     await this.#messaging
       .send({
