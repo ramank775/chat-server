@@ -8,14 +8,14 @@ class RedisCache {
 
   /**
    * Create redis cache instance
-   * @param {{redisEndpoint: string}} options 
+   * @param {{redisEndpoint: string}} options
    */
   constructor(options) {
-    this._redis = new Redis(options.redisEndpoint)
+    this._redis = new Redis(options.redisEndpoint);
   }
 
   async get(key) {
-    return await this._redis.get(key)
+    return await this._redis.get(key);
   }
 
   async getAll(keys) {
@@ -27,11 +27,10 @@ class RedisCache {
   }
 
   async del(key) {
-    await this._redis.del(key)
+    await this._redis.del(key);
   }
-
 }
 
 module.exports = {
-  RedisCache
-}
+  RedisCache,
+};

@@ -2,9 +2,7 @@ const { ObjectId } = require('mongodb');
 const { IFileMetadataDB } = require('./file-metadata-db');
 const { addMongodbOptions, initMongoClient } = require('../../../libs/mongo-utils');
 
-
 class MongoFileStore extends IFileMetadataDB {
-
   /** @type { import('mongodb').MongoClient } */
   #client;
 
@@ -13,7 +11,7 @@ class MongoFileStore extends IFileMetadataDB {
 
   /**
    * Group Database interface
-   * @param {*} context 
+   * @param {*} context
    */
   constructor(context) {
     super(context);
@@ -30,21 +28,21 @@ class MongoFileStore extends IFileMetadataDB {
       category: payload.category,
       owner: payload.owner,
       contentType: payload.contentType,
-      createdAt: new Date()
-    }
+      createdAt: new Date(),
+    };
     const record = await this.#collection.insertOne(fileRecord);
-    return record.insertedId.toHexString()
+    return record.insertedId.toHexString();
   }
 
   /**
    * Get File record
-   * @param {string} fileId 
+   * @param {string} fileId
    */
   async getRecord(fileId) {
     const file = await this.#collection.findOne({
-      _id: ObjectId.createFromHexString(fileId)
-    })
-    return file
+      _id: ObjectId.createFromHexString(fileId),
+    });
+    return file;
   }
 
   /**
@@ -54,9 +52,8 @@ class MongoFileStore extends IFileMetadataDB {
     await this.#collection.updateOne(
       { _id: ObjectId.createFromHexString(fileId) },
       { $set: { status: !!status } }
-    )
+    );
   }
-
 
   /**
    * Initialize the database instance
@@ -76,13 +73,12 @@ class MongoFileStore extends IFileMetadataDB {
 }
 
 function addDatabaseOptions(cmd) {
-  cmd = addMongodbOptions(cmd)
+  cmd = addMongodbOptions(cmd);
   return cmd;
 }
-
 
 module.exports = {
   code: 'mongo',
   addOptions: addDatabaseOptions,
   Implementation: MongoFileStore,
-}
+};

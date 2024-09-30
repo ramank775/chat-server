@@ -12,14 +12,12 @@ async function initDefaultResources(options) {
   const asyncStorage = new AsyncLocalStorage();
   let ctx = {
     options: options || {},
-    asyncStorage
+    asyncStorage,
   };
   ctx = await initLogger(ctx);
   ctx = await statsClient.initializeStatsClient(ctx);
   return ctx;
 }
-
-
 
 function initDefaultOptions() {
   let cmd = new commander.Command('my name').allowUnknownOption();
@@ -53,8 +51,7 @@ class ServiceBase {
     this.statsClient = context.statsClient;
   }
 
-  // eslint-disable-next-line class-methods-use-this
-  init() { }
+  init() {}
 
   async run() {
     this.log.info(
@@ -83,8 +80,7 @@ class ServiceBase {
     process.on('SIGINT', () => this._shutdown());
   }
 
-  /* eslint-disable-next-line class-methods-use-this, no-empty-function */
-  async shutdown() { }
+  async shutdown() {}
 
   async _shutdown() {
     this.log.info('Shutting down service');
@@ -102,5 +98,5 @@ module.exports = {
   ServiceBase,
   initDefaultResources,
   initDefaultOptions,
-  resolveEnvVariables
+  resolveEnvVariables,
 };

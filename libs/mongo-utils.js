@@ -21,7 +21,7 @@ function prepareMongoOptions(options) {
     auth,
     sslCert: clientCertificate,
     sslKey: clientCertificate,
-    useUnifiedTopology: true
+    useUnifiedTopology: true,
   };
   let url = options.mongoUrl;
   if (options.mongoSslEnable) {
@@ -38,5 +38,5 @@ function initMongoClient(context) {
 
 module.exports = {
   addMongodbOptions,
-  initMongoClient
+  initMongoClient,
 };

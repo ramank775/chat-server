@@ -1,14 +1,11 @@
-/* eslint-disable class-methods-use-this */
-
 /**
  * @abstract
  * Interface for File Database
  */
- class IFileMetadataDB {
-
+class IFileMetadataDB {
   /**
    * Group Database interface
-   * @param {*} context 
+   * @param {*} context
    */
   // eslint-disable-next-line no-unused-vars
   constructor(context) {
@@ -25,26 +22,25 @@
    */
   // eslint-disable-next-line no-unused-vars
   async createRecord(payload) {
-    throw new Error('Method not implemented')
+    throw new Error('Method not implemented');
   }
 
   /**
    * Get File record
-   * @param {string} fileId 
+   * @param {string} fileId
    */
   // eslint-disable-next-line no-unused-vars
   async getRecord(fileId) {
-    throw new Error('Method not implemented')
+    throw new Error('Method not implemented');
   }
 
   /**
    * Update File status
    */
   // eslint-disable-next-line no-unused-vars
-  async updateFileStatus(fileId, status){
-    throw new Error('Method not implemented')
+  async updateFileStatus(fileId, status) {
+    throw new Error('Method not implemented');
   }
-
 
   /**
    * @abstract
@@ -64,5 +60,5 @@
 }
 
 module.exports = {
-  IFileMetadataDB
-}
+  IFileMetadataDB,
+};

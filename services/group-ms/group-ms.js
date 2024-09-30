@@ -2,9 +2,13 @@ const Joi = require('joi');
 const {
   initDefaultOptions,
   initDefaultResources,
-  resolveEnvVariables
+  resolveEnvVariables,
 } = require('../../libs/service-base');
-const { addHttpOptions, initHttpResource, HttpServiceBase } = require('../../libs/http-service-base');
+const {
+  addHttpOptions,
+  initHttpResource,
+  HttpServiceBase,
+} = require('../../libs/http-service-base');
 const { extractInfoFromRequest, schemas } = require('../../helper');
 const eventStore = require('../../libs/event-store');
 const { addDatabaseOptions, initializeDatabase } = require('./database');
@@ -20,7 +24,7 @@ function parseOptions(argv) {
   cmd = cmd.option(
     '--system-message-topic <system-message-topic>',
     'Used by producer to produce new message for system message'
-  )
+  );
   return cmd.parse(argv).opts();
 }
 
@@ -48,124 +52,83 @@ class GroupMs extends HttpServiceBase {
      * Route is deprecated in favour of new route `GET - /`
      * This will be removed in next major release @version v3.x
      */
-    this.addRoute(
-      '/get',
-      'GET',
-      this.getGroups.bind(this)
-    );
+    this.addRoute('/get', 'GET', this.getGroups.bind(this));
 
     /**
      * @deprecated
      * Route is deprecated in favour of new route `POST - /`
      * This will be removed in next major release @version v3.x
      */
-    this.addRoute(
-      '/create',
-      'POST',
-      this.createGroup.bind(this)
-    );
+    this.addRoute('/create', 'POST', this.createGroup.bind(this));
 
-    this.addRoute(
-      '/',
-      'GET',
-      this.getGroups.bind(this),
-      {
-        validate: {
-          headers: schemas.authHeaders
-        }
-      }
-    );
+    this.addRoute('/', 'GET', this.getGroups.bind(this), {
+      validate: {
+        headers: schemas.authHeaders,
+      },
+    });
 
-    this.addRoute(
-      '/',
-      'POST',
-      this.createGroup.bind(this),
-      {
-        validate: {
-          headers: schemas.authHeaders,
-          payload: Joi.object({
-            name: Joi.string().required(),
-            members: Joi.array().items(Joi.string()).max(100).required(),
-            profilePic: Joi.string().allow(null)
-          })
-        }
-      }
-    );
+    this.addRoute('/', 'POST', this.createGroup.bind(this), {
+      validate: {
+        headers: schemas.authHeaders,
+        payload: Joi.object({
+          name: Joi.string().required(),
+          members: Joi.array().items(Joi.string()).max(100).required(),
+          profilePic: Joi.string().allow(null),
+        }),
+      },
+    });
 
-    this.addRoute(
-      '/{groupId}',
-      'GET',
-      this.getGroupInfo.bind(this),
-      {
-        validate: {
-          headers: schemas.authHeaders,
-          params: Joi.object({
-            groupId: Joi.string().required()
-          })
-        }
-      }
-    );
+    this.addRoute('/{groupId}', 'GET', this.getGroupInfo.bind(this), {
+      validate: {
+        headers: schemas.authHeaders,
+        params: Joi.object({
+          groupId: Joi.string().required(),
+        }),
+      },
+    });
 
     /**
      * @deprecated
      * Route in depreceated in favour for new route `POST /:group_id/members`
      * This will be removed in next major release @version v3.x
      */
-    this.addRoute(
-      '/{groupId}/add',
-      'POST',
-      this.addMembers.bind(this)
-    );
+    this.addRoute('/{groupId}/add', 'POST', this.addMembers.bind(this));
 
     /**
      * @deprecated
      * Route in depreceated in favour for new route `DELETE /:group_id/members`
      * This will be removed in next major release @version v3.x
      */
-    this.addRoute(
-      '/{groupId}/remove',
-      'POST',
-      this.removeMembers.bind(this)
-    );
+    this.addRoute('/{groupId}/remove', 'POST', this.removeMembers.bind(this));
 
-    this.addRoute(
-      '/{groupId}/members',
-      'POST',
-      this.addMembers.bind(this),
-      {
-        validate: {
-          headers: schemas.authHeaders,
-          params: Joi.object({
-            groupId: Joi.string().required()
-          }),
-          payload: Joi.object({
-            members: Joi.array().items(Joi.string()).max(50)
-          })
-        }
-      }
-    );
+    this.addRoute('/{groupId}/members', 'POST', this.addMembers.bind(this), {
+      validate: {
+        headers: schemas.authHeaders,
+        params: Joi.object({
+          groupId: Joi.string().required(),
+        }),
+        payload: Joi.object({
+          members: Joi.array().items(Joi.string()).max(50),
+        }),
+      },
+    });
 
-    this.addRoute(
-      '/{groupId}/members',
-      'DELETE',
-      this.removeMembers.bind(this),
-      {
-        validate: {
-          headers: schemas.authHeaders,
-          params: Joi.object({
-            groupId: Joi.string().required()
-          }),
-          payload: Joi.object({
-            member: Joi.string()
-          })
-        }
-      }
-    );
+    this.addRoute('/{groupId}/members', 'DELETE', this.removeMembers.bind(this), {
+      validate: {
+        headers: schemas.authHeaders,
+        params: Joi.object({
+          groupId: Joi.string().required(),
+        }),
+        payload: Joi.object({
+          member: Joi.string(),
+        }),
+      },
+    });
   }
 
   async getGroups(req) {
     const user = extractInfoFromRequest(req, 'user');
-    const groups = await this.db.getMemberGroups(user)
+    const groups = await this.db.getMemberGroups(user);
     return groups || [];
   }
 
@@ -193,12 +156,12 @@ class GroupMs extends HttpServiceBase {
     members.forEach((member) => {
       payload.members.push({ username: member, role: member === user ? 'admin' : 'user' });
     });
-    const groupId = await this.db.create(payload)
-    const event = new GroupEvent(groupId, 'add', user)
-    event.newMembers(payload.members)
+    const groupId = await this.db.create(payload);
+    const event = new GroupEvent(groupId, 'add', user);
+    event.newMembers(payload.members);
     this.sendNotification(event, members);
     return {
-      groupId
+      groupId,
     };
   }
 
@@ -212,7 +175,7 @@ class GroupMs extends HttpServiceBase {
     const { members } = req.payload;
     if (!members || !members.length) {
       return {
-        status: true
+        status: true,
       };
     }
     const newMembers = members.map((member) => ({ username: member, role: 'user' }));
@@ -220,7 +183,7 @@ class GroupMs extends HttpServiceBase {
     const existingMembers = group.members.map((member) => member.username);
     const receivers = [...new Set(existingMembers.concat(members))];
     const event = new GroupEvent(groupId, 'add', user);
-    event.newMembers(newMembers)
+    event.newMembers(newMembers);
     this.sendNotification(event, receivers);
     return { status: true };
   }
@@ -229,7 +192,7 @@ class GroupMs extends HttpServiceBase {
     const user = extractInfoFromRequest(req, 'user');
     const { member } = req.payload;
     const { groupId } = req.params;
-    const group = await this.db.getGroupInfo(groupId, user)
+    const group = await this.db.getGroupInfo(groupId, user);
     if (!group) {
       return res.response({ status: false }).code(404);
     }
@@ -237,7 +200,7 @@ class GroupMs extends HttpServiceBase {
     const self = group.members.find((x) => x.username === user);
     if (!isSelf && self.role !== 'admin') {
       return {
-        status: false
+        status: false,
       };
     }
 
@@ -253,11 +216,14 @@ class GroupMs extends HttpServiceBase {
         }
       }
     }
-    const event = new GroupEvent(groupId, 'remove', user)
-    event.removedMembers([member])
-    this.sendNotification(event, group.members.map((u) => u.username));
+    const event = new GroupEvent(groupId, 'remove', user);
+    event.removedMembers([member]);
+    this.sendNotification(
+      event,
+      group.members.map((u) => u.username)
+    );
     return {
-      status: true
+      status: true,
     };
   }
 
@@ -270,8 +236,8 @@ class GroupMs extends HttpServiceBase {
     const { systemMessageTopic } = this.options;
     const promises = receivers.map(async (r) => {
       await this.eventStore.emit(systemMessageTopic, notification, r);
-    })
-    await Promise.all(promises)
+    });
+    await Promise.all(promises);
   }
 
   async shutdown() {

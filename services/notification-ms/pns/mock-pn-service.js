@@ -1,12 +1,11 @@
-const { IPushNotificationService } = require("./pn-service");
+const { IPushNotificationService } = require('./pn-service');
 
 class MockPushNotificationService extends IPushNotificationService {
-
   #logger;
 
   /**
    * Mock push notification service
-   * @param {*} context 
+   * @param {*} context
    */
   constructor(context) {
     super(context);
@@ -15,8 +14,8 @@ class MockPushNotificationService extends IPushNotificationService {
 
   /**
    *  Push the notification
-   * @param {string} token 
-   * @param {Object} payload 
+   * @param {string} token
+   * @param {Object} payload
    */
   async push(token, payload) {
     this.#logger.info('new push notification', token, payload);
@@ -30,5 +29,5 @@ function addOptions(cmd) {
 module.exports = {
   code: 'mock',
   addOptions,
-  Implementation: MockPushNotificationService
-}
+  Implementation: MockPushNotificationService,
+};

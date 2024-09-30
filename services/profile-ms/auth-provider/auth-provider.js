@@ -1,11 +1,7 @@
-/* eslint-disable max-classes-per-file */
-/* eslint-disable class-methods-use-this */
-
 class IAuthProvider {
-  
   /**
    * Auth provider interface
-   * @param {{authDB: import('../database/auth/auth-db').IAuthDB; options: {[key: string]: *}}} context 
+   * @param {{authDB: import('../database/auth/auth-db').IAuthDB; options: {[key: string]: *}}} context
    */
   // eslint-disable-next-line no-unused-vars
   constructor(context) {
@@ -16,8 +12,8 @@ class IAuthProvider {
 
   /**
    * Verify Access key for the user
-   * @param {string} username 
-   * @param {string} accesskey 
+   * @param {string} username
+   * @param {string} accesskey
    * @returns {Promise<void>}
    */
   // eslint-disable-next-line no-unused-vars
@@ -37,7 +33,7 @@ class IAuthProvider {
 
   /**
    * Generate new access key
-   * @param {string} username 
+   * @param {string} username
    * @returns {Promise<string>}
    */
   // eslint-disable-next-line no-unused-vars
@@ -47,8 +43,8 @@ class IAuthProvider {
 
   /**
    * Revoke user's session
-   * @param {string} username 
-   * @param {string} accesskey 
+   * @param {string} username
+   * @param {string} accesskey
    */
   // eslint-disable-next-line no-unused-vars
   async revoke(username, accesskey) {
@@ -59,19 +55,19 @@ class IAuthProvider {
    * @abstract
    * Initialize the auth provider instance
    */
-   // eslint-disable-next-line no-empty-function
-   async init() {}
+
+  async init() {}
 
   /**
    * @abstract
    * Dispose the auth provider internal resources
    */
-  // eslint-disable-next-line no-empty-function
+
   async dispose() {}
 }
 
 class UnAuthorizedError extends Error {
-  code = 'error.unauthorized'
+  code = 'error.unauthorized';
 
   constructor() {
     super('UnAuthorized');
@@ -80,5 +76,5 @@ class UnAuthorizedError extends Error {
 
 module.exports = {
   IAuthProvider,
-  UnAuthorizedError
-}
+  UnAuthorizedError,
+};

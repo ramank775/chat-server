@@ -21,7 +21,7 @@ function initJsonServer(context) {
 
 function initJsonClient(url) {
   if (!url) return null;
-  // eslint-disable-next-line prefer-const
+
   let [host, port] = url.split(':', 2);
   if (port) {
     port = Number(port);
@@ -34,5 +34,5 @@ function initJsonClient(url) {
 module.exports = {
   addJsonServerOptions,
   initJsonServer,
-  initJsonClient
+  initJsonClient,
 };

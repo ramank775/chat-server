@@ -5,7 +5,7 @@ const { getProtoDefination } = require('./util');
 const CONNECTION_STATE = {
   CONNECTED: 'CONNECTED',
   DISCONNECTED: 'DISCONNECTED',
-}
+};
 
 class ConnectionStateEvent extends IEventArg {
   static #binary_resource_name = 'UserConnectionState';
@@ -31,17 +31,17 @@ class ConnectionStateEvent extends IEventArg {
     const message = new ConnectionStateEvent();
     message._user = user;
     message._gateway = gateway;
-    message._state = CONNECTION_STATE.DISCONNECTED
+    message._state = CONNECTION_STATE.DISCONNECTED;
     return message;
   }
 
   static fromBinary(payload) {
     const messageDefination = getProtoDefination(ConnectionStateEvent.#binary_resource_name);
-    const incomming = messageDefination.decode(payload)
+    const incomming = messageDefination.decode(payload);
     const json = messageDefination.toObject(incomming, {
       longs: Long,
-      enums: String
-    })
+      enums: String,
+    });
     const message = new ConnectionStateEvent();
     message._user = json.user;
     message._state = json.state;
@@ -54,7 +54,7 @@ class ConnectionStateEvent extends IEventArg {
     const message = {
       user: this._user,
       gateway: this._gateway,
-      state: messageDefination.State[this._state]
+      state: messageDefination.State[this._state],
     };
     const temp = messageDefination.create(message);
     return messageDefination.encode(temp).finish();
@@ -75,5 +75,5 @@ class ConnectionStateEvent extends IEventArg {
 
 module.exports = {
   CONNECTION_STATE,
-  ConnectionStateEvent
-}
+  ConnectionStateEvent,
+};

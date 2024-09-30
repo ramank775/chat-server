@@ -1,8 +1,7 @@
 const admin = require('firebase-admin');
-const { IPushNotificationService } = require("./pn-service");
+const { IPushNotificationService } = require('./pn-service');
 
 class FirebasePushNotificationService extends IPushNotificationService {
-
   #ttl = 30;
 
   #credFilePath;
@@ -14,7 +13,7 @@ class FirebasePushNotificationService extends IPushNotificationService {
 
   /**
    * Firebase push notification service
-   * @param {*} context 
+   * @param {*} context
    */
   constructor(context) {
     super(context);
@@ -25,33 +24,31 @@ class FirebasePushNotificationService extends IPushNotificationService {
 
   /**
    *  Push the notification
-   * @param {string} token 
-   * @param {Object} payload 
+   * @param {string} token
+   * @param {Object} payload
    */
   async push(token, payload) {
     const chatPayload = {
       data: {
-        message: payload
-      }
+        message: payload,
+      },
     };
     const options = {
       priority: 'high',
-      timeToLive: this.#ttl
+      timeToLive: this.#ttl,
     };
-    await this.#messaging.sendToDevice(token, chatPayload, options)
-      .then((response) => {
-        this.#logger.info('Push notification sent successfully', response)
-      })
+    await this.#messaging.sendToDevice(token, chatPayload, options).then((response) => {
+      this.#logger.info('Push notification sent successfully', response);
+    });
   }
 
   /**
    * Initialize the PN service instance
    */
   async init() {
-    /* eslint-disable-next-line import/no-dynamic-require, global-require */
     const serviceAccount = require(this.#credFilePath);
     const app = admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount)
+      credential: admin.credential.cert(serviceAccount),
     });
     this.#messaging = app.messaging();
   }
@@ -66,12 +63,13 @@ function addOptions(cmd) {
     '--firebase-pn-ttl <firebase-pn-ttl>',
     'Firebase pushing notification Time to live (30 sec)',
     (c) => Number(c),
-    30);
+    30
+  );
   return cmd;
 }
 
 module.exports = {
   code: 'firebase',
   addOptions,
-  Implementation: FirebasePushNotificationService
-}
+  Implementation: FirebasePushNotificationService,
+};

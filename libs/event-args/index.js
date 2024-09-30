@@ -10,5 +10,5 @@ module.exports = {
   CONNECTION_STATE,
   ConnectionStateEvent,
   LoginEvent,
-  loadProtoDefination
-}
+  loadProtoDefination,
+};

@@ -1,5 +1,5 @@
 const winston = require('winston');
-const moment = require('moment');
+const { DateTime } = require('luxon');
 
 const LEVEL = Symbol.for('level');
 const MESSAGE = Symbol.for('message');
@@ -8,7 +8,7 @@ winston.configure({
   exitOnError: false,
   transports: [
     new winston.transports.Console({
-      timestamp: () => moment().format('YYYY-MM-DD HH:mm:ss.SSS'),
+      timestamp: () => DateTime.now().toFormat('yyyy-MM-dd HH:mm:ss.SSS'),
       // enable color only when output supports TTY
       colorize: process.stdout.isTTY,
       handleExceptions: true,
@@ -32,15 +32,15 @@ winston.configure({
         if (callback) {
           callback();
         }
-      }
-    })
-  ]
+      },
+    }),
+  ],
 });
 
 function isDebugEnabled() {
   const l = `${this.level}`;
   return l.toLowerCase() === 'debug';
-};
+}
 
 winston.init = function init(options, asyncStorage) {
   const formatter = winston.format((info) => {
@@ -79,7 +79,7 @@ winston.init = function init(options, asyncStorage) {
   winston.configure({
     exitOnError: options.exitOnError || false,
     format: winston.format.combine(formatter(), winston.format.json()),
-    transports: [new winston.transports.Console(configure)]
+    transports: [new winston.transports.Console(configure)],
   });
 
   const LOG_LEVELS = ['debug', 'info', 'warn', 'error', 'fatal', 'none'];

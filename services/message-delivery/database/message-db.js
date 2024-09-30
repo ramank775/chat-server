@@ -1,5 +1,3 @@
-/* eslint-disable class-methods-use-this */
-
 /** @typedef {import('../../../libs/event-args').MessageEvent} MessageEvent */
 
 /**
@@ -7,10 +5,9 @@
  * Interface for Auth Database
  */
 class IMessageDB {
-
   /**
    * Group Database interface
-   * @param {*} context 
+   * @param {*} context
    */
   // eslint-disable-next-line no-unused-vars
   constructor(context) {
@@ -27,7 +24,7 @@ class IMessageDB {
    */
   // eslint-disable-next-line no-unused-vars
   async save(user, messages) {
-    throw new Error('Method not implemented')
+    throw new Error('Method not implemented');
   }
 
   /**
@@ -38,7 +35,7 @@ class IMessageDB {
    */
   // eslint-disable-next-line no-unused-vars
   async getUndeliveredMessage(userId) {
-    throw new Error('Method not implemented')
+    throw new Error('Method not implemented');
   }
 
   /**
@@ -49,7 +46,7 @@ class IMessageDB {
    */
   // eslint-disable-next-line no-unused-vars
   async markMessageDelivered(userId, messageIds) {
-    throw new Error('Method not implemented')
+    throw new Error('Method not implemented');
   }
 
   /**
@@ -60,7 +57,7 @@ class IMessageDB {
    */
   // eslint-disable-next-line no-unused-vars
   async markMessageSent(userId, messageIds) {
-    throw new Error('Method not implemented')
+    throw new Error('Method not implemented');
   }
 
   /**
@@ -81,5 +78,5 @@ class IMessageDB {
 }
 
 module.exports = {
-  IMessageDB
-}
+  IMessageDB,
+};

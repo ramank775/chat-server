@@ -6,7 +6,7 @@ class LocalCache {
   }
 
   async getAll(keys) {
-    const values = keys.map(key => values.push(this._cache[key]));
+    const values = keys.map((key) => values.push(this._cache[key]));
   }
 
   async set(key, value) {
@@ -19,5 +19,5 @@ class LocalCache {
 }
 
 module.exports = {
-  LocalCache
-}
+  LocalCache,
+};

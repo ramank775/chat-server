@@ -1,9 +1,7 @@
 const { IFileStorage } = require('./file-storage');
-const s3 = require('./s3-file-storage')
+const s3 = require('./s3-file-storage');
 
-const FILE_STORAGE_IMPL = [
-  s3
-]
+const FILE_STORAGE_IMPL = [s3];
 
 /**
  * Add command line options for database store
@@ -12,9 +10,9 @@ const FILE_STORAGE_IMPL = [
  */
 function addOptions(cmd) {
   cmd = cmd.option('--file-storage <file-storage>', 'Which file storage to use (s3)', 's3');
-  FILE_STORAGE_IMPL.forEach(impl => {
-    cmd = impl.addOptions(cmd)
-  })
+  FILE_STORAGE_IMPL.forEach((impl) => {
+    cmd = impl.addOptions(cmd);
+  });
   return cmd;
 }
 
@@ -26,7 +24,7 @@ function addOptions(cmd) {
  */
 function getFileStorageImpl(context) {
   const {
-    options: { fileStorage }
+    options: { fileStorage },
   } = context;
   const store = FILE_STORAGE_IMPL.find((s) => s.code === fileStorage);
   if (!store) {
@@ -37,19 +35,18 @@ function getFileStorageImpl(context) {
 
 /**
  * Initialize File Storage
- * @returns 
+ * @returns
  */
 async function initialize(context) {
-  const impl = getFileStorageImpl(context)
+  const impl = getFileStorageImpl(context);
   const provider = new impl.Implementation(context);
   await provider.init();
   context.fileStorage = provider;
   return context;
 }
 
-
 module.exports = {
   IFileStorage,
   addFileStorageOptions: addOptions,
-  initializeFileStorage: initialize
-}
+  initializeFileStorage: initialize,
+};

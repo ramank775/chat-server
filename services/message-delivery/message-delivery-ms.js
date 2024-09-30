@@ -4,7 +4,7 @@ const {
   ServiceBase,
   initDefaultOptions,
   initDefaultResources,
-  resolveEnvVariables
+  resolveEnvVariables,
 } = require('../../libs/service-base');
 const cache = require('../../libs/cache');
 const disoveryService = require('../../libs/discovery-service-utils');
@@ -19,14 +19,17 @@ const EVENT_TYPE = {
   SEND_EVENT: 'send-event',
   OFFLINE_EVENT: 'offline-event',
   SYSTEM_EVENT: 'system-event',
-  CLIENT_ACK_EVENT: 'client-ack-event'
+  CLIENT_ACK_EVENT: 'client-ack-event',
 };
 
 async function prepareEventList(context) {
   const { options } = context;
   const {
-    userConnectionStateTopic, sendMessageTopic,
-    offlineMessageTopic, clientAckTopic, systemMessageTopic
+    userConnectionStateTopic,
+    sendMessageTopic,
+    offlineMessageTopic,
+    clientAckTopic,
+    systemMessageTopic,
   } = options;
   context.events = {
     [EVENT_TYPE.CONNECTION_EVENT]: userConnectionStateTopic,
@@ -35,7 +38,12 @@ async function prepareEventList(context) {
     [EVENT_TYPE.SYSTEM_EVENT]: systemMessageTopic,
     [EVENT_TYPE.CLIENT_ACK_EVENT]: clientAckTopic,
   };
-  context.listenerEvents = [userConnectionStateTopic, sendMessageTopic, systemMessageTopic, clientAckTopic];
+  context.listenerEvents = [
+    userConnectionStateTopic,
+    sendMessageTopic,
+    systemMessageTopic,
+    clientAckTopic,
+  ];
   return context;
 }
 
@@ -50,14 +58,14 @@ async function initResources(options) {
     producer: true,
     consumer: true,
     decodeMessageCb: (topic) => {
-      const { events } = context
+      const { events } = context;
       switch (topic) {
         case events[EVENT_TYPE.CONNECTION_EVENT]:
           return ConnectionStateEvent;
         default:
           return MessageEvent;
       }
-    }
+    },
   })(context);
   return context;
 }
@@ -68,10 +76,11 @@ function parseOptions(argv) {
   cmd = database.addDatabaseOptions(cmd);
   cmd = disoveryService.addDiscoveryServiceOptions(cmd);
   cmd = cache.addMemCacheOptions(cmd);
-  cmd = cmd.option(
-    '--user-connection-state-topic <user-connection-state-topic>',
-    'Used by consumer to consume new message when a user connected/disconnected to server'
-  )
+  cmd = cmd
+    .option(
+      '--user-connection-state-topic <user-connection-state-topic>',
+      'Used by consumer to consume new message when a user connected/disconnected to server'
+    )
     .option(
       '--send-message-topic <send-message-topic>',
       'Used by consumer to consume new message to send to user'
@@ -143,7 +152,7 @@ class MessageDeliveryMS extends ServiceBase {
 
   /**
    * Handle user connection state change event
-   * @param {import('../../libs/event-args').ConnectionStateEvent} message 
+   * @param {import('../../libs/event-args').ConnectionStateEvent} message
    */
   async onConnectionStateChange(message) {
     switch (message.state) {
@@ -167,7 +176,7 @@ class MessageDeliveryMS extends ServiceBase {
       tags: {
         service: 'delivery-ms',
         user,
-      }
+      },
     });
   }
 
@@ -181,14 +190,14 @@ class MessageDeliveryMS extends ServiceBase {
         tags: {
           service: 'delivery-ms',
           user,
-        }
+        },
       });
     }
   }
 
   /**
-   * 
-   * @param {import('../../libs/event-args').MessageEvent} value 
+   *
+   * @param {import('../../libs/event-args').MessageEvent} value
    * @param {string} receiver
    */
   async onMessage(value, receiver) {
@@ -199,63 +208,65 @@ class MessageDeliveryMS extends ServiceBase {
   }
 
   /**
-   * 
-   * @param {import('../../libs/event-args').MessageEvent} value 
+   *
+   * @param {import('../../libs/event-args').MessageEvent} value
    * @param {string} receiver
    */
   async onSystemEvent(value, receiver) {
     if (value.destination === 'server') {
       this.ackMessage(value);
     } else {
-      this.onMessage(value, receiver)
+      this.onMessage(value, receiver);
     }
   }
 
   /**
-   * 
-   * @param {import('../../libs/event-args').MessageEvent} value 
+   *
+   * @param {import('../../libs/event-args').MessageEvent} value
    */
   async onClientAckEvent(value) {
     await this.db.markMessageDelivered(value.source, [value.id]);
   }
 
   /**
-   * 
-   * @param {import('../../libs/event-args').MessageEvent} value 
+   *
+   * @param {import('../../libs/event-args').MessageEvent} value
    * @param {string} receiver
    */
   async sendMessage(value, receiver) {
-    await this.sendMessageWithRetry(receiver, [value], { saved: false, retry: 0 })
+    await this.sendMessageWithRetry(receiver, [value], { saved: false, retry: 0 });
   }
 
   async sendMessageWithRetry(receiver, messages, { trackid = null, saved = false, retry = 0 }) {
-    if (retry > this.maxRetryCount) return
-    const servers = await this.getServer([receiver])
-    const server = servers[receiver]
+    if (retry > this.maxRetryCount) return;
+    const servers = await this.getServer([receiver]);
+    const server = servers[receiver];
     if (!server) {
-      if (saved) return
+      if (saved) return;
       await this.sendOfflineMessage(messages, receiver);
-      return
+      return;
     }
     const url = await this.discoveryService.getServiceUrl(server);
     const trackId = trackid || this.context.asyncStorage.getStore() || shortuuid();
     const body = {
-      items: [{
-        receiver,
-        meta: {
-          saved,
-          retry
+      items: [
+        {
+          receiver,
+          meta: {
+            saved,
+            retry,
+          },
+          messages: messages.map((m) => ({ sid: m.server_id, raw: m.toBinary() })),
         },
-        messages: messages.map((m) => ({ sid: m.server_id, raw: m.toBinary() }))
-      }]
-    }
+      ],
+    };
     fetch(`${url}/send`, {
       method: 'post',
       body: JSON.stringify(body),
       headers: {
         'Content-Type': 'application/json',
-        'x-request-id': trackId
-      }
+        'x-request-id': trackId,
+      },
     })
       .then((res) => res.json())
       .then(async ({ errors }) => {
@@ -265,29 +276,37 @@ class MessageDeliveryMS extends ServiceBase {
         const error = errors[0];
         if (error.code === 404) {
           await this.onDisconnect(receiver, server);
-          await this.sendMessageWithRetry(receiver, messages, { trackid: trackId, saved, retry: retry + 1 })
+          await this.sendMessageWithRetry(receiver, messages, {
+            trackid: trackId,
+            saved,
+            retry: retry + 1,
+          });
           return;
         }
         const errorMessages = [];
         const deliveredMessages = [];
         let hasNotFoundError = false;
         messages.forEach((m) => {
-          const errMsg = error.messages.find((err) => err.sid === m.server_id)
+          const errMsg = error.messages.find((err) => err.sid === m.server_id);
           if (!errMsg) {
-            deliveredMessages.push(m.id)
+            deliveredMessages.push(m.id);
           } else if (errMsg.code === 404) {
-            hasNotFoundError = true
-            errorMessages.push(m)
+            hasNotFoundError = true;
+            errorMessages.push(m);
           }
-        })
+        });
         if (hasNotFoundError) {
           await this.onDisconnect(receiver, server);
         }
         if (deliveredMessages.length) {
-          await this.db.markMessageSent(receiver, deliveredMessages)
+          await this.db.markMessageSent(receiver, deliveredMessages);
         }
         if (errorMessages.length) {
-          await this.sendMessageWithRetry(receiver, errorMessages, { trackid: trackId, saved, retry: retry + 1 })
+          await this.sendMessageWithRetry(receiver, errorMessages, {
+            trackid: trackId,
+            saved,
+            retry: retry + 1,
+          });
         }
       })
       .catch((e) => {
@@ -300,7 +319,7 @@ class MessageDeliveryMS extends ServiceBase {
       .filter((m) => !m.ephemeral)
       .map(async (m) => {
         await this.eventStore.emit(this.events[EVENT_TYPE.OFFLINE_EVENT], m, receiver);
-      })
+      });
     await Promise.all(promises);
   }
 
@@ -308,12 +327,12 @@ class MessageDeliveryMS extends ServiceBase {
     const messages = await this.db.getUndeliveredMessage(user);
     if (!(messages && messages.length)) return;
     this.log.info(`Processing pending message for ${user}, length : ${messages.length}`);
-    await this.sendMessageWithRetry(user, messages, { saved: true, retry: 0 })
+    await this.sendMessageWithRetry(user, messages, { saved: true, retry: 0 });
   }
 
   async getServer(users) {
     const servers = await this.memCache.getAll(users);
-    const result = {}
+    const result = {};
     for (let idx = 0; idx < users.length; idx += 1) {
       result[users[idx]] = servers[idx];
     }

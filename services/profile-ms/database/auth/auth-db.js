@@ -1,14 +1,11 @@
-/* eslint-disable class-methods-use-this */
-
 /**
  * @abstract
  * Interface for Auth Database
  */
- class IAuthDB {
-
+class IAuthDB {
   /**
    * Profile Database interface
-   * @param {*} context 
+   * @param {*} context
    */
   // eslint-disable-next-line no-unused-vars
   constructor(context) {
@@ -20,7 +17,7 @@
   /**
    * @abstract
    * Verify if accesskey is exits for the username
-   * @param {string} username 
+   * @param {string} username
    * @param {string} accesskey
    * @returns {Promise<boolean>}
    */
@@ -38,18 +35,18 @@
    */
   // eslint-disable-next-line no-unused-vars
   async create(username, accesskey) {
-    throw new Error('Method not implemented')
+    throw new Error('Method not implemented');
   }
 
   /**
    * @abstract
    * Revoke the accesskey for username
-   * @param {string} username 
+   * @param {string} username
    * @param {string} accesskey
    */
   // eslint-disable-next-line no-unused-vars
   async revoke(username, accesskey) {
-    throw new Error('Method not implemented')
+    throw new Error('Method not implemented');
   }
 
   /**
@@ -70,5 +67,5 @@
 }
 
 module.exports = {
-  IAuthDB
-}
+  IAuthDB,
+};

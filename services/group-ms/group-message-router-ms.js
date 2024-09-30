@@ -4,7 +4,7 @@ const {
   ServiceBase,
   initDefaultOptions,
   initDefaultResources,
-  resolveEnvVariables
+  resolveEnvVariables,
 } = require('../../libs/service-base');
 const { addDatabaseOptions, initializeDatabase } = require('./database');
 
@@ -13,13 +13,13 @@ const asMain = require.main === module;
 const EVENT_TYPE = {
   SEND_EVENT: 'send-event',
   SYSTEM_EVENT: 'system-event',
-}
+};
 
 async function prepareEventList(context) {
   const { options } = context;
   const eventName = {
     [EVENT_TYPE.SEND_EVENT]: options.sendMessageTopic,
-    [EVENT_TYPE.SYSTEM_EVENT]: options.systemMessageTopic || options.ackTopic
+    [EVENT_TYPE.SYSTEM_EVENT]: options.systemMessageTopic || options.ackTopic,
   };
   context.events = eventName;
   context.listenerEvents = [options.newGroupMessageTopic];
@@ -30,11 +30,13 @@ async function initResources(options) {
   const context = await initDefaultResources(options)
     .then(initializeDatabase)
     .then(prepareEventList)
-    .then(eventStore.initializeEventStore({
-      producer: true,
-      consumer: true,
-      decodeMessageCb: () => MessageEvent
-    }));
+    .then(
+      eventStore.initializeEventStore({
+        producer: true,
+        consumer: true,
+        decodeMessageCb: () => MessageEvent,
+      })
+    );
 
   return context;
 }
@@ -82,8 +84,8 @@ class GroupMessageRouterMS extends ServiceBase {
 
   /**
    * Redirect Group message.
-   * @param {import('../../libs/event-args').MessageEvent} message 
-   * @param {string} key 
+   * @param {import('../../libs/event-args').MessageEvent} message
+   * @param {string} key
    */
   async redirectMessage(message) {
     const users = await this.getGroupUsers(message.destination, message.source);
@@ -95,15 +97,17 @@ class GroupMessageRouterMS extends ServiceBase {
       default:
         event = EVENT_TYPE.SEND_EVENT;
     }
-    const promises = users.filter((x) => x !== message.source).map(async (user) => {
-      await this.publish(event, message, user);
-    })
-    await Promise.all(promises)
+    const promises = users
+      .filter((x) => x !== message.source)
+      .map(async (user) => {
+        await this.publish(event, message, user);
+      });
+    await Promise.all(promises);
     this.log.info('Message redirected', { sid: message.server_id });
   }
 
   async publish(event, message, key) {
-    this.eventStore.emit(this.events[event], message, key)
+    this.eventStore.emit(this.events[event], message, key);
   }
 
   async shutdown() {

@@ -8,13 +8,13 @@ const MESSAGE_TYPE = {
   CLIENT_ACK: 'CLIENT_ACK',
   MESSAGE: 'MESSAGE',
   NOTIFICATION: 'NOTIFICATION',
-  CUSTOM: 'CUSTOM'
-}
+  CUSTOM: 'CUSTOM',
+};
 const CHANNEL_TYPE = {
   UNKNOWN: 'UNKNOWN',
   INDIVIDUAL: 'INDIVIDUAL',
   GROUP: 'GROUP',
-}
+};
 
 class MessageEvent extends IEventArg {
   static #binary_resource_name = 'Message';
@@ -53,7 +53,7 @@ class MessageEvent extends IEventArg {
   _content;
 
   /** @type {Record<string, string>} */
-  _meta = {}
+  _meta = {};
 
   /** @type {string} */
   _server_id;
@@ -62,7 +62,7 @@ class MessageEvent extends IEventArg {
   _server_timestamp;
 
   static fromString(payload, options) {
-    if (!options) options = {}
+    if (!options) options = {};
     const json = JSON.parse(payload);
     const message = new MessageEvent();
     message._raw = payload;
@@ -77,24 +77,23 @@ class MessageEvent extends IEventArg {
       message._channel = type.toUpperCase();
       message._type = contentType.toUpperCase();
       if (!Object.values(MESSAGE_TYPE).includes(message._type)) {
-        message._type = MESSAGE_TYPE.MESSAGE
+        message._type = MESSAGE_TYPE.MESSAGE;
       }
       message._ephemeral = ephemeral;
-      Object.entries(others)
-        .forEach(([key, value]) => {
-          message._meta[key] = `${value}`;
-        })
+      Object.entries(others).forEach(([key, value]) => {
+        message._meta[key] = `${value}`;
+      });
       message._meta.contentType = contentType;
-      message._content = json.body
+      message._content = json.body;
     } else {
       message._id = json.msgId;
       message._channel = (json.chatType || json.module).toUpperCase();
-      message._type = json.type.toUpperCase()
+      message._type = json.type.toUpperCase();
       message._source = json.from || options.source;
       message._destination = json.to;
       message._content = {
-        text: json.text
-      }
+        text: json.text,
+      };
       message._meta.chatid = json.chatId || json.chatid;
       message._meta.action = json.action;
       message._meta.state = json.state;
@@ -103,13 +102,13 @@ class MessageEvent extends IEventArg {
   }
 
   static fromBinary(payload, options) {
-    if (!options) options = {}
+    if (!options) options = {};
     const messageDefination = getProtoDefination(MessageEvent.#binary_resource_name);
-    const incomming = messageDefination.decode(payload)
+    const incomming = messageDefination.decode(payload);
     const json = messageDefination.toObject(incomming, {
       longs: Long,
-      enums: String
-    })
+      enums: String,
+    });
     const message = new MessageEvent();
     message._raw = payload;
     message._raw_format = 'binary';
@@ -131,11 +130,11 @@ class MessageEvent extends IEventArg {
   }
 
   toString(version = 2.1) {
-    let body = this._content
+    let body = this._content;
     if (typeof this._content === 'string') {
-      body = JSON.parse(this._content)
+      body = JSON.parse(this._content);
     } else if (Buffer.isBuffer(this._content)) {
-      body = JSON.parse(this._content.toString('utf-8'))
+      body = JSON.parse(this._content.toString('utf-8'));
     }
     const message = {
       _v: version,
@@ -145,16 +144,16 @@ class MessageEvent extends IEventArg {
         from: this._source,
         to: this._destination,
         contentType: this._type,
-        ephemeral: this._ephemeral
+        ephemeral: this._ephemeral,
       },
-      body: body || {}
-    }
+      body: body || {},
+    };
     Object.entries(this._meta).forEach(([key, value]) => {
       if (key.startsWith('_m')) {
         return;
       }
       message.head[key] = value;
-    })
+    });
     if (!message.head.category) {
       message.head.category = ['state', 'ack'].includes(message.head.action) ? 'system' : 'message';
     }
@@ -167,24 +166,23 @@ class MessageEvent extends IEventArg {
     message.module = message.head.type;
     message.action = message.head.action;
     message.chatType = message.head.type;
-    return JSON.stringify(message)
+    return JSON.stringify(message);
   }
 
   toBinary() {
-    if (this._raw && this._raw_format === 'binary')
-      return this._raw;
+    if (this._raw && this._raw_format === 'binary') return this._raw;
 
     const messageDefination = getProtoDefination(MessageEvent.#binary_resource_name);
     let content = this._content;
     if (Buffer.isBuffer(this._content)) {
-      content = this._content
+      content = this._content;
     } else if (this._content instanceof Uint8Array) {
-      content = Buffer.from(this._content)
+      content = Buffer.from(this._content);
     } else if (typeof this._content === 'object') {
-      content = JSON.stringify(this._content)
-      content = Buffer.from(content, 'utf-8')
+      content = JSON.stringify(this._content);
+      content = Buffer.from(content, 'utf-8');
     } else if (content) {
-      content = Buffer.from(content.toString(), 'utf-8')
+      content = Buffer.from(content.toString(), 'utf-8');
     }
     const message = {
       version: this._version,
@@ -198,14 +196,14 @@ class MessageEvent extends IEventArg {
       content,
       meta: this._meta,
       serverId: this._server_id,
-      serverTimestamp: this._server_timestamp
-    }
+      serverTimestamp: this._server_timestamp,
+    };
     const errorMessage = messageDefination.verify(message);
     if (errorMessage) {
-      throw new Error(errorMessage)
+      throw new Error(errorMessage);
     }
-    const temp = messageDefination.create(message)
-    return messageDefination.encode(temp).finish()
+    const temp = messageDefination.create(message);
+    return messageDefination.encode(temp).finish();
   }
 
   buildServerAckMessage() {
@@ -226,17 +224,17 @@ class MessageEvent extends IEventArg {
    * @param {string?} id
    */
   set_server_id(id) {
-    id = id || shortuuid()
+    id = id || shortuuid();
     this._server_id = id;
     this._raw = null;
   }
 
   get server_id() {
-    return this._server_id
+    return this._server_id;
   }
 
   /**
-   * @param {number} ts 
+   * @param {number} ts
    */
   set_server_timestamp(ts) {
     ts = ts || getUTCTime();
@@ -280,5 +278,5 @@ class MessageEvent extends IEventArg {
 module.exports = {
   MESSAGE_TYPE,
   CHANNEL_TYPE,
-  MessageEvent
-}
+  MessageEvent,
+};

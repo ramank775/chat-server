@@ -2,7 +2,7 @@ const {
   ServiceBase,
   initDefaultOptions,
   initDefaultResources,
-  resolveEnvVariables
+  resolveEnvVariables,
 } = require('../../libs/service-base');
 const eventStore = require('../../libs/event-store');
 const { addDatabaseOptions, initializeDatabase } = require('./database');
@@ -13,14 +13,14 @@ const asMain = require.main === module;
 
 const EVENT_TYPE = {
   PUSH_NOTIFICATION: 'push-notification',
-  LOGIN: 'login'
-}
+  LOGIN: 'login',
+};
 
 async function prepareEventList(context) {
   const { options } = context;
   const eventName = {
     [EVENT_TYPE.PUSH_NOTIFICATION]: options.offlineMessageTopic,
-    [EVENT_TYPE.LOGIN]: options.newLoginTopic
+    [EVENT_TYPE.LOGIN]: options.newLoginTopic,
   };
   context.events = eventName;
   context.listenerEvents = [options.offlineMessageTopic, options.newLoginTopic];
@@ -35,14 +35,14 @@ async function initResources(options) {
   context = await eventStore.initializeEventStore({
     consumer: true,
     decodeMessageCb: (topic) => {
-      const { events } = context
+      const { events } = context;
       switch (topic) {
         case events[EVENT_TYPE.LOGIN]:
           return LoginEvent;
         default:
           return MessageEvent;
       }
-    }
+    },
   })(context);
   return context;
 }
@@ -91,46 +91,48 @@ class NotificationMS extends ServiceBase {
           await this.pushNotification(message, key);
           break;
         default:
-          throw new Error("Unknown event type");
+          throw new Error('Unknown event type');
       }
     };
   }
 
   /**
    * handle login event
-   * @param {LoginEvent} event 
+   * @param {LoginEvent} event
    */
   async onLogin(event) {
     await this.notifDB.upsertToken(event.user, {
       deviceId: event.deviceId || 'default',
       messageVersion: event.messageVersion || 2.1,
-      token: event.notificationToken
+      token: event.notificationToken,
     });
   }
 
   /**
    * push message to user
-   * @param {import('../../libs/event-args').MessageEvent} message 
+   * @param {import('../../libs/event-args').MessageEvent} message
    */
   async pushNotification(message, user) {
     if (message.type === MESSAGE_TYPE.NOTIFICATION) return;
     const record = await this.notifDB.getToken(user, { deviceId: 'default' });
     if (!record) return;
-    const payload = (record.messageVersion || 2.1) < 3 ? message.toString() : message.toBinary()
-    await this.pns.push(record.notificationToken, payload)
+    const payload = (record.messageVersion || 2.1) < 3 ? message.toString() : message.toBinary();
+    await this.pns
+      .push(record.notificationToken, payload)
       .then(() => {
         this.statsClient.increment({
           stat: 'notificaton.delivery.count',
           tags: {
             user,
-          }
+          },
         });
-      }).catch((err) => {
+      })
+      .catch((err) => {
         this.statsClient.increment({
           stat: 'notificaton.delivery.error_count',
           tags: {
             user,
-          }
+          },
         });
         this.log.error(`Error while sending push notification ${err}`, err);
       });

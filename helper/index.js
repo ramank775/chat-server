@@ -17,7 +17,7 @@ function extractInfoFromRequest(req, key = 'user', defaultValue = null) {
 
 function getUTCTime() {
   const now = new Date();
-  const utc = now.getTime() + (now.getTimezoneOffset() * 60 * 1000);
+  const utc = now.getTime() + now.getTimezoneOffset() * 60 * 1000;
   return utc;
 }
 
@@ -45,5 +45,5 @@ module.exports = {
   shortuuid,
   getFilename,
   base64ToProtoBuffer,
-  schemas
+  schemas,
 };

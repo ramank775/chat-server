@@ -2,10 +2,7 @@ const { INotificationDB } = require('./pn-service');
 const firebase = require('./firebase-pn-service');
 const mock = require('./mock-pn-service');
 
-const PN_IMPL = [
-  firebase,
-  mock
-]
+const PN_IMPL = [firebase, mock];
 
 /**
  * Add command line options for PN service
@@ -13,10 +10,14 @@ const PN_IMPL = [
  * @returns {import('commander').Command}
  */
 function addOptions(cmd) {
-  cmd = cmd.option('--pn-service <pn-service>', 'Which push notification service to use (firebase)', 'firebase');
-  PN_IMPL.forEach(impl => {
-    cmd = impl.addOptions(cmd)
-  })
+  cmd = cmd.option(
+    '--pn-service <pn-service>',
+    'Which push notification service to use (firebase)',
+    'firebase'
+  );
+  PN_IMPL.forEach((impl) => {
+    cmd = impl.addOptions(cmd);
+  });
   return cmd;
 }
 
@@ -28,7 +29,7 @@ function addOptions(cmd) {
  */
 function getPNImpl(context) {
   const {
-    options: { pnService }
+    options: { pnService },
   } = context;
   const store = PN_IMPL.find((s) => s.code === pnService);
   if (!store) {
@@ -39,19 +40,18 @@ function getPNImpl(context) {
 
 /**
  * Initialize database
- * @returns 
+ * @returns
  */
 async function initialize(context) {
-  const impl = getPNImpl(context)
+  const impl = getPNImpl(context);
   const pns = new impl.Implementation(context);
   await pns.init();
   context.pns = pns;
   return context;
 }
 
-
 module.exports = {
   INotificationDB,
   addPNSOptions: addOptions,
-  initializePNS: initialize
-}
+  initializePNS: initialize,
+};

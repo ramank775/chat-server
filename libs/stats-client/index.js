@@ -1,9 +1,7 @@
 const { IStatsClient } = require('./iStatsClient');
 const StatsD = require('./statsd');
 
-const STATS_CLIENT = [
-  StatsD
-];
+const STATS_CLIENT = [StatsD];
 
 /**
  * Add command line options for Stats Client
@@ -28,7 +26,7 @@ function addOptions(cmd) {
  */
 function getStatsClientImpl(context) {
   const {
-    options: { statsClient }
+    options: { statsClient },
   } = context;
   const client = STATS_CLIENT.find((c) => c.code === statsClient);
   if (!client) {
@@ -52,4 +50,4 @@ module.exports = {
   IStatsClient,
   addStatsClientOptions: addOptions,
   initializeStatsClient: initialize,
-}
+};

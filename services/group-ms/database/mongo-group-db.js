@@ -1,9 +1,8 @@
-const { IGroupDB } = require("./group-db");
+const { IGroupDB } = require('./group-db');
 const { addMongodbOptions, initMongoClient } = require('../../../libs/mongo-utils');
-const { uuidv4, } = require('../../../helper');
+const { uuidv4 } = require('../../../helper');
 
 class MongoGroupDB extends IGroupDB {
-
   /** @type { import('mongodb').MongoClient } */
   #client;
 
@@ -12,7 +11,7 @@ class MongoGroupDB extends IGroupDB {
 
   /**
    * Group Database interface
-   * @param {*} context 
+   * @param {*} context
    */
   constructor(context) {
     super(context);
@@ -24,14 +23,15 @@ class MongoGroupDB extends IGroupDB {
    * @param {string} memberId
    */
   async getMemberGroups(memberId) {
-    const groups = await this.#collection.find(
+    const groups = await this.#collection
+      .find(
         { 'members.username': memberId },
         {
-          projection: { _id: 0, groupId: 1, name: 1, members: 1, profilePic: 1 }
+          projection: { _id: 0, groupId: 1, name: 1, members: 1, profilePic: 1 },
         }
       )
       .toArray();
-    return groups || []
+    return groups || [];
   }
 
   /**
@@ -45,28 +45,32 @@ class MongoGroupDB extends IGroupDB {
       name: payload.name,
       members: payload.members,
       profilePic: payload.profilePic,
-      addedOn: new Date()
-    }
+      addedOn: new Date(),
+    };
     await this.#collection.insertOne(groupDoc);
-    return groupDoc.groupId
+    return groupDoc.groupId;
   }
 
   /**
    * Get Group info
-   * @param {string} groupId 
+   * @param {string} groupId
    * @param {string} memberId
    */
   async getGroupInfo(groupId, memberId) {
-    const group = await this.#collection.findOne({
-      groupId, 'members.username': memberId
-    }, {
-      projection: {
-        groupId: 1,
-        name: 1,
-        members: 1,
-        profilePic: 1
+    const group = await this.#collection.findOne(
+      {
+        groupId,
+        'members.username': memberId,
+      },
+      {
+        projection: {
+          groupId: 1,
+          name: 1,
+          members: 1,
+          profilePic: 1,
+        },
       }
-    })
+    );
     return group;
   }
 
@@ -77,45 +81,57 @@ class MongoGroupDB extends IGroupDB {
    * @param {{username: string; role: string}[]} members
    */
   async addMember(groupId, memberId, newMembers) {
-    await this.#collection.updateOne({
-      groupId, 'members.username': memberId
-    }, {
-      $addToSet: { members: { $each: newMembers } }
-    })
+    await this.#collection.updateOne(
+      {
+        groupId,
+        'members.username': memberId,
+      },
+      {
+        $addToSet: { members: { $each: newMembers } },
+      }
+    );
   }
 
   /**
    * Remove member from the group
-   * @param {string} groupId 
+   * @param {string} groupId
    * @param {string} memberId
    * @param {string[]} exitMemberIds
    */
   async removeMember(groupId, memberId, exitMemberIds) {
-    await this.#collection.updateOne({
-      groupId, 'members.username': memberId
-    }, {
-      $pull: {
-        members: {
-          username: {
-            $in: exitMemberIds
-          }
-        }
+    await this.#collection.updateOne(
+      {
+        groupId,
+        'members.username': memberId,
+      },
+      {
+        $pull: {
+          members: {
+            username: {
+              $in: exitMemberIds,
+            },
+          },
+        },
       }
-    })
+    );
   }
 
   /**
    * Update Member role
-   * @param {string} groupId 
-   * @param {string} memberId 
-   * @param {string} role 
+   * @param {string} groupId
+   * @param {string} memberId
+   * @param {string} role
    */
   async updateMemberRole(groupId, memberId, role) {
-    await this.#collection.updateOne({
-      groupId, 'members.username': memberId
-    }, {
-      $set: { 'members.$.role': role }
-    })
+    await this.#collection.updateOne(
+      {
+        groupId,
+        'members.username': memberId,
+      },
+      {
+        $set: { 'members.$.role': role },
+      }
+    );
   }
 
   /**
@@ -136,13 +152,12 @@ class MongoGroupDB extends IGroupDB {
 }
 
 function addDatabaseOptions(cmd) {
-  cmd = addMongodbOptions(cmd)
+  cmd = addMongodbOptions(cmd);
   return cmd;
 }
-
 
 module.exports = {
   code: 'mongo',
   addOptions: addDatabaseOptions,
   Implementation: MongoGroupDB,
-}
+};

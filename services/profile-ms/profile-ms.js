@@ -2,12 +2,16 @@ const Joi = require('joi');
 const {
   initDefaultOptions,
   initDefaultResources,
-  resolveEnvVariables
+  resolveEnvVariables,
 } = require('../../libs/service-base');
-const { addHttpOptions, initHttpResource, HttpServiceBase } = require('../../libs/http-service-base');
+const {
+  addHttpOptions,
+  initHttpResource,
+  HttpServiceBase,
+} = require('../../libs/http-service-base');
 const eventStore = require('../../libs/event-store');
 const { profileDB } = require('./database');
-const { addAuthProviderOptions, initializeAuthProvider } = require('./auth-provider')
+const { addAuthProviderOptions, initializeAuthProvider } = require('./auth-provider');
 const { extractInfoFromRequest, schemas } = require('../../helper');
 const { LoginEvent } = require('../../libs/event-args');
 
@@ -49,75 +53,48 @@ class ProfileMs extends HttpServiceBase {
   async init() {
     await super.init();
 
-    this.addRoute(
-      '/auth',
-      ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
-      this.auth.bind(this)
-    );
+    this.addRoute('/auth', ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], this.auth.bind(this));
 
-    this.addRoute(
-      '/login',
-      'POST',
-      this.login.bind(this),
-      {
-        validate: {
-          payload: Joi.object({
-            username: Joi.string().required(),
-            authToken: Joi.string(),
-            notificationToken: Joi.string().required(),
-            deviceId: Joi.string().default('default'),
-            messageVersion: Joi.number().default(2.1),
-          }).required(),
-        }
-      });
+    this.addRoute('/login', 'POST', this.login.bind(this), {
+      validate: {
+        payload: Joi.object({
+          username: Joi.string().required(),
+          authToken: Joi.string(),
+          notificationToken: Joi.string().required(),
+          deviceId: Joi.string().default('default'),
+          messageVersion: Joi.number().default(2.1),
+        }).required(),
+      },
+    });
 
     /**
      * @deprecated
      * Route is deprecated in favour of new Route `GET - /`
      * This will be removed in next major release @version v3.x
      */
-    this.addRoute(
-      '/get',
-      'GET',
-      this.fetchProfile.bind(this)
-    );
+    this.addRoute('/get', 'GET', this.fetchProfile.bind(this));
 
-    this.addRoute(
-      '/',
-      'GET',
-      this.fetchProfile.bind(this),
-      {
-        validate: {
-          headers: schemas.authHeaders
-        }
-      }
-    );
+    this.addRoute('/', 'GET', this.fetchProfile.bind(this), {
+      validate: {
+        headers: schemas.authHeaders,
+      },
+    });
 
     /**
      * @deprecated
      * Route is deprecated in favour of new Route `POST - /contactbook/sync`
      * This will be removed in next major release @version v3.x
      */
-    this.addRoute(
-      '/user/sync',
-      'POST',
-      this.syncContact.bind(this)
-    );
+    this.addRoute('/user/sync', 'POST', this.syncContact.bind(this));
 
-    this.addRoute(
-      '/contactbook/sync',
-      'POST',
-      this.syncContact.bind(this),
-      {
-        validate: {
-          headers: schemas.authHeaders,
-          payload: Joi.object({
-            users: Joi.array().items(Joi.string()).required()
-          })
-        }
-      }
-    );
-
+    this.addRoute('/contactbook/sync', 'POST', this.syncContact.bind(this), {
+      validate: {
+        headers: schemas.authHeaders,
+        payload: Joi.object({
+          users: Joi.array().items(Joi.string()).required(),
+        }),
+      },
+    });
   }
 
   async auth(req, res) {
@@ -150,7 +127,7 @@ class ProfileMs extends HttpServiceBase {
         username,
         uid: result.uid,
         addedOn: new Date(),
-        isActive: true
+        isActive: true,
       };
       await this.profileDB.create(profile);
     }
@@ -160,13 +137,13 @@ class ProfileMs extends HttpServiceBase {
       deviceId: payload.deviceId,
       notificationToken: payload.notificationToken,
       messageVersion: payload.messageVersion,
-    })
+    });
     this.eventStore.emit(this.newLoginTopic, loginMessage, username);
     return {
       status: true,
       username,
       accesskey,
-      isNew
+      isNew,
     };
   }
 

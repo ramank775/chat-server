@@ -1,5 +1,5 @@
-const { shortuuid, getUTCTime } = require("../../helper");
-const { MessageEvent, MESSAGE_TYPE, CHANNEL_TYPE } = require("../../libs/event-args");
+const { shortuuid, getUTCTime } = require('../../helper');
+const { MessageEvent, MESSAGE_TYPE, CHANNEL_TYPE } = require('../../libs/event-args');
 
 class GroupEvent extends MessageEvent {
   constructor(groupId, action, actor) {
@@ -18,7 +18,7 @@ class GroupEvent extends MessageEvent {
     this._meta.action = action;
     this._server_id = this._id;
     this._server_timestamp = this._timestamp;
-    this._content = {}
+    this._content = {};
   }
 
   newMembers(members) {
@@ -31,5 +31,5 @@ class GroupEvent extends MessageEvent {
 }
 
 module.exports = {
-  GroupEvent
-}
+  GroupEvent,
+};

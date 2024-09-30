@@ -1,9 +1,7 @@
-/* eslint-disable class-methods-use-this */
 class IPushNotificationService {
-
   /**
    * Notification Database interface
-   * @param {*} context 
+   * @param {*} context
    */
   // eslint-disable-next-line no-unused-vars
   constructor(context) {
@@ -14,12 +12,12 @@ class IPushNotificationService {
 
   /**
    *  Push the notification
-   * @param {string} token 
-   * @param {Object} payload 
+   * @param {string} token
+   * @param {Object} payload
    */
   // eslint-disable-next-line no-unused-vars
   async push(token, payload) {
-    throw new Error("Method is not implemented");
+    throw new Error('Method is not implemented');
   }
 
   /**
@@ -40,5 +38,5 @@ class IPushNotificationService {
 }
 
 module.exports = {
-  IPushNotificationService
-}
+  IPushNotificationService,
+};
