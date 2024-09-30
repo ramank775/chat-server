@@ -1,5 +1,3 @@
-/* eslint-disable class-methods-use-this */
-
 /**
  * @typedef {Object} UserProfile
  * @property {string} username
@@ -16,10 +14,9 @@
  * Interface for Profile Database
  */
 class IProfileDB {
-
   /**
    * Profile Database interface
-   * @param {*} context 
+   * @param {*} context
    */
   // eslint-disable-next-line no-unused-vars
   constructor(context) {
@@ -31,7 +28,7 @@ class IProfileDB {
   /**
    * @abstract
    * Verify if user exits by username
-   * @param {string} _username 
+   * @param {string} _username
    * @returns {Promise<boolean>}
    */
   // eslint-disable-next-line no-unused-vars
@@ -42,34 +39,34 @@ class IProfileDB {
   /**
    * @abstract
    * Create new user profile
-   * @param {UserProfile} _profile 
+   * @param {UserProfile} _profile
    * @returns {Promise<void>}
    */
   // eslint-disable-next-line no-unused-vars
   async create(profile) {
-    throw new Error('Method not implemented')
+    throw new Error('Method not implemented');
   }
 
   /**
    * @abstract
    * Find active user by username
-   * @param {string} username 
-   * @param {{[key:string]: boolean}} projection 
+   * @param {string} username
+   * @param {{[key:string]: boolean}} projection
    */
   // eslint-disable-next-line no-unused-vars
   async findActiveUser(username, projection) {
-    throw new Error('Method not implemented')
+    throw new Error('Method not implemented');
   }
 
   /**
    * @abstract
    * Sync contact book
    * @param {string} username
-   * @param {string[]} contacts 
+   * @param {string[]} contacts
    */
   // eslint-disable-next-line no-unused-vars
   async contactBookSyncByUsername(username, contacts) {
-    throw new Error('Method not implemented')
+    throw new Error('Method not implemented');
   }
 
   /**
@@ -90,5 +87,5 @@ class IProfileDB {
 }
 
 module.exports = {
-  IProfileDB
-}
+  IProfileDB,
+};

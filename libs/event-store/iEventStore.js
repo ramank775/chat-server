@@ -6,13 +6,11 @@
  */
 
 class IEventStore {
-
   constructor() {
     if (new.target === IEventStore) {
-      throw new TypeError("Cannot construct IEventStore instances directly");
+      throw new TypeError('Cannot construct IEventStore instances directly');
     }
   }
-
 
   /**
    * @property
@@ -22,9 +20,8 @@ class IEventStore {
    * @param {string} _key Event Grouping key
    */
 
-  // eslint-disable-next-line class-methods-use-this
   on = async (_event, _args, _key) => {
-    throw new Error("Not Implemented Exception")
+    throw new Error('Not Implemented Exception');
   };
 
   /**
@@ -32,10 +29,10 @@ class IEventStore {
    * Initialize event store.
    * Use this function to connect to remote host or
    * perform any async setup operation
-   * @param {InitOptions} _options 
+   * @param {InitOptions} _options
    */
-  /* eslint-disable-next-line class-methods-use-this, no-empty-function */
-  async init(_options) { }
+
+  async init(_options) {}
 
   /**
    * @abstract
@@ -44,18 +41,18 @@ class IEventStore {
    * @param {IEventArg} _args Event arguments
    * @param {string} key Event grouping key
    */
-  // eslint-disable-next-line class-methods-use-this
+
   async emit(_event, _args, _key) {
-    throw new Error("Not Implemented Exception");
+    throw new Error('Not Implemented Exception');
   }
 
   /**
    * Dispose the event store
    */
-  /* eslint-disable-next-line class-methods-use-this, no-empty-function */
-  async dispose() { }
+
+  async dispose() {}
 }
 
 module.exports = {
-  IEventStore
+  IEventStore,
 };

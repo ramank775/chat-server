@@ -1,14 +1,11 @@
-/* eslint-disable class-methods-use-this */
-
 /**
  * @abstract
  * Interface for Group Database
  */
- class IGroupDB {
-
+class IGroupDB {
   /**
    * Group Database interface
-   * @param {*} context 
+   * @param {*} context
    */
   // eslint-disable-next-line no-unused-vars
   constructor(context) {
@@ -17,17 +14,17 @@
     }
   }
 
-   /**
-    * @abstract
+  /**
+   * @abstract
    * Get all the groups of a member
    * @param {string} memberId
    * @returns {Promise<[]>}
    */
   // eslint-disable-next-line no-unused-vars
-    async getMemberGroups(memberId) {
-      throw new Error('Method not implemented')
-    }
-  
+  async getMemberGroups(memberId) {
+    throw new Error('Method not implemented');
+  }
+
   /**
    * @abstract
    * Create new User group
@@ -36,17 +33,17 @@
    */
   // eslint-disable-next-line no-unused-vars
   async create(payload) {
-    throw new Error('Method not implemented')
+    throw new Error('Method not implemented');
   }
 
   /**
    * Get Group info
-   * @param {string} groupId 
+   * @param {string} groupId
    * @param {string} memberId
    */
   // eslint-disable-next-line no-unused-vars
   async getGroupInfo(groupId, memberId) {
-    throw new Error('Method not implemented')
+    throw new Error('Method not implemented');
   }
 
   /**
@@ -58,32 +55,31 @@
    */
   // eslint-disable-next-line no-unused-vars
   async addMember(groupId, memberId, newMembers) {
-    throw new Error('Method not implemented')
+    throw new Error('Method not implemented');
   }
 
   /**
    * Remove member from the group
-   * @param {string} groupId 
+   * @param {string} groupId
    * @param {string} memberId
    * @param {string[]} exitMemberIds
    */
   // eslint-disable-next-line no-unused-vars
   async removeMember(groupId, memberId, exitMemberIds) {
-    throw new Error('Method not implemented')
+    throw new Error('Method not implemented');
   }
-
 
   /**
    * @abstract
    * Update Member role
-   * @param {string} groupId 
-   * @param {string} memberId 
-   * @param {string} role 
+   * @param {string} groupId
+   * @param {string} memberId
+   * @param {string} role
    */
   // eslint-disable-next-line no-unused-vars
-   async updateMemberRole(groupId, memberId, role) {
-     throw new Error('Not implemented Exception')
-   }
+  async updateMemberRole(groupId, memberId, role) {
+    throw new Error('Not implemented Exception');
+  }
 
   /**
    * @abstract
@@ -103,5 +99,5 @@
 }
 
 module.exports = {
-  IGroupDB
-}
+  IGroupDB,
+};

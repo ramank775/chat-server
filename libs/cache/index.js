@@ -4,7 +4,11 @@ const { RedisCache } = require('./redis-cache');
 function addMemCacheOptions(cmd) {
   cmd = cmd
     .option('--cache-type <cache-type>', 'Type of cache service (local, redis)', 'local')
-    .option('--redis-endpoint <redis-endpoint>', 'Redis endpoint to connet with in case of cache type redis', '127.0.0.1:6379')
+    .option(
+      '--redis-endpoint <redis-endpoint>',
+      'Redis endpoint to connet with in case of cache type redis',
+      '127.0.0.1:6379'
+    );
   return cmd;
 }
 
@@ -16,7 +20,7 @@ async function initMemCache(context) {
       memCache = new LocalCache();
       break;
     case 'redis':
-      memCache = new RedisCache(context.options)
+      memCache = new RedisCache(context.options);
       break;
     default:
       memCache = new LocalCache();
@@ -28,5 +32,5 @@ async function initMemCache(context) {
 
 module.exports = {
   addMemCacheOptions,
-  initMemCache
-}
+  initMemCache,
+};

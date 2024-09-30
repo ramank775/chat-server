@@ -1,19 +1,17 @@
 /// <reference path="messaging.js" />
 
-// eslint-disable-next-line node/no-unsupported-features/es-syntax, import/extensions
 import { Messaging, Message } from './messaging.js';
 
 /* eslint-env browser */
 
 /* eslint-disable no-console */
 
-// eslint-disable-next-line
 let groups = [];
 
 const events = new Map();
-// eslint-disable-next-line no-var
+
 // var Messaging;
-// eslint-disable-next-line no-var
+
 // var Message;
 
 /** @type {Messaging} */
@@ -48,13 +46,12 @@ function getUserInfo() {
   return [username, accesskey];
 }
 
-
 async function login(username, authtoken) {
   return Messaging.login({
     username,
     authToken: authtoken,
     notificationToken: 'testing-token',
-    deviceId: 'default'
+    deviceId: 'default',
   })
     .then((res) => {
       setCookie('user', username, 1000);
@@ -71,39 +68,37 @@ function isLogin() {
 }
 
 function showGroups() {
-  const groupSpace = document.getElementById('groups')
+  const groupSpace = document.getElementById('groups');
   groupSpace.innerHTML = '';
-  groups.forEach(g => {
+  groups.forEach((g) => {
     const newGroup = document.createElement('li');
-    newGroup.id = g.groupId
-    const name = document.createElement('span')
-    name.textContent = g.name
-    newGroup.appendChild(name)
+    newGroup.id = g.groupId;
+    const name = document.createElement('span');
+    name.textContent = g.name;
+    newGroup.appendChild(name);
     newGroup.onclick = function groupClick() {
-      document.getElementById('to').value = g.groupId
+      document.getElementById('to').value = g.groupId;
       document.getElementById('msg_channel').value = 'GROUP';
-    }
-    groupSpace.appendChild(newGroup)
-  })
+    };
+    groupSpace.appendChild(newGroup);
+  });
 }
 
 function getGroups() {
-  messaging.getGroups()
-    .then((res) => {
-      groups = res;
-      showGroups()
-    });
+  messaging.getGroups().then((res) => {
+    groups = res;
+    showGroups();
+  });
 }
 
 function createGroup() {
   const groupName = document.getElementById('group_name').value;
   const groupMembers = document.getElementById('group_member').value.split(',');
 
-  messaging.createGroup(groupName, groupMembers)
-    .then((res) => {
-      console.log(res);
-      getGroups();
-    });
+  messaging.createGroup(groupName, groupMembers).then((res) => {
+    console.log(res);
+    getGroups();
+  });
 }
 
 function switchToEventTab() {
@@ -118,29 +113,29 @@ function switchToGroupTab() {
 }
 
 function showEventDetail(id) {
-  const event = events.get(id)
+  const event = events.get(id);
   if (!event) return;
-  document.getElementById('json').textContent = JSON.stringify(event, undefined, 2)
-  switchToEventTab()
+  document.getElementById('json').textContent = JSON.stringify(event, undefined, 2);
+  switchToEventTab();
 }
 
 function displayEvent(message) {
-  const id = `${message.id}_${message.type}`
-  events.set(id, message)
+  const id = `${message.id}_${message.type}`;
+  events.set(id, message);
   const msgSpace = document.getElementById('message');
   const newMsgItem = document.createElement('li');
   newMsgItem.id = id;
   newMsgItem.onclick = function onEventClick() {
-    showEventDetail(id)
-  }
-  newMsgItem.classList.add(message.type.toLowerCase())
-  const headElm = document.createElement('span')
-  headElm.textContent = message.type
-  newMsgItem.appendChild(headElm)
-  newMsgItem.appendChild(document.createElement('br'))
-  const contentElm = document.createElement('span')
-  contentElm.textContent = JSON.stringify(message.content || '')
-  newMsgItem.appendChild(contentElm)
+    showEventDetail(id);
+  };
+  newMsgItem.classList.add(message.type.toLowerCase());
+  const headElm = document.createElement('span');
+  headElm.textContent = message.type;
+  newMsgItem.appendChild(headElm);
+  newMsgItem.appendChild(document.createElement('br'));
+  const contentElm = document.createElement('span');
+  contentElm.textContent = JSON.stringify(message.content || '');
+  newMsgItem.appendChild(contentElm);
   msgSpace.appendChild(newMsgItem);
 }
 
@@ -172,8 +167,8 @@ function setupUI() {
     };
   } else {
     messaging = new Messaging({
-      get: getUserInfo
-    })
+      get: getUserInfo,
+    });
     document.getElementById('div_login').style.display = 'none';
     document.getElementById('div_loggedIn').style.display = 'block';
     const [username] = getUserInfo();
@@ -181,55 +176,55 @@ function setupUI() {
     messaging.connectSocket();
     messaging.addEventListener('connection', (event) => {
       document.getElementById('status').innerText = event.detail.status;
-    })
+    });
     messaging.addEventListener('message', (event) => displayEvent(event.detail));
     document.getElementById('create_group').onclick = createGroup;
     document.getElementById('channel').onchange = (e) => {
-      const event = new Message()
-      event.id = `local_${Date.now()}`
-      event.type = 'channel'
-      event.content = `Channel change from ${messaging.channel} to ${e.target.value}`
+      const event = new Message();
+      event.id = `local_${Date.now()}`;
+      event.type = 'channel';
+      event.content = `Channel change from ${messaging.channel} to ${e.target.value}`;
       event.source = 'local';
-      messaging.updateMessageChannel(e.target.value)
-      displayEvent(event)
-    }
-    document.getElementById('version').onchange = e => {
-      const event = new Message()
-      event.id = `local_${Date.now()}`
-      event.type = 'version'
-      event.content = `Version change from ${messaging.message_version} to ${e.target.value}`
+      messaging.updateMessageChannel(e.target.value);
+      displayEvent(event);
+    };
+    document.getElementById('version').onchange = (e) => {
+      const event = new Message();
+      event.id = `local_${Date.now()}`;
+      event.type = 'version';
+      event.content = `Version change from ${messaging.message_version} to ${e.target.value}`;
       event.source = 'local';
-      messaging.updateMessageVersion(Number(e.target.value))
-      displayEvent(event)
-    }
+      messaging.updateMessageVersion(Number(e.target.value));
+      displayEvent(event);
+    };
     document.getElementById('server-ack').checked = messaging.server_ack;
     document.getElementById('client-ack').checked = messaging.client_ack;
-    document.getElementById('server-ack').onchange = e => {
-      const event = new Message()
-      event.id = `local_${Date.now()}`
-      event.type = 'server_ack'
-      event.content = `Server ack is ${e.target.checked ? 'enabled' : 'disabled'}`
+    document.getElementById('server-ack').onchange = (e) => {
+      const event = new Message();
+      event.id = `local_${Date.now()}`;
+      event.type = 'server_ack';
+      event.content = `Server ack is ${e.target.checked ? 'enabled' : 'disabled'}`;
       event.source = 'local';
       if (e.target.checked) {
         messaging.enableServerAck();
       } else {
-        messaging.disableServerAck()
+        messaging.disableServerAck();
       }
-      displayEvent(event)
-    }
-    document.getElementById('client-ack').onchange = e => {
-      const event = new Message()
-      event.id = `local_${Date.now()}`
-      event.type = 'client-ack'
-      event.content = `Client ack is ${e.target.checked ? 'enabled' : 'disabled'}`
+      displayEvent(event);
+    };
+    document.getElementById('client-ack').onchange = (e) => {
+      const event = new Message();
+      event.id = `local_${Date.now()}`;
+      event.type = 'client-ack';
+      event.content = `Client ack is ${e.target.checked ? 'enabled' : 'disabled'}`;
       event.source = 'local';
       if (e.target.checked) {
-        messaging.enableClientAck()
+        messaging.enableClientAck();
       } else {
-        messaging.disableClientAck()
+        messaging.disableClientAck();
       }
-      displayEvent(event)
-    }
+      displayEvent(event);
+    };
     document.getElementById('group_tab').onclick = () => switchToGroupTab();
     document.getElementById('event_tab').onclick = () => switchToEventTab();
     document.getElementById('msg_submit').onclick = () => sendMessage();

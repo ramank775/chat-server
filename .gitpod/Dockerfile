@@ -1,10 +1,14 @@
 FROM gitpod/workspace-mongodb
 
-ARG NATS_VERSION="v2.8.3"
-ARG KAFKA_VERSION="3.2.0"
-ARG NATS_CLI_VERSION="0.0.33"
+ARG NODE_VERSION="20"
+ARG NATS_VERSION="v2.10.21"
+ARG KAFKA_VERSION="3.8.0"
+ARG NATS_CLI_VERSION="0.1.5"
 
 COPY .gitpod/load.nginx.conf /etc/nginx/nginx.conf
+
+RUN bash -c 'source $HOME/.nvm/nvm.sh && nvm install $NODE_VERSION \
+    && nvm use $NODE_VERSION && nvm alias default $NODE_VERSION'
 
 RUN sudo apt-get update && sudo apt-get install redis-server -y
 

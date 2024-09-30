@@ -3,7 +3,6 @@ const { uuidv4 } = require('../../../helper');
 const { IAuthProvider, UnAuthorizedError } = require('./auth-provider');
 
 class FirebaseAuthProvider extends IAuthProvider {
-
   /** @type {import('../database/auth/auth-db').IAuthDB} */
   #db;
 
@@ -17,19 +16,18 @@ class FirebaseAuthProvider extends IAuthProvider {
 
   /**
    * Auth provider interface
-   * @param {{authDB: import('../database/auth/auth-db').IAuthDB; options: {[key: string]: *}}} context 
+   * @param {{authDB: import('../database/auth/auth-db').IAuthDB; options: {[key: string]: *}}} context
    */
   constructor(context) {
     super(context);
     this.#db = context.authDB;
     this.#projectId = context.options.firebaseProjectId;
-    
   }
 
   /**
    * Verify Access key for the user
-   * @param {string} username 
-   * @param {string} accesskey 
+   * @param {string} username
+   * @param {string} accesskey
    * @returns {Promise<void>}
    */
   async verifyAccessKey(username, accesskey) {
@@ -52,7 +50,7 @@ class FirebaseAuthProvider extends IAuthProvider {
 
   /**
    * Decode the external token supplied
-   * @param {string} token 
+   * @param {string} token
    * @returns {Promise<{uid: string; [key:string]: *}>}
    */
   async decodeExternalToken(token) {
@@ -62,12 +60,12 @@ class FirebaseAuthProvider extends IAuthProvider {
 
   /**
    * Generate new access key
-   * @param {string} username 
+   * @param {string} username
    * @returns {Promise<string>}
    */
   async generateAccessKey(username) {
-    const newAccessKey = uuidv4()
-    await this.#db.create(username, newAccessKey)
+    const newAccessKey = uuidv4();
+    await this.#db.create(username, newAccessKey);
     let accessKeys = new Set();
     if (this.#cache.has(username)) {
       accessKeys = this.#cache.get(username);
@@ -79,8 +77,8 @@ class FirebaseAuthProvider extends IAuthProvider {
 
   /**
    * Revoke user's session
-   * @param {string} username 
-   * @param {string} accesskey 
+   * @param {string} username
+   * @param {string} accesskey
    */
   async revoke(username, accesskey) {
     await this.#db.revoke(username, accesskey);
@@ -93,7 +91,7 @@ class FirebaseAuthProvider extends IAuthProvider {
 
   async init() {
     const app = admin.initializeApp({
-      projectId: this.#projectId
+      projectId: this.#projectId,
     });
     this.#firebaseAuth = app.auth();
   }
@@ -110,5 +108,5 @@ function firebaseProjectOptions(cmd) {
 module.exports = {
   code: 'firebase',
   addOptions: firebaseProjectOptions,
-  Implementation: FirebaseAuthProvider
-}
+  Implementation: FirebaseAuthProvider,
+};

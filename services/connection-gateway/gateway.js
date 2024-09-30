@@ -4,11 +4,22 @@ const URL = require('url');
 const {
   initDefaultOptions,
   initDefaultResources,
-  resolveEnvVariables
+  resolveEnvVariables,
 } = require('../../libs/service-base');
-const { addHttpOptions, initHttpResource, HttpServiceBase } = require('../../libs/http-service-base');
+const {
+  addHttpOptions,
+  initHttpResource,
+  HttpServiceBase,
+} = require('../../libs/http-service-base');
 const EventStore = require('../../libs/event-store');
-const { uuidv4, shortuuid, extractInfoFromRequest, schemas, base64ToProtoBuffer, getUTCTime } = require('../../helper');
+const {
+  uuidv4,
+  shortuuid,
+  extractInfoFromRequest,
+  schemas,
+  base64ToProtoBuffer,
+  getUTCTime,
+} = require('../../helper');
 const { MessageEvent, ConnectionStateEvent, MESSAGE_TYPE } = require('../../libs/event-args');
 
 const asMain = require.main === module;
@@ -17,7 +28,7 @@ const EVENT_TYPE = {
   CONNECTION_EVENT: 'connection-state',
   NEW_MESSAGE_EVENT: 'new-message',
   CLIENT_ACK: 'client-ack',
-}
+};
 
 async function prepareListEvent(context) {
   const { options } = context;
@@ -84,10 +95,7 @@ class Gateway extends HttpServiceBase {
   constructor(context) {
     super(context);
     /** @type {{eventStore: import('../../libs/event-store/iEventStore').IEventStore}} */
-    const {
-      eventStore,
-      events
-    } = this.context;
+    const { eventStore, events } = this.context;
 
     this.publishEvent = async (event, eventArgs, key) => {
       await eventStore.emit(events[event], eventArgs, key);
@@ -101,17 +109,12 @@ class Gateway extends HttpServiceBase {
 
     this.addRoute('/send', 'post', this.sendRestMessage.bind(this));
 
-    this.addRoute(
-      '/messages',
-      'post',
-      this.newMessage.bind(this),
-      {
-        validate: {
-          headers: schemas.authHeaders,
-          payload: Joi.array().items(Joi.string()).min(1).required()
-        }
-      }
-    );
+    this.addRoute('/messages', 'post', this.newMessage.bind(this), {
+      validate: {
+        headers: schemas.authHeaders,
+        payload: Joi.array().items(Joi.string()).min(1).required(),
+      },
+    });
   }
 
   initWebsocket() {
@@ -141,14 +144,14 @@ class Gateway extends HttpServiceBase {
         channel: 'rest',
         gateway: this.options.gatewayName,
         user,
-      }
+      },
     });
 
     const promises = messages.map(async (msg) => {
       let event;
       const options = {
-        source: user
-      }
+        source: user,
+      };
       if (isbinary) {
         const bmsg = base64ToProtoBuffer(msg);
         event = MessageEvent.fromBinary(bmsg, options);
@@ -159,16 +162,15 @@ class Gateway extends HttpServiceBase {
       event.set_server_timestamp();
       await this.publishEvent(EVENT_TYPE.NEW_MESSAGE_EVENT, event, event.destination);
       if (ack) {
-        return event.buildServerAckMessage()
+        return event.buildServerAckMessage();
       }
-    })
+    });
     const acks = await Promise.all(promises);
-    const response = ack ? {
-      acks: acks.map((m) => (isbinary ?
-        m.toBinary().toString('base64')
-        : m.toString()
-      ))
-    } : {}
+    const response = ack
+      ? {
+          acks: acks.map((m) => (isbinary ? m.toBinary().toString('base64') : m.toString())),
+        }
+      : {};
     return res.response(response).code(201);
   }
 
@@ -179,34 +181,36 @@ class Gateway extends HttpServiceBase {
         channel: 'websocket',
         gateway: this.options.gatewayName,
         user,
-      }
+      },
     });
     const ws = this.userSocketMapping.get(user);
     if (!isBinary) {
       const msg = payload.toString();
-      if (msg === "ping") {
-        ws.send("pong");
-        return
+      if (msg === 'ping') {
+        ws.send('pong');
+        return;
       }
     }
     const trackId = shortuuid();
     this.context.asyncStorage.run(trackId, async () => {
       const options = {
-        source: user
-      }
-      const message = isBinary ?
-        MessageEvent.fromBinary(payload, options)
-        : MessageEvent.fromString(payload.toString(), options)
+        source: user,
+      };
+      const message = isBinary
+        ? MessageEvent.fromBinary(payload, options)
+        : MessageEvent.fromString(payload.toString(), options);
       message.set_server_id(trackId);
       message.set_server_timestamp();
-      const event = message.type === MESSAGE_TYPE.CLIENT_ACK ? EVENT_TYPE.CLIENT_ACK : EVENT_TYPE.NEW_MESSAGE_EVENT;
+      const event =
+        message.type === MESSAGE_TYPE.CLIENT_ACK
+          ? EVENT_TYPE.CLIENT_ACK
+          : EVENT_TYPE.NEW_MESSAGE_EVENT;
       await this.publishEvent(event, message, message.destination);
       if (ws.ackEnabled && event === EVENT_TYPE.NEW_MESSAGE_EVENT) {
-        const ack = message.buildServerAckMessage()
-        this.sendWebsocketMessage(user, ack)
+        const ack = message.buildServerAckMessage();
+        this.sendWebsocketMessage(user, ack);
       }
     });
-
   }
 
   async onConnect(user, ws) {
@@ -218,7 +222,7 @@ class Gateway extends HttpServiceBase {
         service: 'gateway',
         gateway: this.options.gatewayName,
         user,
-      }
+      },
     });
     const message = ConnectionStateEvent.connect(user, this.options.gatewayName);
     await this.publishEvent(EVENT_TYPE.CONNECTION_EVENT, message, user);
@@ -233,7 +237,7 @@ class Gateway extends HttpServiceBase {
         service: 'gateway',
         gateway: this.options.gatewayName,
         user,
-      }
+      },
     });
     const message = ConnectionStateEvent.disconnect(user, this.options.gatewayName);
     await this.publishEvent(EVENT_TYPE.CONNECTION_EVENT, message, user);
@@ -243,11 +247,11 @@ class Gateway extends HttpServiceBase {
     const items = req.payload.items || [];
     const errors = [];
     items.forEach((item) => {
-      const { receiver, messages, meta } = item
+      const { receiver, messages, meta } = item;
       if (!messages.length) return;
       const ws = this.userSocketMapping.get(receiver);
       if (ws) {
-        const uError = []
+        const uError = [];
         messages.forEach((m) => {
           try {
             const message = MessageEvent.fromBinary(Buffer.from(m.raw));
@@ -262,20 +266,20 @@ class Gateway extends HttpServiceBase {
                 retry: meta.retry || 0,
                 saved: meta.saved || false,
                 sid: message.server_id,
-              }
-            })
+              },
+            });
           } catch (e) {
             uError.push({
               code: 500,
               error: e,
-              sid: m.sid
+              sid: m.sid,
             });
           }
-        })
+        });
         errors.push({
           receiver,
-          messages: uError
-        })
+          messages: uError,
+        });
         if (uError.length) {
           this.statsClient.increment({
             stat: 'message.delivery.error_count',
@@ -285,14 +289,14 @@ class Gateway extends HttpServiceBase {
               gateway: this.options.gatewayName,
               user: receiver,
               code: 500,
-            }
-          })
+            },
+          });
         }
       } else {
         errors.push({
           code: 404,
           receiver,
-          messages: messages.map((m) => ({ sid: m.sid }))
+          messages: messages.map((m) => ({ sid: m.sid })),
         });
         this.statsClient.increment({
           stat: 'message.delivery.error_count',
@@ -301,24 +305,24 @@ class Gateway extends HttpServiceBase {
             gateway: this.options.gatewayName,
             user: receiver,
             code: 404,
-          }
-        })
+          },
+        });
       }
     });
     return {
-      errors
+      errors,
     };
   }
 
   /**
    * Send messages to user via websocket
    * @param {string} user
-   * @param {import('../../libs/event-args').MessageEvent} message 
+   * @param {import('../../libs/event-args').MessageEvent} message
    */
   sendWebsocketMessage(user, message) {
-    const ws = this.userSocketMapping.get(user)
+    const ws = this.userSocketMapping.get(user);
     if (ws.isbinary) {
-      ws.send(message.toBinary(), { isBinary: true })
+      ws.send(message.toBinary(), { isBinary: true });
     } else {
       ws.send(message.toString());
     }
@@ -330,16 +334,15 @@ class Gateway extends HttpServiceBase {
         gateway: this.options.gatewayName,
         user,
         format: ws.isbinary ? 'binary' : 'text',
-      }
+      },
     });
   }
 
   async shutdown() {
-    await super.shutdown()
+    await super.shutdown();
     const { eventStore } = this.context;
-    await eventStore.dispose()
+    await eventStore.dispose();
   }
-
 }
 
 if (asMain) {

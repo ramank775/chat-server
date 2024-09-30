@@ -1,4 +1,4 @@
-const fs = require('fs')
+const fs = require('fs');
 
 class FileDiscoveryService {
   _services = {};
@@ -8,17 +8,20 @@ class FileDiscoveryService {
    * @params {{serviceDiscoveryPath: string}} options
    */
   constructor(options) {
-    const file = fs.readFileSync(options.serviceDiscoveryPath)
-    this._services = JSON.parse(file)
+    const file = fs.readFileSync(options.serviceDiscoveryPath);
+    this._services = JSON.parse(file);
   }
 
   async getServiceUrl(srv) {
-    return this._services[srv]
+    return this._services[srv];
   }
 }
 
 function addDiscoveryServiceOptions(cmd) {
-  cmd = cmd.option('--service-discovery-path <service-discovery-path>', 'Path to service discovery service')
+  cmd = cmd.option(
+    '--service-discovery-path <service-discovery-path>',
+    'Path to service discovery service'
+  );
   return cmd;
 }
 
@@ -31,4 +34,4 @@ async function initDiscoveryService(context) {
 module.exports = {
   addDiscoveryServiceOptions,
   initDiscoveryService,
-}
+};

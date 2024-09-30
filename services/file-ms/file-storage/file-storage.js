@@ -1,14 +1,11 @@
-/* eslint-disable class-methods-use-this */
-
 /**
  * @abstract
  * Interface for File Database
  */
- class IFileStorage {
-
+class IFileStorage {
   /**
    * Group Database interface
-   * @param {*} context 
+   * @param {*} context
    */
   // eslint-disable-next-line no-unused-vars
   constructor(context) {
@@ -23,9 +20,9 @@
    * @param {{fileId: string; category: string; contentType: string, operation: 'upload'|'download'}} payload
    * @returns {Promise<string>}
    */
-   // eslint-disable-next-line no-unused-vars
+  // eslint-disable-next-line no-unused-vars
   async getSignedUrl(payload) {
-    throw new Error('Method not implemented')
+    throw new Error('Method not implemented');
   }
 
   /**
@@ -46,5 +43,5 @@
 }
 
 module.exports = {
-  IFileStorage
-}
+  IFileStorage,
+};

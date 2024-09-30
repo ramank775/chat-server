@@ -28,7 +28,7 @@ async function initHttpResource(context) {
     const cert = fs.readFileSync(sslCert);
     server = https.createServer({
       key,
-      cert
+      cert,
     });
   } else {
     log.info(`Creating an http server on port ${port}`);
@@ -57,8 +57,8 @@ class HttpServiceBase extends ServiceBase {
     const serverOptions = {
       port: this.options.port,
       host: this.options.host,
-      listener: this.httpServer
-    }
+      listener: this.httpServer,
+    };
     this.hapiServer = Hapi.server(serverOptions);
     this.httpServer = this.hapiServer.listener;
 
@@ -68,8 +68,8 @@ class HttpServiceBase extends ServiceBase {
         stat: 'http.request.count',
         tags: {
           url: req.url.pathname,
-        }
-      })
+        },
+      });
       const trackId = extractInfoFromRequest(req, 'x-request-id') || shortuuid();
       req.trackId = trackId;
       asyncStorage.enterWith(trackId);
@@ -83,8 +83,8 @@ class HttpServiceBase extends ServiceBase {
         value: req.startTime,
         tags: {
           url: req.url.pathname,
-        }
-      })
+        },
+      });
       return h.continue;
     });
 
@@ -103,18 +103,18 @@ class HttpServiceBase extends ServiceBase {
     const path = `${this.baseRoute}${uri}`;
     if (options && options.validate) {
       options.validate.options = {
-        abortEarly: false
-      }
+        abortEarly: false,
+      };
       options.validate.failAction = (_req, _h, error) => {
-        const errorMessage = error.details.map(({ message }) => message).join('\n')
-        throw Boom.badRequest(errorMessage)
-      }
+        const errorMessage = error.details.map(({ message }) => message).join('\n');
+        throw Boom.badRequest(errorMessage);
+      };
     }
     this.hapiServer.route({
       method,
       path,
       handler,
-      options
+      options,
     });
   }
 
@@ -132,5 +132,5 @@ class HttpServiceBase extends ServiceBase {
 module.exports = {
   addHttpOptions,
   initHttpResource,
-  HttpServiceBase
+  HttpServiceBase,
 };

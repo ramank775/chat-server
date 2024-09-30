@@ -2,11 +2,15 @@ const Joi = require('joi');
 const {
   initDefaultOptions,
   initDefaultResources,
-  resolveEnvVariables
+  resolveEnvVariables,
 } = require('../../libs/service-base');
-const { HttpServiceBase, addHttpOptions, initHttpResource } = require('../../libs/http-service-base');
+const {
+  HttpServiceBase,
+  addHttpOptions,
+  initHttpResource,
+} = require('../../libs/http-service-base');
 const { addDatabaseOptions, initializeDatabase } = require('./database');
-const { addFileStorageOptions, initializeFileStorage } = require('./file-storage')
+const { addFileStorageOptions, initializeFileStorage } = require('./file-storage');
 const { extractInfoFromRequest, schemas } = require('../../helper');
 const { getContentTypeByExt } = require('../../libs/content-type-utils');
 
@@ -27,8 +31,6 @@ async function initResource(options) {
     .then(initializeFileStorage);
 }
 
-
-
 class FileMS extends HttpServiceBase {
   constructor(context) {
     super(context);
@@ -45,60 +47,41 @@ class FileMS extends HttpServiceBase {
      * Route is deprecated in favour of new route `GET - /upload/presigned_url`
      * This will be removed in next major release @version v3.x
      */
-    this.addRoute(
-      '/upload/presigned_url',
-      'POST',
-      this.generateUploadURL.bind(this)
-    );
+    this.addRoute('/upload/presigned_url', 'POST', this.generateUploadURL.bind(this));
 
-    this.addRoute(
-      '/upload/presigned_url',
-      'GET',
-      this.getUploadURL.bind(this),
-      {
-        validate:{
-          headers: schemas.authHeaders,
-          query: Joi.object({
-            ext: Joi.string().required(),
-            category: Joi.string().required()
-          })
-        }
-      }
-    );
+    this.addRoute('/upload/presigned_url', 'GET', this.getUploadURL.bind(this), {
+      validate: {
+        headers: schemas.authHeaders,
+        query: Joi.object({
+          ext: Joi.string().required(),
+          category: Joi.string().required(),
+        }),
+      },
+    });
 
-    this.addRoute(
-      '/download/{fileId}/presigned_url',
-      'GET',
-      this.getDownloadURL.bind(this),
-      {
-        validate: {
-          headers: schemas.authHeaders,
-          params: Joi.object({
-            fileId: Joi.string().required()
-          })
-        }
-      }
-    );
-    this.addRoute(
-      '/{fileId}/status',
-      'PUT',
-      this.updateFileUploadStatus.bind(this),
-      {
-        validate:{
-          headers: schemas.authHeaders,
-          params: Joi.object({
-            fileId: Joi.string().required()
-          }),
-          payload: Joi.object({
-            status: Joi.bool().required()
-          })
-        }
-      }
-    );
+    this.addRoute('/download/{fileId}/presigned_url', 'GET', this.getDownloadURL.bind(this), {
+      validate: {
+        headers: schemas.authHeaders,
+        params: Joi.object({
+          fileId: Joi.string().required(),
+        }),
+      },
+    });
+    this.addRoute('/{fileId}/status', 'PUT', this.updateFileUploadStatus.bind(this), {
+      validate: {
+        headers: schemas.authHeaders,
+        params: Joi.object({
+          fileId: Joi.string().required(),
+        }),
+        payload: Joi.object({
+          status: Joi.bool().required(),
+        }),
+      },
+    });
   }
 
   async updateFileUploadStatus(req, h) {
-    const { fileId } = req.params
+    const { fileId } = req.params;
     const { status } = req.payload;
     const user = extractInfoFromRequest(req, 'user');
     const file = await this.fileMetadataDB.getRecord(fileId);
@@ -155,7 +138,7 @@ class FileMS extends HttpServiceBase {
     const preSignedURL = await this.getSignedURL(payload, 'upload');
     return {
       url: preSignedURL,
-      fileId: payload.fileId
+      fileId: payload.fileId,
     };
   }
 
@@ -165,7 +148,7 @@ class FileMS extends HttpServiceBase {
       fileId: payload.fileId,
       category: payload.category,
       contentType: payload.contentType,
-    })
+    });
     return preSignedURL;
   }
 

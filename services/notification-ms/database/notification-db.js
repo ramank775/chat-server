@@ -1,10 +1,7 @@
-/* eslint-disable class-methods-use-this */
-
 class INotificationDB {
-
   /**
    * Notification Database interface
-   * @param {*} context 
+   * @param {*} context
    */
   // eslint-disable-next-line no-unused-vars
   constructor(context) {
@@ -16,8 +13,8 @@ class INotificationDB {
   /**
    * @abstract
    * Upsert Notification Token
-   * @param {string} username 
-   * @param {{deviceId: string|null, token: string}} options 
+   * @param {string} username
+   * @param {{deviceId: string|null, token: string}} options
    */
   // eslint-disable-next-line no-unused-vars
   async upsertToken(username, options) {
@@ -27,8 +24,8 @@ class INotificationDB {
   /**
    * @abstract
    * Get Notification Token
-   * @param {string} username 
-   * @param {{deviceId: string|null}} options 
+   * @param {string} username
+   * @param {{deviceId: string|null}} options
    */
   // eslint-disable-next-line no-unused-vars
   async getToken(username, options) {
@@ -53,5 +50,5 @@ class INotificationDB {
 }
 
 module.exports = {
-  INotificationDB
-}
+  INotificationDB,
+};

@@ -1,7 +1,15 @@
 const { MongoClient } = require('mongodb');
 const fs = require('fs');
 
+/**
+ * Add mongodb options in command
+ * @param {import('commander').Command} cmd
+ * @returns
+ */
 function addMongodbOptions(cmd) {
+  if (cmd.options.find((option) => option.is('--mongo-url'))) {
+    return cmd;
+  }
   return cmd
     .option('--mongo-url <mongo-url>', 'Mongodb connection string mongodb://host:port/db')
     .option('--mongo-auth', 'Enable authentication for mongodb', false)
@@ -17,11 +25,9 @@ function prepareMongoOptions(options) {
     ? { username: options.mongoUser, password: options.mongoPassword }
     : null;
   const dbOptions = {
-    useNewUrlParser: true,
     auth,
     sslCert: clientCertificate,
     sslKey: clientCertificate,
-    useUnifiedTopology: true
   };
   let url = options.mongoUrl;
   if (options.mongoSslEnable) {
@@ -38,5 +44,5 @@ function initMongoClient(context) {
 
 module.exports = {
   addMongodbOptions,
-  initMongoClient
+  initMongoClient,
 };

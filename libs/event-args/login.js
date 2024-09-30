@@ -18,7 +18,7 @@ class LoginEvent extends IEventArg {
   _messageVersion = 2.1;
 
   constructor(args) {
-    super()
+    super();
     this._user = args.user;
     this._deviceId = args.deviceId;
     this._notificationToken = args.notificationToken;
@@ -27,11 +27,11 @@ class LoginEvent extends IEventArg {
 
   static fromBinary(payload) {
     const messageDefination = getProtoDefination(LoginEvent.#binary_resource_name);
-    const incomming = messageDefination.decode(payload)
+    const incomming = messageDefination.decode(payload);
     const json = messageDefination.toObject(incomming, {
       longs: Long,
-      enums: String
-    })
+      enums: String,
+    });
     const message = new LoginEvent(json);
     return message;
   }
@@ -66,5 +66,5 @@ class LoginEvent extends IEventArg {
 }
 
 module.exports = {
-  LoginEvent
-}
+  LoginEvent,
+};

@@ -5,7 +5,7 @@ const { IEventStore } = require('./iEventStore');
 /** @typedef {import('./iEventArg').IEventArg} IEventArg */
 
 function parseAuthOptions(options) {
-  const authOptions = {}
+  const authOptions = {};
   switch (options.natsAuthType) {
     case 'pass':
       authOptions.user = options.natsAuthUser;
@@ -19,7 +19,7 @@ function parseAuthOptions(options) {
         const seed = new TextEncoder().encode(options.natsAuthNkey);
         authOptions.authenticator = nats.nkeyAuthenticator(seed);
       }
-      break
+      break;
     case 'jwt':
       {
         const creds = new TextEncoder().encode(`
@@ -32,8 +32,7 @@ NKEYs are sensitive and should be treated as secrets.
 -----BEGIN USER NKEY SEED-----
 ${options.natsAuthNkey}
 ------END USER NKEY SEED------
-`
-        );
+`);
         authOptions.authenticator = nats.credsAuthenticator(creds);
       }
       break;
@@ -44,11 +43,11 @@ ${options.natsAuthNkey}
 }
 
 function parseNatsOptions(options) {
-  const servers = options.natsServerList.split(',')
-  const authOptions = parseAuthOptions(options)
+  const servers = options.natsServerList.split(',');
+  const authOptions = parseAuthOptions(options);
   return {
     servers,
-    ...authOptions
+    ...authOptions,
   };
 }
 
@@ -80,7 +79,7 @@ class NatsEventStore extends IEventStore {
   #isDisconnect = false;
 
   /** @type { string[] } */
-  #subjects
+  #subjects;
 
   /** @type {(topic: string) => IEventArg} */
   #decodeMessageCb;
@@ -106,7 +105,7 @@ class NatsEventStore extends IEventStore {
     if (!this.#nc) {
       const options = parseNatsOptions(this.#options);
       this.#logger.info('connecting nats server');
-      this.#nc = await nats.connect(options)
+      this.#nc = await nats.connect(options);
     }
     return this.#nc;
   }
@@ -114,15 +113,15 @@ class NatsEventStore extends IEventStore {
   async #getJetStreamClient() {
     if (!this.#jsc) {
       const nc = await this.#getNatsInstance();
-      this.#jsc = nc.jetstream()
+      this.#jsc = nc.jetstream();
     }
     return this.#jsc;
   }
 
   async #createNatsConsumer(decodeMessageCb) {
-    nats.createInbox()
+    nats.createInbox();
     const js = await this.#getJetStreamClient();
-    this.#decodeMessageCb = decodeMessageCb
+    this.#decodeMessageCb = decodeMessageCb;
     try {
       this.#logger.info('subscribing to consumer.');
       const promises = this.#subjects.map((subject) => {
@@ -136,14 +135,14 @@ class NatsEventStore extends IEventStore {
           }
           await this.#eachMessage(msg);
           this.#psub.get(subject).pull();
-        })
+        });
         const subp = js.pullSubscribe(`${subject}.>`, opts);
         subp.then((sub) => {
           this.#psub.set(subject, sub);
-        })
+        });
         return subp;
-      })
-      await Promise.all(promises)
+      });
+      await Promise.all(promises);
       this.#logger.info('Consumer subscribe sucessfully.');
     } catch (error) {
       this.#logger.error(`Error while subscribing consumer. ${error}`);
@@ -153,7 +152,7 @@ class NatsEventStore extends IEventStore {
     setTimeout(async () => {
       this.#psub.forEach((sub) => {
         sub.pull();
-      })
+      });
     }, 500);
 
     return this.#jsc;
@@ -168,22 +167,22 @@ class NatsEventStore extends IEventStore {
         event: topic,
         partition,
         key,
-        broker: 'nats'
-      }
-    })
+        broker: 'nats',
+      },
+    });
     const trackId = msg.headers.get('track_id') || shortuuid();
     try {
       await this.#asyncStorage.run(trackId, async () => {
-        const Message = this.#decodeMessageCb(topic)
+        const Message = this.#decodeMessageCb(topic);
         const logInfo = {
           topic,
           partition,
           offset: msg.seq,
-          key
+          key,
         };
         this.#logger.info(`new data received`, logInfo);
         const sProcess = new Date();
-        const message = Message.fromBinary(msg.data)
+        const message = Message.fromBinary(msg.data);
         await this.on(topic, message, key);
         this.statsClient.timing({
           stat: 'event.process.latency',
@@ -193,7 +192,7 @@ class NatsEventStore extends IEventStore {
             partition,
             key,
             broker: 'nats',
-          }
+          },
         });
         this.#logger.info('message consumed', logInfo);
       });
@@ -201,19 +200,17 @@ class NatsEventStore extends IEventStore {
     } catch (e) {
       this.#logger.error(`Error while processing message`, { err: e });
       // TODO: wait to msg to have retryCount
-      if (msg.redelivered)
-        msg.term();
-      else
-        msg.nak();
+      if (msg.redelivered) msg.term();
+      else msg.nak();
       this.statsClient.increment({
         stat: 'event.process.error_count',
         tags: {
           event: topic,
           partition,
           key,
-          broker: 'nats'
-        }
-      })
+          broker: 'nats',
+        },
+      });
     } finally {
       this.statsClient.timing({
         stat: 'event.consume.latency',
@@ -222,15 +219,15 @@ class NatsEventStore extends IEventStore {
           event: topic,
           partition,
           key,
-          broker: 'nats'
-        }
+          broker: 'nats',
+        },
       });
     }
   }
 
   /**
    * Initialize Nats event store
-   * @param {import('./iEventStore').InitOptions} options 
+   * @param {import('./iEventStore').InitOptions} options
    */
   async init(options) {
     await this.#getJetStreamClient();
@@ -249,10 +246,10 @@ class NatsEventStore extends IEventStore {
     const trackId = this.#asyncStorage.getStore() || shortuuid();
     try {
       const start = new Date();
-      const jc = await this.#getJetStreamClient()
-      const headers = nats.headers()
-      headers.append('track_id', trackId)
-      const data = args.toBinary()
+      const jc = await this.#getJetStreamClient();
+      const headers = nats.headers();
+      headers.append('track_id', trackId);
+      const data = args.toBinary();
       const response = await jc.publish(`${event}.${key}`, data, {
         headers,
       });
@@ -263,15 +260,15 @@ class NatsEventStore extends IEventStore {
           event,
           key,
           broker: 'nats',
-        }
+        },
       });
       this.statsClient.increment({
         stat: 'event.emit.count',
         tags: {
           event,
           key,
-          broker: 'nats'
-        }
+          broker: 'nats',
+        },
       });
 
       this.#logger.info(`Sucessfully produced message`, {
@@ -288,8 +285,8 @@ class NatsEventStore extends IEventStore {
         tags: {
           event,
           key,
-          broker: 'nats'
-        }
+          broker: 'nats',
+        },
       });
       throw error;
     }
@@ -313,10 +310,16 @@ function initOptions(cmd) {
     .option('--nats-auth-type <auth-type>', 'Nats client auth options <pass,token,nkey,jwt>')
     .option('--nats-auth-user <auth-user>', 'Nats client username for pass authentication')
     .option('--nats-auth-pass <auth-pass>', 'Nats client password for pass authentication')
-    .option('--nats-auth-token <auth-token>', 'Nats client authentication token for token authentication')
+    .option(
+      '--nats-auth-token <auth-token>',
+      'Nats client authentication token for token authentication'
+    )
     .option('--nats-auth-nkey <auth-nkey>', 'Nats client secret nkey for nkey/jwt authentication')
     .option('--nats-auth-jwt <auth-jwt>', 'Nats client user jwt token for jwt authentication')
-    .option('--nats-consumer-group <consumer-group>', 'Nats consumer group name for durable consumer');
+    .option(
+      '--nats-consumer-group <consumer-group>',
+      'Nats consumer group name for durable consumer'
+    );
 }
 
 async function initialize(context, options) {
@@ -328,5 +331,5 @@ async function initialize(context, options) {
 module.exports = {
   code: 'nats',
   initOptions,
-  initialize
-}
+  initialize,
+};

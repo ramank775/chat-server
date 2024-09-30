@@ -160,8 +160,8 @@ function parseStandardKafkaOptions(options) {
     retry: {
       maxRetryTime: options.kafkaMaxRetryTime,
       initialRetryTime: options.kafkaInitialRetryTime,
-      retries: options.kafkaMaxRetries
-    }
+      retries: options.kafkaMaxRetries,
+    },
   };
   return kafkaOptions;
 }
@@ -178,11 +178,10 @@ function parseKafkaSSLOptions(options) {
         rejectUnauthorized: false,
         ca: [fs.readFileSync(options.kafkaSslCa, 'utf-8')],
         key: fs.readFileSync(options.kafkaSslKey, 'utf-8'),
-        cert: fs.readFileSync(options.kafkaSslCertificate, 'utf-8')
+        cert: fs.readFileSync(options.kafkaSslCertificate, 'utf-8'),
       };
     }
     return true;
-
   }
 
   if (options.kafkaSecurityProtocol === 'sasl_ssl') {
@@ -193,17 +192,17 @@ function parseKafkaSSLOptions(options) {
       sasl: {
         mechanism: options.kafkaSaslMechanisms,
         username: options.kafkaSaslUsername,
-        password: options.kafkaSaslPassword
-      }
+        password: options.kafkaSaslPassword,
+      },
     };
-  } if (options.kafkaSecurityProtocol === 'ssl') {
+  }
+  if (options.kafkaSecurityProtocol === 'ssl') {
     return {
       authenticationTimeout: 1000,
-      ssl: sslOptions()
+      ssl: sslOptions(),
     };
   }
   return {};
-
 }
 
 /**
@@ -216,7 +215,7 @@ function parseKakfaProducerOptions(options) {
     metadataMaxAge: options.kafkaMetadataMaxAge,
     allowAutoTopicCreation: false,
     transactionTimeout: options.kafkaTransactionTimeout,
-    maxInFlightRequests: options.kafkaMaxInFlightRequests
+    maxInFlightRequests: options.kafkaMaxInFlightRequests,
   };
   return kafkaProducerOptions;
 }
@@ -238,7 +237,7 @@ function parseKakfaConsumerOptions(options) {
     maxBytesPerPartition: options.kafkaMaxBytesPerPartition,
     minBytes: options.kafkaMinBytes,
     maxBytes: options.kafakMaxBytes,
-    maxWaitTimeInMs: options.kafkaMaxWaitTime
+    maxWaitTimeInMs: options.kafkaMaxWaitTime,
   };
   return kafkaConsumerOptions;
 }
@@ -246,7 +245,7 @@ function parseKakfaConsumerOptions(options) {
 function parseKafkaOptions(options) {
   return {
     ...parseStandardKafkaOptions(options),
-    ...parseKafkaSSLOptions(options)
+    ...parseKafkaSSLOptions(options),
   };
 }
 
@@ -262,7 +261,7 @@ function toWinstonLogLevel(level) {
     case logLevel.DEBUG:
       return 'debug';
     default:
-      return 'info'
+      return 'info';
   }
 }
 
@@ -277,7 +276,7 @@ function toLogLevel(level) {
     case 'debug':
       return logLevel.DEBUG;
     default:
-      return logLevel.INFO
+      return logLevel.INFO;
   }
 }
 
@@ -312,7 +311,7 @@ class KafkaEventStore extends IEventStore {
   #isDisconnect = false;
 
   /** @type { string[] } */
-  #listenerEvents
+  #listenerEvents;
 
   /** @type {import('../stats-client/iStatsClient').IStatsClient} */
   statsClient;
@@ -337,14 +336,16 @@ class KafkaEventStore extends IEventStore {
       this.#kafka = new Kafka({
         ...options,
         logLevel: toLogLevel(this.#logger.level === 'debug' ? 'info' : this.#logger.level),
-        logCreator: (_level) => ({ _namespace, level, _label, log }) => {
-          const { message, ...extra } = log;
-          this.#logger.log({
-            level: toWinstonLogLevel(level),
-            message,
-            extra
-          });
-        }
+        logCreator:
+          (_level) =>
+          ({ _namespace, level, _label, log }) => {
+            const { message, ...extra } = log;
+            this.#logger.log({
+              level: toWinstonLogLevel(level),
+              message,
+              extra,
+            });
+          },
       });
     }
     return this.#kafka;
@@ -375,7 +376,9 @@ class KafkaEventStore extends IEventStore {
 
     try {
       this.#logger.info(`Subscribing consumer to topics ${this.#listenerEvents}`);
-      const subscribePromise = this.#listenerEvents.map(event => this.#consumer.subscribe({ topic: event }));
+      const subscribePromise = this.#listenerEvents.map((event) =>
+        this.#consumer.subscribe({ topic: event })
+      );
       await Promise.all(subscribePromise);
       this.#logger.info(`Consumer subscribe to topics successfully`);
     } catch (error) {
@@ -396,15 +399,15 @@ class KafkaEventStore extends IEventStore {
                 event: topic,
                 partition,
                 key,
-                broker: 'kafka'
-              }
+                broker: 'kafka',
+              },
             });
             const trackId = message.headers.track_id.toString() || shortuuid();
             try {
               await this.#asyncStorage.run(trackId, async () => {
                 const data = {
                   key,
-                  value: message.value
+                  value: message.value,
                 };
                 const logInfo = {
                   topic,
@@ -413,7 +416,7 @@ class KafkaEventStore extends IEventStore {
                   key: data.key,
                 };
                 /** @type {import('./iEventArg').IEventArg} */
-                const Message = decodeMessageCb(topic)
+                const Message = decodeMessageCb(topic);
 
                 this.#logger.info(`new data received`, logInfo);
                 const sProcess = new Date();
@@ -427,7 +430,7 @@ class KafkaEventStore extends IEventStore {
                     partition,
                     key,
                     broker: 'kafka',
-                  }
+                  },
                 });
                 this.#logger.info('message consumed', logInfo);
               });
@@ -438,8 +441,8 @@ class KafkaEventStore extends IEventStore {
                   event: topic,
                   partition,
                   key,
-                  broker: 'kafka'
-                }
+                  broker: 'kafka',
+                },
               });
               throw e;
             } finally {
@@ -450,11 +453,11 @@ class KafkaEventStore extends IEventStore {
                   event: topic,
                   partition,
                   key,
-                  broker: 'kafka'
-                }
+                  broker: 'kafka',
+                },
               });
             }
-          }
+          },
         });
       } catch (error) {
         this.#logger.error(`Error while running consumer ${error}`, { error });
@@ -466,7 +469,7 @@ class KafkaEventStore extends IEventStore {
 
   /**
    * Initialize kafka event store
-   * @param {import('./iEventStore').InitOptions} options 
+   * @param {import('./iEventStore').InitOptions} options
    */
   async init(options) {
     if (options.producer) {
@@ -494,9 +497,9 @@ class KafkaEventStore extends IEventStore {
             key,
             value: args.toBinary(),
             headers: {
-              track_id: trackId
-            }
-          }
+              track_id: trackId,
+            },
+          },
         ],
         acks: 1,
       });
@@ -507,15 +510,15 @@ class KafkaEventStore extends IEventStore {
           event,
           key,
           broker: 'kafka',
-        }
+        },
       });
       this.statsClient.increment({
         stat: 'event.emit.count',
         tags: {
           event,
           key,
-          broker: 'kafka'
-        }
+          broker: 'kafka',
+        },
       });
 
       this.#logger.info(`Sucessfully produced message`, {
@@ -531,8 +534,8 @@ class KafkaEventStore extends IEventStore {
         tags: {
           event,
           key,
-          broker: 'kafka'
-        }
+          broker: 'kafka',
+        },
       });
       throw error;
     }
@@ -570,5 +573,5 @@ async function initialize(context, options) {
 module.exports = {
   code: 'kafka',
   initOptions,
-  initialize
+  initialize,
 };

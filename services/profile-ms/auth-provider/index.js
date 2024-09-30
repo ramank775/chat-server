@@ -1,12 +1,9 @@
 const { IAuthProvider } = require('./auth-provider');
 const firebase = require('./firebase-auth-provider');
-const mock = require('./mock-auth-provider')
+const mock = require('./mock-auth-provider');
 const { addDatabaseOptions, initializeDatabase } = require('../database/auth');
 
-const AUTH_PROVIDER_IMPL = [
-  firebase,
-  mock
-]
+const AUTH_PROVIDER_IMPL = [firebase, mock];
 
 /**
  * Add command line options for database store
@@ -14,10 +11,14 @@ const AUTH_PROVIDER_IMPL = [
  * @returns {import('commander').Command}
  */
 function addOptions(cmd) {
-  cmd = cmd.option('--auth-provider <auth-provider>', 'Which auth provider to use (firebase)', 'firebase');
-  AUTH_PROVIDER_IMPL.forEach(impl => {
-    cmd = impl.addOptions(cmd)
-  })
+  cmd = cmd.option(
+    '--auth-provider <auth-provider>',
+    'Which auth provider to use (firebase)',
+    'firebase'
+  );
+  AUTH_PROVIDER_IMPL.forEach((impl) => {
+    cmd = impl.addOptions(cmd);
+  });
   cmd = addDatabaseOptions(cmd);
   return cmd;
 }
@@ -30,7 +31,7 @@ function addOptions(cmd) {
  */
 function getAuthProviderImpl(context) {
   const {
-    options: { authProvider }
+    options: { authProvider },
   } = context;
   const store = AUTH_PROVIDER_IMPL.find((s) => s.code === authProvider);
   if (!store) {
@@ -41,20 +42,19 @@ function getAuthProviderImpl(context) {
 
 /**
  * Initialize Auth provider
- * @returns 
+ * @returns
  */
 async function initialize(context) {
-  await initializeDatabase(context)
-  const impl = getAuthProviderImpl(context)
+  await initializeDatabase(context);
+  const impl = getAuthProviderImpl(context);
   const provider = new impl.Implementation(context);
   await provider.init();
   context.authProvider = provider;
   return context;
 }
 
-
 module.exports = {
   IAuthProvider,
   addAuthProviderOptions: addOptions,
-  initializeAuthProvider: initialize
-}
+  initializeAuthProvider: initialize,
+};

@@ -1,8 +1,7 @@
-const { IAuthDB } = require('./auth-db')
+const { IAuthDB } = require('./auth-db');
 const { addMongodbOptions, initMongoClient } = require('../../../../libs/mongo-utils');
 
- class MongoAuthDB extends IAuthDB {
-
+class MongoAuthDB extends IAuthDB {
   /** @type { import('mongodb').MongoClient } */
   #client;
 
@@ -11,7 +10,7 @@ const { addMongodbOptions, initMongoClient } = require('../../../../libs/mongo-u
 
   /**
    * Auth Database interface
-   * @param {*} context 
+   * @param {*} context
    */
   constructor(context) {
     super(context);
@@ -20,7 +19,7 @@ const { addMongodbOptions, initMongoClient } = require('../../../../libs/mongo-u
 
   /**
    * Verify if accesskey is exits for the username
-   * @param {string} username 
+   * @param {string} username
    * @param {string} accesskey
    * @returns {Promise<boolean>}
    */
@@ -40,20 +39,20 @@ const { addMongodbOptions, initMongoClient } = require('../../../../libs/mongo-u
       username,
       accesskey,
       addedOn: new Date(),
-      updatedOn: new Date()
-    })
+      updatedOn: new Date(),
+    });
   }
 
   /**
    * Revoke the accesskey for username
-   * @param {string} username 
+   * @param {string} username
    * @param {string} accesskey
    */
   async revoke(username, accesskey) {
     await this.#collection.deleteOne({
       username,
-      accesskey
-    })
+      accesskey,
+    });
   }
 
   /**
@@ -74,7 +73,7 @@ const { addMongodbOptions, initMongoClient } = require('../../../../libs/mongo-u
 }
 
 function addDatabaseOptions(cmd) {
-  cmd = addMongodbOptions(cmd)
+  cmd = addMongodbOptions(cmd);
   return cmd;
 }
 
@@ -82,4 +81,4 @@ module.exports = {
   code: 'mongo',
   addOptions: addDatabaseOptions,
   Implementation: MongoAuthDB,
-}
+};

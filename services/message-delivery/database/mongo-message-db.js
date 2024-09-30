@@ -1,16 +1,15 @@
-const moment = require('moment');
+const { DateTime } = require('luxon');
 const { IMessageDB } = require('./message-db');
 const { addMongodbOptions, initMongoClient } = require('../../../libs/mongo-utils');
-const { MessageEvent } = require('../../../libs/event-args')
+const { MessageEvent } = require('../../../libs/event-args');
 
 const MESSAGE_STATUS = {
   UNDELIVERED: 0,
   SENT: 1,
-  DELIVERED: 2
-}
+  DELIVERED: 2,
+};
 
 class MongoMessageDB extends IMessageDB {
-
   /** @type { import('mongodb').MongoClient } */
   #client;
 
@@ -19,7 +18,7 @@ class MongoMessageDB extends IMessageDB {
 
   /**
    * Group Database interface
-   * @param {*} context 
+   * @param {*} context
    */
   constructor(context) {
     super(context);
@@ -29,50 +28,55 @@ class MongoMessageDB extends IMessageDB {
   /**
    * Save messages in database
    * @param {string} user
-   * @param {MessageEvent[]} messages 
+   * @param {MessageEvent[]} messages
    */
   async save(user, messages) {
-    const expireAt = moment().add(30, 'days').toDate()
-    const msgs = messages.map(msg => ({
+    const expireAt = DateTime.now().plus({ days: 30 }).toJSDate();
+    const msgs = messages.map((msg) => ({
       id: msg.id,
       user,
       payload: msg.toBinary(),
       status: MESSAGE_STATUS.UNDELIVERED,
-      expireAt
-    }))
-    await this.#collection.insertMany(msgs)
+      expireAt,
+    }));
+    await this.#collection.insertMany(msgs);
   }
 
   async getUndeliveredMessage(userId) {
-    const cursor = this.#collection.find({ user: userId, status: 0 }, { projection: { payload: 1 } });
+    const cursor = this.#collection.find(
+      { user: userId, status: 0 },
+      { projection: { payload: 1 } }
+    );
     const messageEventCursor = cursor.map((doc) => {
-      const binary = doc.payload.buffer
-      return MessageEvent.fromBinary(binary)
-    })
-    return await messageEventCursor.toArray()
+      const binary = doc.payload.buffer;
+      return MessageEvent.fromBinary(binary);
+    });
+    return await messageEventCursor.toArray();
   }
 
   async markMessageSent(userId, messageIds) {
-    const expireAt = moment().add(7, 'days').toDate();
-    await this.#collection.updateMany({
-      user: userId, id: { $in: messageIds }
-    }, {
-      $set: {
-        status: MESSAGE_STATUS.SENT,
-        expireAt,
+    const expireAt = DateTime.now().plus({ days: 7 }).toJSDate();
+    await this.#collection.updateMany(
+      {
+        user: userId,
+        id: { $in: messageIds },
+      },
+      {
+        $set: {
+          status: MESSAGE_STATUS.SENT,
+          expireAt,
+        },
       }
-    })
-  }
-
-  async markMessageDelivered(userId, messageIds) {
-    await this.#collection.deleteMany(
-      { user: userId, id: { $in: messageIds } }
     );
   }
 
+  async markMessageDelivered(userId, messageIds) {
+    await this.#collection.deleteMany({ user: userId, id: { $in: messageIds } });
+  }
+
   /**
-  * Initialize the database instance
-  */
+   * Initialize the database instance
+   */
   async init() {
     await this.#client.connect();
     const db = this.#client.db();
@@ -88,7 +92,7 @@ class MongoMessageDB extends IMessageDB {
 }
 
 function addDatabaseOptions(cmd) {
-  cmd = addMongodbOptions(cmd)
+  cmd = addMongodbOptions(cmd);
   return cmd;
 }
 
@@ -96,4 +100,4 @@ module.exports = {
   code: 'mongo',
   addOptions: addDatabaseOptions,
   Implementation: MongoMessageDB,
-}
+};

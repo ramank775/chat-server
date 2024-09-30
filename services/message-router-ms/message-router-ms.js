@@ -4,7 +4,7 @@ const {
   ServiceBase,
   initDefaultOptions,
   initDefaultResources,
-  resolveEnvVariables
+  resolveEnvVariables,
 } = require('../../libs/service-base');
 
 const asMain = require.main === module;
@@ -16,7 +16,7 @@ const EVENT_TYPE = {
   SEND_EVENT: 'send-event',
   GROUP_MESSAGE_EVENT: 'group-message',
   SYSTEM_EVENT: 'system-event',
-}
+};
 
 async function prepareEventList(context) {
   const { options } = context;
@@ -32,13 +32,12 @@ async function prepareEventList(context) {
 }
 
 async function initResources(options) {
-  let context = await initDefaultResources(options)
-    .then(prepareEventList);
+  let context = await initDefaultResources(options).then(prepareEventList);
   context = await eventStore.initializeEventStore({
     producer: true,
     consumer: true,
-    decodeMessageCb: () => MessageEvent
-  })(context)
+    decodeMessageCb: () => MessageEvent,
+  })(context);
   return context;
 }
 
@@ -86,32 +85,32 @@ class MessageRouterMS extends ServiceBase {
 
   /**
    * Redirect message based on the type
-   * @param {Message} message 
+   * @param {Message} message
    * @param {string} key
    */
   async redirectMessage(message, key) {
     let event;
     switch (message.channel) {
       case CHANNEL_TYPE.GROUP:
-        event = EVENT_TYPE.GROUP_MESSAGE_EVENT
+        event = EVENT_TYPE.GROUP_MESSAGE_EVENT;
         break;
       default:
         switch (message.type) {
           case MESSAGE_TYPE.NOTIFICATION:
-            event = EVENT_TYPE.SYSTEM_EVENT
+            event = EVENT_TYPE.SYSTEM_EVENT;
             break;
           default:
-            event = EVENT_TYPE.SEND_EVENT
+            event = EVENT_TYPE.SEND_EVENT;
         }
         break;
     }
     await this.publish(event, message, key);
 
-    this.log.info('Message redirected', { sid: message.server_id, });
+    this.log.info('Message redirected', { sid: message.server_id });
   }
 
   async publish(event, message, key) {
-    this.eventStore.emit(this.events[event], message, key)
+    this.eventStore.emit(this.events[event], message, key);
   }
 
   async shutdown() {

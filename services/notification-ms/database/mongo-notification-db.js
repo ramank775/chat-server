@@ -1,9 +1,7 @@
-
 const { INotificationDB } = require('./notification-db');
 const { addMongodbOptions, initMongoClient } = require('../../../libs/mongo-utils');
 
 class MongoNotificationDB extends INotificationDB {
-
   /** @type { import('mongodb').MongoClient } */
   #client;
 
@@ -12,7 +10,7 @@ class MongoNotificationDB extends INotificationDB {
 
   /**
    * Profile Database interface
-   * @param {*} context 
+   * @param {*} context
    */
   constructor(context) {
     super(context);
@@ -21,31 +19,31 @@ class MongoNotificationDB extends INotificationDB {
 
   /**
    * Upsert Notification Token
-   * @param {string} username 
-   * @param {{deviceId: string|null, token: string}} options 
+   * @param {string} username
+   * @param {{deviceId: string|null, token: string}} options
    */
   async upsertToken(username, options) {
     await this.#collection.updateOne(
       { username, deviceId: options.deviceId },
       {
         $set: {
-          notificationToken: options.token
+          notificationToken: options.token,
         },
         $setOnInsert: {
           username,
           deviceId: options.deviceId,
-        }
+        },
       },
       {
-        upsert: true
+        upsert: true,
       }
     );
   }
 
   /**
    * Get Notification Token
-   * @param {string} username 
-   * @param {{deviceId: string|null}} options 
+   * @param {string} username
+   * @param {{deviceId: string|null}} options
    */
   async getToken(username, options) {
     const record = await this.#collection.findOne(
@@ -70,7 +68,6 @@ class MongoNotificationDB extends INotificationDB {
   async dispose() {
     await this.#client.close();
   }
-
 }
 
 function addOptions(cmd) {
@@ -81,5 +78,5 @@ function addOptions(cmd) {
 module.exports = {
   code: 'mongo',
   addOptions,
-  Implementation: MongoNotificationDB
-}
+  Implementation: MongoNotificationDB,
+};
