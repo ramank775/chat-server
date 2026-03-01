@@ -50,16 +50,18 @@ app.kubernetes.io/name: {{ include "chatserver.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
-{{/*
-Create the name of the service account to use
-*/}}
-{{- define "chatserver.serviceAccountName" -}}
-{{- if .Values.serviceAccount.create }}
-{{- default (include "chatserver.fullname" .) .Values.serviceAccount.name }}
-{{- else }}
-{{- default "default" .Values.serviceAccount.name }}
-{{- end }}
-{{- end }}
+{{- /*
+Merges the global annotations with the service-specific annotations,
+giving precedence to the service-specific annotations.
+*/ -}}
+{{- define "chatserver.annotations" -}}
+{{- $serviceAnnotations := . -}}
+{{- $globalAnnotations := .Values.podAnnotations -}}
+{{- $result := dict -}}
+{{- $result = merge $result $globalAnnotations -}}
+{{- $result = merge $result $serviceAnnotations -}}
+{{- $result -}}
+{{- end -}}
 
 
 {{/*

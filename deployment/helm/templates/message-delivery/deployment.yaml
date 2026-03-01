@@ -19,6 +19,10 @@ spec:
   template:
     metadata:
       name:  {{ $serviceName }}
+      {{- with ( include "chatserver.annotations" .Values.mesageDelivery.podAnnotations ) -}}
+      annotations:
+        {{- toYaml . | nindent 8 -}}
+      {{- end -}}
       labels:
         - service:  {{ $serviceName }}
         {{- include "chatserverlabels" . | nindent 4 -}}
@@ -27,7 +31,6 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 -}}
       {{- end -}}
-      serviceAccountName: {{ include "chatserver.serviceAccountName" . }}
       containers:
         - name:  {{ $serviceName }}
           securityContext:
@@ -54,11 +57,4 @@ spec:
             {{ include "mongo.opton" | nindent 12 }}
             {{- end -}}
             {{ include "eventStore.option" (dict "consumerGroup" "message-delivery") | nindent 12 }}
-          volumeMounts:
-            - name: service-discovery
-              mountPath: /app
-      volumes:
-        - name: service-discovery
-          configMap:
-            name: gateway-directory
 {{- end -}}

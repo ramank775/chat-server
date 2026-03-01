@@ -17,7 +17,7 @@ spec:
       {{- include "chatserver.selectorLabels" . | nindent 6 -}}
   template:
     metadata:
-      {{- with .Values.podAnnotations -}}
+      {{- with ( include "chatserver.annotations" .Values.mesageDelivery.podAnnotations ) -}}
       annotations:
         {{- toYaml . | nindent 8 -}}
       {{- end -}}

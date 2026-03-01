@@ -20,6 +20,10 @@ spec:
   template:
     metadata:
       name: {{ $serviceName }}
+      {{- with ( include "chatserver.annotations" .Values.profileMs.podAnnotations ) -}}
+      annotations:
+        {{- toYaml . | nindent 8 -}}
+      {{- end -}}
       labels:
         - service: {{ $serviceName }}
         {{- include "chatserver.labels" . | nindent 4 -}}
@@ -28,7 +32,6 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 -}}
       {{- end -}}
-      serviceAccountName: {{ include "chatserver.serviceAccountName" . }}
       containers:
         - name: {{ $serviceName }}
           securityContext:

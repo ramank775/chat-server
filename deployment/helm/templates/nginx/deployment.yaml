@@ -16,6 +16,10 @@ spec:
   template:
     metadata:
       name: nginx
+      {{- with ( include "chatserver.annotations" .Values.nginx.podAnnotations ) -}}
+      annotations:
+        {{- toYaml . | nindent 8 -}}
+      {{- end -}}
       labels:
         - service: "nginx"
         {{- include "chatserver.labels" . | nindent 4 -}}
@@ -24,7 +28,6 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 -}}
       {{- end -}}
-      serviceAccountName: {{ include "chatserver.serviceAccountName" . }}
       containers:
         - name: nginx
           securityContext:

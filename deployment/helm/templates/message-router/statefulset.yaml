@@ -16,7 +16,7 @@ spec:
       {{- include "chatserver.selectorLabels" . | nindent 6 -}}
   template:
     metadata:
-      {{- with .Values.podAnnotations -}}
+      {{- with ( include "chatserver.annotations" .Values.messageRouter.podAnnotations ) -}}
       annotations:
         {{- toYaml . | nindent 8 -}}
       {{- end -}}
@@ -29,7 +29,6 @@ spec:
         {{- toYaml . | nindent 8 -}}
       {{- end -}}
       serviceName: {{ $serviceName }}
-      serviceAccountName: {{ include "chatserver.serviceAccountName" . }}
       containers:
         - name: {{ $serviceName }}
           securityContext:
