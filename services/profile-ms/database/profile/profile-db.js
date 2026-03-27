@@ -63,9 +63,21 @@ class IProfileDB {
 
   /**
    * @abstract
+   * Update user profile
+   * @param {string} username
+   * @param {Partial<UserProfile>} updates
+   * @returns {Promise<UserProfile|null>}
+   */
+  // eslint-disable-next-line no-unused-vars
+  async updateProfile(username, updates) {
+    throw new Error('Method not implemented');
+  }
+
+  /**
+   * @abstract
    * Sync contact book
    * @param {string} username
-   * @param {string[]} contacts 
+   * @param {string[]} contacts
    */
   // eslint-disable-next-line no-unused-vars
   async contactBookSyncByUsername(username, contacts) {

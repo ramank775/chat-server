@@ -83,6 +83,21 @@ class ProfileMs extends HttpServiceBase {
     );
 
     this.addRoute(
+      '/',
+      'PUT',
+      this.updateProfile.bind(this),
+      {
+        validate: {
+          headers: schemas.authHeaders,
+          payload: Joi.object({
+            name: Joi.string().allow(null),
+            image: Joi.string().allow(null),
+          }).min(1)
+        }
+      }
+    );
+
+    this.addRoute(
       '/contactbook/sync',
       'POST',
       this.syncContact.bind(this),
@@ -146,6 +161,19 @@ class ProfileMs extends HttpServiceBase {
       accesskey,
       isNew
     };
+  }
+
+  async updateProfile(req, res) {
+    const username = extractInfoFromRequest(req);
+    if (!username) {
+      return res.response({ error: 'unauthorized' }).code(401);
+    }
+    const updates = req.payload;
+    const updated = await this.profileDB.updateProfile(username, updates);
+    if (!updated) {
+      return res.response({ error: 'profile not found' }).code(404);
+    }
+    return updated;
   }
 
   async fetchProfile(req) {

@@ -86,6 +86,24 @@ class ChannelMs extends HttpServiceBase {
     );
 
     this.addRoute(
+      '/{channelId}',
+      'PUT',
+      this.updateChannel.bind(this),
+      {
+        validate: {
+          headers: schemas.authHeaders,
+          params: Joi.object({
+            channelId: Joi.string().required()
+          }),
+          payload: Joi.object({
+            name: Joi.string().allow(null),
+            profilePic: Joi.string().allow(null),
+          }).min(1)
+        }
+      }
+    );
+
+    this.addRoute(
       '/{channelId}/members',
       'POST',
       this.addMembers.bind(this),
@@ -138,6 +156,18 @@ class ChannelMs extends HttpServiceBase {
     const { type } = req.query;
     const channels = await this.db.getMemberChannels(user, type || 'group')
     return channels || [];
+  }
+
+  async updateChannel(req, res) {
+    const user = extractInfoFromRequest(req, 'user');
+    const { channelId } = req.params;
+    const channel = await this.db.getChannelInfo(channelId, user);
+    if (!channel) {
+      return res.response({ error: 'channel not found' }).code(404);
+    }
+    const updates = req.payload;
+    const updated = await this.db.updateChannel(channelId, updates);
+    return updated || {};
   }
 
   async getChannelInfo(req, res) {

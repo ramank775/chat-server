@@ -123,10 +123,25 @@ class MongoChannelDB extends IChannelDB {
   }
 
   /**
+   * Update channel details
+   * @param {string} channelId
+   * @param {{name?: string, profilePic?: string}} updates
+   * @returns {Promise<object|null>}
+   */
+  async updateChannel(channelId, updates) {
+    const result = await this.#collection.findOneAndUpdate(
+      { channelId },
+      { $set: { ...updates, updatedOn: new Date() } },
+      { returnDocument: 'after', projection: { _id: 0, channelId: 1, name: 1, profilePic: 1 } }
+    );
+    return result;
+  }
+
+  /**
    * Update Member role
-   * @param {string} channelId 
-   * @param {string} memberId 
-   * @param {string} role 
+   * @param {string} channelId
+   * @param {string} memberId
+   * @param {string} role
    */
   async updateMemberRole(channelId, role) {
     await this.#collection.updateOne({

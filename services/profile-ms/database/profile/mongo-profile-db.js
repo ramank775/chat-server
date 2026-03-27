@@ -47,9 +47,24 @@ class MongoProfileDB extends IProfileDB {
   }
 
   /**
+   * Update user profile
+   * @param {string} username
+   * @param {Partial<import('./profile-db').UserProfile>} updates
+   * @returns {Promise<import('./profile-db').UserProfile|null>}
+   */
+  async updateProfile(username, updates) {
+    const result = await this.#collection.findOneAndUpdate(
+      { username, isActive: true },
+      { $set: { ...updates, updatedOn: new Date() } },
+      { returnDocument: 'after', projection: { _id: 0, username: 1, name: 1 } }
+    );
+    return result;
+  }
+
+  /**
    * Sync contact book with username
    * @param {string} username
-   * @param {string[]} contacts 
+   * @param {string[]} contacts
    */
   async contactBookSyncByUsername(username, contacts) {
     const availableUsers = await this.#collection

@@ -75,9 +75,21 @@
 
   /**
    * @abstract
+   * Update channel details
+   * @param {string} channelId
+   * @param {{name?: string, profilePic?: string}} updates
+   * @returns {Promise<object|null>}
+   */
+  // eslint-disable-next-line no-unused-vars
+  async updateChannel(channelId, updates) {
+    throw new Error('Method not implemented');
+  }
+
+  /**
+   * @abstract
    * Update Member role
-   * @param {string} channelId 
-   * @param {string} role 
+   * @param {string} channelId
+   * @param {string} role
    */
   // eslint-disable-next-line no-unused-vars
    async updateMemberRole(channelId, role) {
