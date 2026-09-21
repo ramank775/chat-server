@@ -103,6 +103,13 @@ class MongoChannelDB extends IChannelDB {
     );
   }
 
+  async setMemberRole(channelId, userId, role) {
+    // `owner` is denormalised on the doc, so succession has to move it too.
+    const update = { 'members.$.role': role };
+    if (role === 'owner') update.owner = userId;
+    await this.#collection.updateOne({ channelId, 'members.user_id': userId }, { $set: update });
+  }
+
   async updateChannel(channelId, updates) {
     const channel = await this.#collection.findOneAndUpdate(
       { channelId },

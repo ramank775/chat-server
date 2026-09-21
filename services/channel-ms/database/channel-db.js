@@ -99,6 +99,17 @@ class IChannelDB {
 
   /**
    * @abstract
+   * Set one member's role (DECISIONS row 80 promote/demote, row 9 succession).
+   * @param {string} channelId
+   * @param {string} userId
+   * @param {'owner'|'admin'|'member'} role
+   */
+  async setMemberRole(channelId, userId, role) {
+    throw new Error('Method not implemented');
+  }
+
+  /**
+   * @abstract
    * @param {string} channelId
    * @param {{name?: string, avatarUrl?: string}} updates
    * @returns {Promise<Channel|null>}
@@ -109,7 +120,7 @@ class IChannelDB {
 
   /**
    * @abstract
-   * Hard delete, owner only (DECISIONS row 9 — no ownership transfer in 3.0).
+   * Hard delete: the owner's DELETE, or the last member leaving (row 9).
    * @param {string} channelId
    */
   async deleteChannel(channelId) {

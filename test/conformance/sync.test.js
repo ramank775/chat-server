@@ -11,6 +11,7 @@ const {
   eventually,
   mintOpId,
   signup,
+  signupWithUsername,
   uniquePhone
 } = require('./helper');
 
@@ -479,5 +480,76 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
     assert.equal(removedEvent.type, 'CHANNEL_MEMBER_REMOVED');
     assert.equal(removedEvent.memberRemoved.channelId, groupId);
     assert.equal(removedEvent.memberRemoved.member, bob.user_id);
+  });
+
+  // -- 10. roles and owner succession (DECISIONS rows 9 / 80) ---------------
+
+  it('promotes an admin and hands the group over when the owner leaves', async () => {
+    const carol = await signupWithUsername('device-r');
+    const carolWs = connect(carol.accesskey);
+    await carolWs.opened;
+    /** The next 0x53 push on `socket` whose decoded event satisfies `match`. */
+    const serverEvent = async (socket, match) => {
+      const frame = await socket.waitFor((f) => {
+        if (f.type !== WS_TYPE.WS_PUSH) return false;
+        const event = decodeServerEvent(f.push.payload);
+        return Boolean(event) && match(event);
+      });
+      return decodeServerEvent(frame.push.payload);
+    };
+
+    const roleGroup = crypto.randomUUID();
+    const created = await api('POST', '/v3.0/channels', {
+      token: alice.accesskey,
+      body: {
+        op_id: aliceOp(),
+        resource_seq: nextSeq(alice.user_id, roleGroup),
+        channel_id: roleGroup,
+        kind: 'group',
+        name: 'roles',
+        members: [alice.user_id, bob.user_id, carol.user_id]
+      }
+    });
+    assert.equal(created.status, 201);
+
+    // alice promotes bob; both bob and carol hear the re-announcement
+    const promoted = await api(
+      'PATCH', `/v3.0/channels/${roleGroup}/members/${bob.user_id}`,
+      {
+        token: alice.accesskey,
+        body: {
+          op_id: aliceOp(),
+          resource_seq: nextSeq(alice.user_id, roleGroup),
+          role: 'admin'
+        }
+      }
+    );
+    assert.equal(promoted.status, 200);
+    assert.deepEqual(promoted.body, { user_id: bob.user_id, role: 'admin' });
+
+    const isAdminOf = (event) => event.type === 'CHANNEL_MEMBER_ADDED'
+      && event.memberAdded.channelId === roleGroup
+      && event.memberAdded.members[0] === bob.user_id
+      && event.memberAdded.role === 'admin';
+    await Promise.all([bobWs, carolWs].map((socket) => serverEvent(socket, isAdminOf)));
+
+    // alice leaves: bob (the only admin) inherits the group
+    const left = await api('DELETE', `/v3.0/channels/${roleGroup}/members/${alice.user_id}`, {
+      token: alice.accesskey,
+      body: { op_id: aliceOp(), resource_seq: nextSeq(alice.user_id, roleGroup) }
+    });
+    assert.equal(left.status, 200);
+    assert.equal(left.body.member_count, 2);
+
+    const succession = await serverEvent(bobWs, (event) => event.type === 'CHANNEL_MEMBER_ADDED'
+      && event.memberAdded.channelId === roleGroup
+      && event.memberAdded.role === 'owner');
+    assert.deepEqual(succession.memberAdded.members, [bob.user_id]);
+
+    const removed = await serverEvent(bobWs, (event) => event.type === 'CHANNEL_MEMBER_REMOVED'
+      && event.memberRemoved.channelId === roleGroup);
+    assert.equal(removed.memberRemoved.member, alice.user_id);
+
+    await carolWs.close();
   });
 });

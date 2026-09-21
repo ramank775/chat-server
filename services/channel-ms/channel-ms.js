@@ -70,6 +70,17 @@ function memberIds(channel) {
   return channel.members.map((m) => m.user_id);
 }
 
+/**
+ * DECISIONS row 9 — who inherits a channel when the owner leaves: the
+ * longest-standing admin, else the longest-standing remaining member. Ties on
+ * `joinedAt` break lexically so every replica picks the same heir.
+ */
+function successor(members) {
+  const admins = members.filter((m) => m.role === 'admin');
+  return [...(admins.length ? admins : members)]
+    .sort((a, b) => a.joinedAt - b.joinedAt || a.user_id.localeCompare(b.user_id))[0];
+}
+
 /** The shape a channel takes in a REST response. */
 function channelView(channel) {
   return {
@@ -172,6 +183,20 @@ class ChannelMs extends HttpServiceBase {
           userId: USER_ID.required()
         }),
         payload: Joi.object(OP_FIELDS)
+      }
+    });
+
+    this.addRoute('/{channelId}/members/{userId}', 'PATCH', this.setMemberRole.bind(this), {
+      validate: {
+        headers: schemas.authHeaders,
+        params: Joi.object({
+          channelId: Joi.string().required(),
+          userId: USER_ID.required()
+        }),
+        payload: Joi.object({
+          ...OP_FIELDS,
+          role: Joi.string().valid('admin', 'member').required()
+        })
       }
     });
 
@@ -339,6 +364,7 @@ class ChannelMs extends HttpServiceBase {
       await this.fanout('CHANNEL_MEMBER_ADDED', channel, user, [...existing, ...added], {
         channelId,
         members: added,
+        role: 'member',
         addedAtMs: Date.now()
       });
     }
@@ -369,6 +395,42 @@ class ChannelMs extends HttpServiceBase {
 
     await this.leave(channel, user, userId);
     return this.accept(res, user, opId, 200, { member_count: channel.members.length - 1 });
+  }
+
+  /**
+   * DECISIONS row 80 — owner and admins promote a member to admin or demote an
+   * admin back. The owner's role and the caller's own are off limits here: the
+   * owner hands over by leaving (row 9).
+   */
+  async setMemberRole(req, res) {
+    const user = extractInfoFromRequest(req);
+    const { channelId, userId } = req.params;
+    const { op_id: opId, resource_seq: seq, role } = req.payload;
+
+    const replay = await this.replayed(res, user, opId);
+    if (replay) return replay;
+
+    const channel = await this.db.getChannelInfo(channelId);
+    const denied = this.requireRole(channel, user, ['owner', 'admin']);
+    if (denied) return this.reject(res, user, opId, denied.status, denied.code, denied.message);
+
+    const current = roleOf(channel, userId);
+    if (!current) {
+      return this.reject(res, user, opId, 404, 'not_found', 'not a member of this channel');
+    }
+    if (userId === user || current === 'owner') {
+      return this.reject(
+        res, user, opId, 403, 'forbidden', 'the owner role and your own cannot be changed'
+      );
+    }
+
+    if (!(await this.inOrder(user, channelId, seq))) {
+      return this.reject(res, user, opId, 400, 'out_of_order', 'resource_seq skipped');
+    }
+
+    await this.db.setMemberRole(channelId, userId, role);
+    await this.announceRole(channel, user, userId, role, memberIds(channel));
+    return this.accept(res, user, opId, 200, { user_id: userId, role });
   }
 
   async editChannel(req, res) {
@@ -487,14 +549,47 @@ class ChannelMs extends HttpServiceBase {
     return null;
   }
 
-  /** Tombstone a member and tell the channel (remaining members + the removed one). */
+  /**
+   * Tombstone a member and tell the channel (remaining members + the removed
+   * one). DECISIONS row 9: the last member out takes the channel with them,
+   * and a leaving owner hands the channel to `successor`.
+   */
   async leave(channel, actor, userId) {
     const removedAtMs = Date.now();
     await this.db.removeMember(channel.channelId, userId, removedAtMs);
+    const remaining = channel.members.filter((m) => m.user_id !== userId);
+    if (!remaining.length) {
+      await this.db.deleteChannel(channel.channelId);
+      await this.fanout('CHANNEL_DELETED', channel, actor, [userId], {
+        channelId: channel.channelId,
+        deletedAtMs: removedAtMs
+      });
+      return;
+    }
     await this.fanout('CHANNEL_MEMBER_REMOVED', channel, actor, memberIds(channel), {
       channelId: channel.channelId,
       member: userId,
       removedAtMs
+    });
+    if (roleOf(channel, userId) === 'owner') {
+      const heir = successor(remaining);
+      await this.db.setMemberRole(channel.channelId, heir.user_id, 'owner');
+      await this.announceRole(
+        channel, actor, heir.user_id, 'owner', remaining.map((m) => m.user_id)
+      );
+    }
+  }
+
+  /**
+   * DECISIONS row 80 — a role change or a succession re-announces the affected
+   * member as `ChannelMemberAdded{role}`; clients upsert the role.
+   */
+  async announceRole(channel, actor, userId, role, recipients) {
+    await this.fanout('CHANNEL_MEMBER_ADDED', channel, actor, recipients, {
+      channelId: channel.channelId,
+      members: [userId],
+      role,
+      addedAtMs: Date.now()
     });
   }
 
