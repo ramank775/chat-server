@@ -43,12 +43,12 @@ describe('GET /sync/pending (SYNC_PROTOCOL §10.6)', () => {
     context.undeliveredQueue = queue;
     service = new MessageMs(context);
     await service.init();
-    await service.hapiServer.start();
+    await service.server.ready();
   });
 
   after(async () => { await service.shutdown(); });
 
-  const pull = (userId) => service.hapiServer.inject({
+  const pull = (userId) => service.server.inject({
     method: 'GET',
     url: '/pending',
     headers: { 'x-user': userId, 'x-device': 'device-1' }
@@ -101,7 +101,7 @@ describe('GET /sync/pending (SYNC_PROTOCOL §10.6)', () => {
   });
 
   test('a request without an identity header is rejected', async () => {
-    const response = await service.hapiServer.inject({ method: 'GET', url: '/pending' });
+    const response = await service.server.inject({ method: 'GET', url: '/pending' });
     assert.strictEqual(response.statusCode, 400);
   });
 });

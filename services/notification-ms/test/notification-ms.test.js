@@ -113,7 +113,7 @@ test('push topic registration stores an in base url https topic', async () => {
   const db = stubDb();
   const service = await buildService(db, stubAxios());
 
-  const res = await service.hapiServer.inject({
+  const res = await service.server.inject({
     method: 'POST',
     url: '/topic',
     headers: authHeaders(),
@@ -130,7 +130,7 @@ test('push topic registration rejects a non https topic', async () => {
   const db = stubDb();
   const service = await buildService(db, stubAxios());
 
-  const res = await service.hapiServer.inject({
+  const res = await service.server.inject({
     method: 'POST',
     url: '/topic',
     headers: authHeaders(),
@@ -145,7 +145,7 @@ test('push topic registration rejects a topic on another host', async () => {
   const db = stubDb();
   const service = await buildService(db, stubAxios());
 
-  const res = await service.hapiServer.inject({
+  const res = await service.server.inject({
     method: 'POST',
     url: '/topic',
     headers: authHeaders(),
@@ -161,7 +161,7 @@ test('push topic registration deregisters on null', async () => {
   const db = stubDb();
   const service = await buildService(db, stubAxios());
 
-  const res = await service.hapiServer.inject({
+  const res = await service.server.inject({
     method: 'POST',
     url: '/topic',
     headers: authHeaders(),
@@ -176,7 +176,7 @@ test('internal push topic delete scopes to one device when deviceId is given', a
   const db = stubDb();
   const service = await buildService(db, stubAxios());
 
-  const res = await service.hapiServer.inject({
+  const res = await service.server.inject({
     method: 'POST',
     url: '/_internal/push/topics/delete',
     payload: { user_id: USER, deviceId: 'device-1' }
@@ -191,7 +191,7 @@ test('internal push topic delete removes every device when deviceId is absent', 
   const db = stubDb();
   const service = await buildService(db, stubAxios());
 
-  const res = await service.hapiServer.inject({
+  const res = await service.server.inject({
     method: 'POST',
     url: '/_internal/push/topics/delete',
     payload: { user_id: USER }

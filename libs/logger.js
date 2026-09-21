@@ -1,5 +1,6 @@
 const winston = require('winston');
 const moment = require('moment');
+const { getRequestId } = require('./request-context');
 
 const LEVEL = Symbol.for('level');
 const MESSAGE = Symbol.for('message');
@@ -46,6 +47,7 @@ winston.init = function init(options) {
   const formatter = winston.format((info) => {
     const result = { ...info };
     result.pid = process.pid;
+    result.requestId = getRequestId();
     result.appName = options.appName;
     result.timeMillis = Date.now();
     return result;

@@ -299,13 +299,13 @@ test('revoke sends WS_REAUTH_REQUIRED then closes with the mapped code', async (
       await client.opened;
 
       // eslint-disable-next-line no-await-in-loop
-      const response = await gateway.hapiServer.inject({
+      const response = await gateway.server.inject({
         method: 'POST',
         url: '/_internal/sessions/revoke',
         payload: { user_id: ALICE, deviceId: `device-${i}`, reason }
       });
       assert.strictEqual(response.statusCode, 200);
-      assert.strictEqual(response.result.sessions, 1);
+      assert.strictEqual(response.json().sessions, 1);
 
       // eslint-disable-next-line no-await-in-loop
       const frame = await client.next();
@@ -326,12 +326,12 @@ test('revoke without a deviceId hits every socket of the user', async () => {
     const second = connect(uri, ALICE, 'device-b');
     await Promise.all([first.opened, second.opened]);
 
-    const response = await gateway.hapiServer.inject({
+    const response = await gateway.server.inject({
       method: 'POST',
       url: '/_internal/sessions/revoke',
       payload: { user_id: ALICE, reason: 'revoked' }
     });
-    assert.strictEqual(response.result.sessions, 2);
+    assert.strictEqual(response.json().sessions, 2);
     assert.strictEqual((await first.next()).type, WS_TYPE.WS_REAUTH_REQUIRED);
     assert.strictEqual((await second.next()).type, WS_TYPE.WS_REAUTH_REQUIRED);
     assert.strictEqual((await first.closed).code, 4002);

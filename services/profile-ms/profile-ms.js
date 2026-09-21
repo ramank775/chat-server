@@ -116,7 +116,7 @@ async function initResource(options) {
 /**
  * `Authorization: Bearer <accesskey>` (REST) or
  * `Sec-WebSocket-Protocol: accesskey.<accesskey>` (WS upgrade, AUTH_CONTRACT 6.1)
- * @param {import('@hapi/hapi').Request} req
+ * @param {import('fastify').FastifyRequest} req
  * @returns {string|null}
  */
 function extractAccesskey(req) {
@@ -139,7 +139,7 @@ function extractAccesskey(req) {
  * The caller's address for the AUTH_CONTRACT 10.1 per-IP budgets. Every request
  * arrives from nginx, so `remoteAddress` is the proxy and the budget would be
  * global; the last `x-forwarded-for` hop is the peer nginx actually saw.
- * @param {import('@hapi/hapi').Request} req
+ * @param {import('fastify').FastifyRequest} req
  */
 function clientIp(req) {
   const forwarded = req.headers['x-forwarded-for'];
@@ -147,7 +147,7 @@ function clientIp(req) {
     const hops = forwarded.split(',').map((hop) => hop.trim()).filter(Boolean);
     if (hops.length) return hops[hops.length - 1];
   }
-  return req.info.remoteAddress;
+  return req.ip;
 }
 
 /**
@@ -218,20 +218,6 @@ class ProfileMs extends HttpServiceBase {
 
   async init() {
     await super.init();
-
-    // every non-envelope error (joi rejection, unknown route, crash) still leaves
-    // the service through the AUTH_CONTRACT 11 envelope
-    this.hapiServer.ext('onPreResponse', (req, h) => {
-      const { response } = req;
-      if (!response.isBoom) return h.continue;
-      const status = response.output.statusCode;
-      if (status >= 500) {
-        this.log.error(`Unhandled error on ${req.path}: ${response.message}`);
-        return h.response(errorEnvelope('INTERNAL_ERROR', 'Internal server error')).code(status);
-      }
-      const code = status === 404 ? 'NOT_FOUND' : 'validation_failed';
-      return h.response(errorEnvelope(code, response.message)).code(status);
-    });
 
     const payload = (schema) => ({ validate: { payload: schema.required() } });
 
@@ -405,7 +391,7 @@ class ProfileMs extends HttpServiceBase {
    * The single implementation of authentication + the AUTH_CONTRACT 2.4
    * `USERNAME_REQUIRED` gate. Routes opt out of the gate with `exempt = true`.
    * @param {boolean} gated
-   * @returns {import('@hapi/hapi').RouteOptionsPreObject}
+   * @returns {{assign: string, method: Function}} a `pre` entry for `addRoute`
    */
   authPre(gated = true) {
     return {
@@ -429,7 +415,7 @@ class ProfileMs extends HttpServiceBase {
 
   /**
    * Resolve the accesskey on a request to its session and user.
-   * @param {import('@hapi/hapi').Request} req
+   * @param {import('fastify').FastifyRequest} req
    * @param {boolean} gated apply the USERNAME_REQUIRED gate
    */
   async resolveSession(req, gated) {
@@ -471,7 +457,7 @@ class ProfileMs extends HttpServiceBase {
     await this.otpRateLimits(phone, clientIp(req));
 
     const challenge = await this.sendOtp(() => this.authProvider.startOtp({ phone, deviceId }), res);
-    if (challenge.isBoom || !challenge.sessionId) return challenge;
+    if (!challenge.sessionId) return challenge;
     const existing = await this.profileDB.getByPhone(phone);
     return {
       sessionId: challenge.sessionId,
@@ -486,7 +472,7 @@ class ProfileMs extends HttpServiceBase {
       () => this.authProvider.resendOtp(req.payload.sessionId),
       res
     );
-    if (challenge.isBoom || !challenge.sessionId) return challenge;
+    if (!challenge.sessionId) return challenge;
     const existing = await this.profileDB.getByPhone(challenge.phone);
     return {
       sessionId: challenge.sessionId,
@@ -919,7 +905,7 @@ class ProfileMs extends HttpServiceBase {
         }),
       res
     );
-    if (challenge.isBoom || !challenge.sessionId) return challenge;
+    if (!challenge.sessionId) return challenge;
     return {
       rebindSessionId: challenge.sessionId,
       resendAfterSec: challenge.resendAfterSec,

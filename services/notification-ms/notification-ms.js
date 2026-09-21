@@ -99,19 +99,6 @@ class NotificationMS extends HttpServiceBase {
       }
     };
 
-    // every non-envelope error (joi rejection, unknown route, crash) still leaves
-    // the service through the AUTH_CONTRACT 11 envelope
-    this.hapiServer.ext('onPreResponse', (req, h) => {
-      const { response } = req;
-      if (!response.isBoom) return h.continue;
-      const status = response.output.statusCode;
-      if (status >= 500) {
-        this.log.error(`Unhandled error on ${req.path}: ${response.message}`);
-        return h.response(errorEnvelope('INTERNAL_ERROR', 'Internal server error')).code(status);
-      }
-      const code = status === 404 ? 'NOT_FOUND' : 'validation_failed';
-      return h.response(errorEnvelope(code, response.message)).code(status);
-    });
 
     this.addRoute(
       '/topic',

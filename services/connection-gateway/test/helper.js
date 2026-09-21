@@ -80,11 +80,11 @@ async function startGateway(overrides = {}) {
 
   const gateway = new Gateway(context);
   await gateway.init();
-  await gateway.hapiServer.start();
+  await gateway.server.listen({ port: options.port, host: options.host });
   return {
     gateway,
     published,
-    uri: gateway.hapiServer.info.uri,
+    uri: gateway.uri,
     addChannel(channelId, members) { channels.set(channelId, new Set(members)); },
     publishedEnvelopes() { return published.filter((p) => p.topic === options.newMessageTopic); },
     async stop() { await gateway.shutdown(); }

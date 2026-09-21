@@ -15,15 +15,14 @@
     "test:conformance": "CONFORMANCE_BASE_URL=${CONFORMANCE_BASE_URL:-http://localhost:8085} node --test test/conformance/*.test.js"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.592.0",
     "@aws-sdk/s3-request-presigner": "^3.592.0",
-    "@hapi/boom": "^10.0.1",
-    "@hapi/hapi": "^21.3.9",
     "axios": "^1.7.2",
     "commander": "^11.1.0",
+    "fastify": "^5.12.5",
     "hot-shots": "^10.0.0",
     "ioredis": "^5.4.1",
     "joi": "^17.13.1",

@@ -83,14 +83,14 @@ async function startChannelMs(dbName) {
   const context = await initResource(options);
   const service = new ChannelMs(context);
   await service.init();
-  await service.hapiServer.initialize();
+  await service.server.ready();
 
   return {
     server: service,
     db,
     eventStore: context.eventStore,
-    /** @param {import('@hapi/hapi').ServerInjectOptions} request */
-    inject: (request) => service.hapiServer.inject(request),
+    /** @param {import('light-my-request').InjectOptions} request */
+    inject: (request) => service.server.inject(request),
     /** Every `EnvelopeEvent` published to the new-message topic. */
     published() {
       return context.eventStore.events

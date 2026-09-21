@@ -71,7 +71,7 @@ test('upload presign returns a url scoped to the caller and the declared size', 
   const storage = stubStorage();
   const service = await buildService(db, storage);
 
-  const res = await service.hapiServer.inject({
+  const res = await service.server.inject({
     method: 'GET',
     url: '/upload/presigned_url?ext=jpg&category=avatar&size=2048',
     headers: authHeaders(OWNER)
@@ -92,7 +92,7 @@ test('upload presign refuses a size over the configured maximum', async () => {
   const storage = stubStorage();
   const service = await buildService(db, storage);
 
-  const res = await service.hapiServer.inject({
+  const res = await service.server.inject({
     method: 'GET',
     url: '/upload/presigned_url?ext=.png&category=avatar&size=1048577',
     headers: authHeaders(OWNER)
@@ -110,7 +110,7 @@ test('download presign returns a url for the caller own asset', async () => {
     storage
   );
 
-  const res = await service.hapiServer.inject({
+  const res = await service.server.inject({
     method: 'GET',
     url: `/download/${FILE_ID}/presigned_url`,
     headers: authHeaders(OWNER)
@@ -129,7 +129,7 @@ test('download presign works for any authenticated holder of the fileId', async 
     storage
   );
 
-  const res = await service.hapiServer.inject({
+  const res = await service.server.inject({
     method: 'GET',
     url: `/download/${FILE_ID}/presigned_url`,
     headers: authHeaders(OTHER)
@@ -143,7 +143,7 @@ test('download presign 404s an unknown fileId', async () => {
   const storage = stubStorage();
   const service = await buildService(stubDb(null), storage);
 
-  const res = await service.hapiServer.inject({
+  const res = await service.server.inject({
     method: 'GET',
     url: `/download/${FILE_ID}/presigned_url`,
     headers: authHeaders(OWNER)
@@ -160,7 +160,7 @@ test('file status update stays scoped to the owner', async () => {
     stubStorage()
   );
 
-  const res = await service.hapiServer.inject({
+  const res = await service.server.inject({
     method: 'PUT',
     url: `/${FILE_ID}/status`,
     headers: authHeaders(OTHER),

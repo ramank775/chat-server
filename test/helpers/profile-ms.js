@@ -47,7 +47,7 @@ async function startProfileMs(dbName) {
   const context = await initResource(options);
   const service = new ProfileMs(context);
   await service.init();
-  await service.hapiServer.initialize();
+  await service.server.ready();
 
   const client = new MongoClient(mongoUrlFor(dbName), { auth: null });
   await client.connect();
@@ -108,10 +108,10 @@ async function startProfileMs(dbName) {
       channels = rows;
     },
     /**
-     * @param {import('@hapi/hapi').ServerInjectOptions} request
-     * @returns {Promise<import('@hapi/hapi').ServerInjectResponse>}
+     * @param {import('light-my-request').InjectOptions} request
+     * @returns {Promise<import('light-my-request').Response>}
      */
-    inject: (request) => service.hapiServer.inject(request),
+    inject: (request) => service.server.inject(request),
     async stop() {
       await db.dropDatabase();
       await client.close();
