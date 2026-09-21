@@ -1,54 +1,52 @@
+const Joi = require('joi');
 const {
-  ServiceBase,
   initDefaultOptions,
   initDefaultResources,
   resolveEnvVariables
 } = require('../../libs/service-base');
+const { HttpServiceBase, addHttpOptions, initHttpResource } = require('../../libs/http-service-base');
 const eventStore = require('../../libs/event-store');
 const { addDatabaseOptions, initializeDatabase } = require('./database');
 const { addPNSOptions, initializePNS } = require('./pns');
-const { LoginEvent, MessageEvent, MESSAGE_TYPE } = require('../../libs/event-args');
+const { isAllowedTopicUrl } = require('./pns/ntfy-pn-service');
+const { MessageEvent, MESSAGE_TYPE } = require('../../libs/event-args');
+const { extractInfoFromRequest, schemas } = require('../../helper');
 
 const asMain = require.main === module;
 
 const EVENT_TYPE = {
-  PUSH_NOTIFICATION: 'push-notification',
-  LOGIN: 'login'
+  PUSH_NOTIFICATION: 'push-notification'
 }
+
+/** SYNC_PROTOCOL §12.1: no more than one wake per 5 seconds per recipient. */
+const WAKE_DEBOUNCE_MS = 5000;
 
 async function prepareEventList(context) {
   const { options } = context;
   const eventName = {
-    [EVENT_TYPE.PUSH_NOTIFICATION]: options.offlineMessageTopic,
-    [EVENT_TYPE.LOGIN]: options.newLoginTopic
+    [EVENT_TYPE.PUSH_NOTIFICATION]: options.offlineMessageTopic
   };
   context.events = eventName;
-  context.listenerEvents = [options.offlineMessageTopic, options.newLoginTopic];
+  context.listenerEvents = [options.offlineMessageTopic];
   return context;
 }
 
 async function initResources(options) {
   let context = await initDefaultResources(options)
     .then(prepareEventList)
+    .then(initHttpResource)
     .then(initializeDatabase)
     .then(initializePNS);
   context = await eventStore.initializeEventStore({
     consumer: true,
-    decodeMessageCb: (topic) => {
-      const { events } = context
-      switch (topic) {
-        case events[EVENT_TYPE.LOGIN]:
-          return LoginEvent;
-        default:
-          return MessageEvent;
-      }
-    }
+    decodeMessageCb: () => MessageEvent
   })(context);
   return context;
 }
 
 function parseOptions(argv) {
   let cmd = initDefaultOptions();
+  cmd = addHttpOptions(cmd);
   cmd = eventStore.addEventStoreOptions(cmd);
   cmd = addDatabaseOptions(cmd);
   cmd = addPNSOptions(cmd);
@@ -56,7 +54,6 @@ function parseOptions(argv) {
     '--offline-message-topic <offline-message-topic>',
     'Used by producer to produce new message to send the push notification'
   );
-  cmd.option('--new-login-topic <new-login-topic>', 'New login topic');
   cmd.option(
     '--offline-msg-initial <offline-msg-initial>',
     'Initial for saved messages',
@@ -65,7 +62,16 @@ function parseOptions(argv) {
   return cmd.parse(argv).opts();
 }
 
-class NotificationMS extends ServiceBase {
+class NotificationMS extends HttpServiceBase {
+  /**
+   * ponytail: in process debounce, one entry per recently woken user_id.
+   * Ceiling: each replica debounces on its own, so N replicas can send N wakes
+   * per window. Kafka/nats key partitioning keeps a user on one replica in
+   * practice. Upgrade path: libs/cache (redis) if that stops holding.
+   * @type {Map<string, number>}
+   */
+  #lastWakeAt = new Map();
+
   constructor(context) {
     super(context);
 
@@ -80,13 +86,11 @@ class NotificationMS extends ServiceBase {
     this.events = this.context.events;
   }
 
-  init() {
+  async init() {
+    await super.init();
     const { events } = this;
     this.eventStore.on = async (event, message, key) => {
       switch (event) {
-        case events[EVENT_TYPE.LOGIN]:
-          await this.onLogin(message);
-          break;
         case events[EVENT_TYPE.PUSH_NOTIFICATION]:
           await this.pushNotification(message, key);
           break;
@@ -94,30 +98,73 @@ class NotificationMS extends ServiceBase {
           throw new Error("Unknown event type");
       }
     };
+
+    this.addRoute(
+      '/topic',
+      'POST',
+      this.registerTopic.bind(this),
+      {
+        validate: {
+          headers: schemas.authHeaders,
+          payload: Joi.object({
+            topicUrl: Joi.string().uri({ scheme: ['https'] }).allow(null, '').required()
+          })
+        }
+      }
+    );
   }
 
   /**
-   * handle login event
-   * @param {LoginEvent} event 
+   * Register, replace or deregister the ntfy topic of the calling device.
+   * AUTH_CONTRACT §5.1
    */
-  async onLogin(event) {
-    await this.notifDB.upsertToken(event.user, {
-      deviceId: event.deviceId || 'default',
-      messageVersion: event.messageVersion || 2.1,
-      token: event.notificationToken
-    });
+  async registerTopic(req, h) {
+    const userId = extractInfoFromRequest(req, 'x-user');
+    const deviceId = extractInfoFromRequest(req, 'x-device', 'default');
+    if (!userId) {
+      return h.response({ error: 'unauthorized' }).code(401);
+    }
+    const { topicUrl } = req.payload;
+    if (!topicUrl) {
+      await this.notifDB.removeTopic(userId, { deviceId });
+      return { status: true };
+    }
+    if (!isAllowedTopicUrl(topicUrl, this.options.ntfyBaseUrl)) {
+      return h.response({ error: 'validation_failed' }).code(400);
+    }
+    await this.notifDB.upsertTopic(userId, { deviceId, topicUrl });
+    return { status: true };
   }
 
   /**
-   * push message to user
-   * @param {import('../../libs/event-args').MessageEvent} message 
+   * Wake every device of an offline recipient
+   * @param {import('../../libs/event-args').MessageEvent} message
+   * @param {string} user recipient user_id
    */
   async pushNotification(message, user) {
     if (message.type === MESSAGE_TYPE.NOTIFICATION) return;
-    const record = await this.notifDB.getToken(user, { deviceId: 'default' });
-    if (!record) return;
-    const payload = (record.messageVersion || 2.1) < 3 ? message.toString() : message.toBinary()
-    await this.pns.push(record.notificationToken, payload)
+    if (!user) return;
+
+    const now = Date.now();
+    const lastWakeAt = this.#lastWakeAt.get(user);
+    if (lastWakeAt && now - lastWakeAt < WAKE_DEBOUNCE_MS) {
+      this.statsClient.increment({
+        stat: 'notificaton.delivery.debounced_count',
+        tags: { user }
+      });
+      return;
+    }
+    if (this.#lastWakeAt.size > 10000) {
+      this.#lastWakeAt.forEach((at, key) => {
+        if (now - at >= WAKE_DEBOUNCE_MS) this.#lastWakeAt.delete(key);
+      });
+    }
+    this.#lastWakeAt.set(user, now);
+
+    const topics = await this.notifDB.getTopics(user);
+    if (!topics || !topics.length) return;
+
+    await Promise.all(topics.map((topic) => this.pns.push(topic.topicUrl)
       .then(() => {
         this.statsClient.increment({
           stat: 'notificaton.delivery.count',
@@ -133,10 +180,11 @@ class NotificationMS extends ServiceBase {
           }
         });
         this.log.error(`Error while sending push notification ${err}`, err);
-      });
+      })));
   }
 
   async shutdown() {
+    await super.shutdown();
     await this.eventStore.dispose();
     await this.notifDB.dispose();
   }

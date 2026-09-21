@@ -4,7 +4,7 @@ class INotificationDB {
 
   /**
    * Notification Database interface
-   * @param {*} context 
+   * @param {*} context
    */
   // eslint-disable-next-line no-unused-vars
   constructor(context) {
@@ -15,23 +15,34 @@ class INotificationDB {
 
   /**
    * @abstract
-   * Upsert Notification Token
-   * @param {string} username 
-   * @param {{deviceId: string|null, token: string}} options 
+   * Register or replace the ntfy topic of a (user_id, deviceId) pair
+   * @param {string} userId
+   * @param {{deviceId: string, topicUrl: string}} options
    */
   // eslint-disable-next-line no-unused-vars
-  async upsertToken(username, options) {
+  async upsertTopic(userId, options) {
     throw new Error('Method not implemented');
   }
 
   /**
    * @abstract
-   * Get Notification Token
-   * @param {string} username 
-   * @param {{deviceId: string|null}} options 
+   * Deregister the ntfy topic of a (user_id, deviceId) pair
+   * @param {string} userId
+   * @param {{deviceId: string}} options
    */
   // eslint-disable-next-line no-unused-vars
-  async getToken(username, options) {
+  async removeTopic(userId, options) {
+    throw new Error('Method not implemented');
+  }
+
+  /**
+   * @abstract
+   * Get every registered ntfy topic of a user
+   * @param {string} userId
+   * @returns {Promise<{deviceId: string, topicUrl: string}[]>}
+   */
+  // eslint-disable-next-line no-unused-vars
+  async getTopics(userId) {
     throw new Error('Method not implemented');
   }
 

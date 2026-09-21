@@ -12,7 +12,7 @@ class MongoNotificationDB extends INotificationDB {
 
   /**
    * Profile Database interface
-   * @param {*} context 
+   * @param {*} context
    */
   constructor(context) {
     super(context);
@@ -20,19 +20,20 @@ class MongoNotificationDB extends INotificationDB {
   }
 
   /**
-   * Upsert Notification Token
-   * @param {string} username 
-   * @param {{deviceId: string|null, token: string}} options 
+   * Register or replace the ntfy topic of a (user_id, deviceId) pair
+   * @param {string} userId
+   * @param {{deviceId: string, topicUrl: string}} options
    */
-  async upsertToken(username, options) {
+  async upsertTopic(userId, options) {
     await this.#collection.updateOne(
-      { username, deviceId: options.deviceId },
+      { user_id: userId, deviceId: options.deviceId },
       {
         $set: {
-          notificationToken: options.token
+          topicUrl: options.topicUrl,
+          updatedAt: new Date()
         },
         $setOnInsert: {
-          username,
+          user_id: userId,
           deviceId: options.deviceId,
         }
       },
@@ -43,16 +44,25 @@ class MongoNotificationDB extends INotificationDB {
   }
 
   /**
-   * Get Notification Token
-   * @param {string} username 
-   * @param {{deviceId: string|null}} options 
+   * Deregister the ntfy topic of a (user_id, deviceId) pair
+   * @param {string} userId
+   * @param {{deviceId: string}} options
    */
-  async getToken(username, options) {
-    const record = await this.#collection.findOne(
-      { username, deviceId: options.deviceId },
-      { projection: { _id: 0, notificationToken: 1, messageVersion: 1 } }
-    );
-    return record;
+  async removeTopic(userId, options) {
+    await this.#collection.deleteOne({ user_id: userId, deviceId: options.deviceId });
+  }
+
+  /**
+   * Get every registered ntfy topic of a user
+   * @param {string} userId
+   * @returns {Promise<{deviceId: string, topicUrl: string}[]>}
+   */
+  async getTopics(userId) {
+    const records = await this.#collection.find(
+      { user_id: userId },
+      { projection: { _id: 0, deviceId: 1, topicUrl: 1 } }
+    ).toArray();
+    return records;
   }
 
   /**
@@ -61,7 +71,7 @@ class MongoNotificationDB extends INotificationDB {
   async init() {
     await this.#client.connect();
     const db = this.#client.db();
-    this.#collection = db.collection('notification_tokens');
+    this.#collection = db.collection('push_topics');
   }
 
   /**

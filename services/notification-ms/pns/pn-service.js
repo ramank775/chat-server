@@ -13,12 +13,12 @@ class IPushNotificationService {
   }
 
   /**
-   *  Push the notification
-   * @param {string} token 
-   * @param {Object} payload 
+   *  Publish a wake notification on the recipient topic.
+   *  No payload by design, a wake never carries message content.
+   * @param {string} topicUrl
    */
   // eslint-disable-next-line no-unused-vars
-  async push(token, payload) {
+  async push(topicUrl) {
     throw new Error("Method is not implemented");
   }
 
