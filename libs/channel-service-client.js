@@ -25,16 +25,17 @@ class ChannelServiceClient {
   }
 
   /**
-   * SYNC_PROTOCOL.md §6a.3 step 3 — is `userId` a member of `channelId`?
-   * Covers one_to_one and group channels alike; both are channel-ms rows.
-   * Cached briefly because every inbound envelope asks.
+   * SYNC_PROTOCOL.md §10.3 step 1 — every member of `channelId`, the fanout
+   * set message-delivery works from. Covers one_to_one and group channels
+   * alike; both are channel-ms rows. Cached briefly because every inbound
+   * envelope asks.
    * @param {string} channelId
-   * @param {string} userId
+   * @returns {Promise<Set<string>>} empty when the channel is gone
    */
-  async isMember(channelId, userId) {
+  async members(channelId) {
     const cached = this._membership.get(channelId);
     if (cached && cached.expiry > Date.now()) {
-      return cached.members.has(userId);
+      return cached.members;
     }
     const channel = await this.getChannelInfo(channelId);
     // ponytail: channel-ms still stores members as `{username}`; v3 step 3.4
@@ -44,7 +45,16 @@ class ChannelServiceClient {
     );
     if (this._membership.size >= MEMBERSHIP_CACHE_MAX) this._membership.clear();
     this._membership.set(channelId, { members, expiry: Date.now() + this._membershipTtlMs });
-    return members.has(userId);
+    return members;
+  }
+
+  /**
+   * SYNC_PROTOCOL.md §6a.3 step 3 — is `userId` a member of `channelId`?
+   * @param {string} channelId
+   * @param {string} userId
+   */
+  async isMember(channelId, userId) {
+    return (await this.members(channelId)).has(userId);
   }
 
   /** Drop the cached membership for a channel (channel-ms fanout tells us it changed). */
