@@ -1,0 +1,213 @@
+syntax = "proto3";
+
+package vartalap.v3;
+
+// =============================================================================
+// Vartalap v3 — Server wire schema
+// =============================================================================
+//
+// Status: v1.0 (2026-04-14)
+//
+// MIRROR: This file is a copy of the canonical version intended to live in
+//         the chat-server repo at `proto/v3-envelope.proto`. During the v3
+//         design phase the file is mirrored here in the vartalap repo for
+//         self-contained review; keep the two copies in sync manually.
+//
+// Spec:   ../SYNC_PROTOCOL.md
+//         ../AUTH_CONTRACT.md
+//
+// This file defines what the chat-server sees on the WS sync wire. It is
+// intentionally minimal:
+//
+//   * The server validates `op_id` (dedup), `channel_id` (membership),
+//     `resource_seq` (per-resource ordering), and the authenticated
+//     session.
+//   * The server NEVER inspects the inner `payload` bytes. Chat-content
+//     semantics — message types, edits, deletions, reactions, forwards,
+//     replies, attachments — are entirely the client's concern.
+//   * Adding a new chat-content type does NOT require a server change or
+//     a bump to this file. Clients evolve `payload` independently
+//     (see v3-chat-payload.proto for the suggested client schema).
+//
+// Server-state mutations (channel CRUD, membership, profile, push topic,
+// auth) live on REST, not on this wire — see AUTH_CONTRACT.md and
+// SYNC_PROTOCOL.md §5.2.
+//
+// =============================================================================
+
+
+// -----------------------------------------------------------------------------
+// Envelope — the unit of opaque chat-content delivery.
+// -----------------------------------------------------------------------------
+//
+// A client sends an Envelope to push some payload bytes into a channel.
+// The server validates routing fields, adds the server-stamped fields
+// (sender_user_id, server_timestamp_ms, delivery_sequence) on fanout,
+// and delivers the same Envelope to every other channel member.
+//
+// Recipients interpret `payload` according to the client-to-client
+// schema. The server's job ends at "delivered to channel members."
+//
+message Envelope {
+  // Client-generated UUIDv7. The dedup key. Stable across retries.
+  // Required on client→server. Echoed unchanged on fanout.
+  string op_id = 1;
+
+  // The channel this envelope targets. Server validates the sender is
+  // a member of this channel. Used as the `resource_id` for per-channel
+  // sequencing and dedup keying. Required.
+  string channel_id = 2;
+
+  // Per-channel monotonic counter, client-generated. Server validates
+  // strict increment per `(authenticated_user_id, channel_id)`.
+  // Required.
+  uint64 resource_seq = 3;
+
+  // Client wall-clock at op-creation, ms since epoch. Advisory only —
+  // server may use for audit logs and debugging; never for ordering
+  // (use resource_seq for that). Optional.
+  uint64 client_timestamp_ms = 4;
+
+  // OPAQUE TO SERVER. Client-defined chat-content payload. The server
+  // does not parse, validate, or interpret these bytes — it only
+  // forwards them. Suggested client schema in v3-chat-payload.proto;
+  // clients are free to evolve it without server coordination.
+  // Required (zero-length allowed for client-defined "ping" semantics).
+  bytes payload = 5;
+
+  // Best-effort, no-persistence, no-ack signal. Drives "send-and-forget"
+  // events like typing indicators. Server semantics:
+  //   - Fan to currently-connected channel members verbatim.
+  //   - DO NOT enqueue for offline members (skip the undelivered queue).
+  //   - DO NOT emit an `Ack` back to the sender.
+  //   - DO NOT include in any history / sync-pull responses.
+  //
+  // Recipients that observe this flag bypass `op_id_seen` and any
+  // projection writes — these envelopes are routed to a side-channel
+  // (e.g. typing-indicator stream) and dropped from the persistent
+  // pipeline entirely. Senders construct ephemeral envelopes via a
+  // direct `WsTransport.sendEphemeral(...)` path that bypasses
+  // `outbound_ops`; if the WS is not connected the envelope is dropped.
+  //
+  // Wire compat: defaults to false, so older clients/servers that don't
+  // know about this field treat the envelope as a normal queued op —
+  // which is harmless for typing (wastes one row, never re-applied
+  // because the receiver-side dispatcher dedups by op_id) but the
+  // optimization only kicks in once both sides understand the flag.
+  bool ephemeral = 6;
+
+  // ---------------------------------------------------------------------------
+  // Server-stamped fields. Absent on client→server. Populated by the
+  // server before fanout to recipients.
+  // ---------------------------------------------------------------------------
+
+  // The authenticated sender's user_id (9 lowercase hex chars). Server
+  // derives from session, not from any client-supplied field. Recipients
+  // use this for sender attribution; see SYNC_PROTOCOL.md §10.1 for the
+  // display-name resolution rule (contact-book → username → phone).
+  string sender_user_id = 20;
+
+  // When the server accepted the envelope, ms since epoch.
+  uint64 server_timestamp_ms = 21;
+
+  // Per-channel monotonic sequence assigned by the server at fanout
+  // time. Used by recipients for inbound ordering across senders.
+  // Distinct from `resource_seq` (which is sender-scoped).
+  uint64 delivery_sequence = 22;
+}
+
+
+// -----------------------------------------------------------------------------
+// Ack — server's per-op response on the WS wire.
+// -----------------------------------------------------------------------------
+//
+// One Ack per Envelope. Multiplexed across all in-flight ops; client
+// matches by `op_id`.
+//
+message Ack {
+  string op_id = 1;
+  AckOutcome outcome = 2;
+
+  // Server-defined code string. Populated for non-success outcomes.
+  // See SYNC_PROTOCOL.md §8 for the enumerated set:
+  //   forbidden, prefix_mismatch, out_of_order, rate_limited,
+  //   validation_failed, server_busy, storage_unavailable,
+  //   downstream_timeout, fanout_queue_full.
+  // Note: per SYNC_PROTOCOL.md §6a, reasons specific to chat-content
+  // semantics (gone, not_found-for-message, author-mismatch) do NOT
+  // appear here — the server does not interpret payloads, so it
+  // cannot produce those outcomes.
+  string reason = 3;
+
+  // Lower bound on retry delay. Populated on transient outcomes and
+  // on rate_limited.
+  uint64 retry_after_ms = 4;
+
+  // Server-stamped on success — same value the recipient sees on the
+  // fanout Envelope. Lets the sender's local store record a stable
+  // server timestamp without waiting for the fanout echo.
+  uint64 server_timestamp_ms = 5;
+
+  // Server-stamped on success — same value as the fanout Envelope.
+  uint64 delivery_sequence = 6;
+}
+
+enum AckOutcome {
+  ACK_OUTCOME_UNSPECIFIED = 0;
+  ACK_SUCCESS = 1;
+  ACK_TRANSIENT = 2;     // retry with backoff
+  ACK_PERMANENT = 3;     // do not retry; surface error
+  ACK_AUTH_FAILURE = 4;  // refresh accesskey, then retry
+}
+
+
+// -----------------------------------------------------------------------------
+// WsEnvelope — multiplexer for the WebSocket frame channel.
+// -----------------------------------------------------------------------------
+//
+// Each WS frame on `wss://<host>/wss` carries one WsEnvelope. The
+// `type` field discriminates which `body` variant is present.
+//
+// Frame direction:
+//   client→server: WS_OP only
+//   server→client: WS_ACK, WS_PUSH, WS_REAUTH_REQUIRED, WS_ERROR
+//
+message WsEnvelope {
+  WsType type = 1;
+
+  oneof body {
+    EnvelopeBatch ops = 10;          // type=WS_OP, client→server
+    AckBatch acks = 11;              // type=WS_ACK, server→client
+    Envelope push = 12;              // type=WS_PUSH, server→client (fanout)
+    bool reauth_required = 13;       // type=WS_REAUTH_REQUIRED, server→client
+    WsError error = 14;              // type=WS_ERROR, server→client
+  }
+}
+
+enum WsType {
+  WS_TYPE_UNSPECIFIED = 0;
+  WS_OP = 1;
+  WS_ACK = 2;
+  WS_PUSH = 3;
+  WS_REAUTH_REQUIRED = 4;
+  WS_ERROR = 5;
+}
+
+// One WsEnvelope MAY carry up to 20 envelopes per the WS batching cap
+// (SYNC_PROTOCOL.md §5.1.4). Server emits one Ack per Envelope, in any
+// order, multiplexed across the WS_ACK frames.
+message EnvelopeBatch {
+  repeated Envelope envelopes = 1;
+}
+
+message AckBatch {
+  repeated Ack acks = 1;
+}
+
+// Protocol-level error not tied to a specific op. Server emits this
+// before closing the connection on malformed-frame / policy violations.
+// See SYNC_PROTOCOL.md §5.1.8.
+message WsError {
+  string code = 1;       // UPPER_SNAKE_CASE, e.g. MALFORMED_FRAME
+  string message = 2;    // human-readable
+}

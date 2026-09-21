@@ -8,7 +8,7 @@
   "license": "MIT",
   "scripts": {
     "lint": "eslint .",
-    "test": "node --test \"test/**/*.test.js\"",
+    "test": "node --test \"test/**/*.test.js\" \"services/**/test/*.test.js\"",
     "test:infra": "docker compose --env-file deployment/.env.tmpl -f deployment/docker-compose.infra.yml up -d mongo redis",
     "lint:fix": "eslint --fix .",
     "prepare": "husky install"

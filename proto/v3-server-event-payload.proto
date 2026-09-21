@@ -1,0 +1,307 @@
+syntax = "proto3";
+
+package vartalap.v3.payload;
+
+// =============================================================================
+// Vartalap v3 — Server-to-client event payload schema (REFERENCE)
+// =============================================================================
+//
+// Status: v1.0 (2026-04-25)
+//
+// MIRROR: This file is a copy of the canonical version intended to live in
+//         the chat-server repo at `proto/v3-server-event-payload.proto`.
+//         During the v3 design phase the file is mirrored here in the
+//         vartalap repo for self-contained review; keep the two copies in
+//         sync manually.
+//
+// Spec:   ../SYNC_PROTOCOL.md §10.2
+//
+// THIS FILE IS IMPORTED BY BOTH SERVER AND CLIENT.
+//
+// Unlike v3-chat-payload.proto (which the server treats as opaque bytes),
+// ServerEventPayload is server-AUTHORED. The chat-server emits these as
+// the `Envelope.payload` of synthetic WS_PUSH frames produced by REST-write
+// fanout — channel CRUD, membership changes, profile edits, username
+// changes. See SYNC_PROTOCOL.md §10.2 for the full bridge contract.
+//
+// WIRE DISTINGUISHER: payload[0] == 0x53 ('S' for "server event").
+// Recipients inspect the first byte of `Envelope.payload` to route between
+// the client-authored ChatPayload decoder and this server-event decoder.
+// Any ChatPayload encoding that would start with 0x53 must be rejected at
+// the encoder side; in practice proto3 wire format for ChatPayload starts
+// with the tag for `version = 1` (0x08), so the namespaces don't collide.
+//
+// EVOLUTION RULES (different from v3-chat-payload.proto):
+//
+//   Adding a new ServerEventType variant is a COORDINATED client + server
+//   change. The server is the producer of these payloads, so the server
+//   must learn to emit a new variant before clients can rely on receiving
+//   it. Order of operations:
+//     1. Land the new variant + ServerEventType value in this proto.
+//     2. Land server emission behind a feature flag.
+//     3. Roll clients capable of decoding the new variant.
+//     4. Enable the feature flag once min-client-version is sufficient.
+//
+//   Standard proto forward-compat still applies: clients tolerate
+//   unknown fields and unknown enum values (fall back to
+//   SERVER_EVENT_UNSPECIFIED). A client that receives an unrecognized
+//   ServerEventType SHOULD ignore the payload silently — it is not a
+//   protocol error, just a feature this client predates.
+//
+//   Server-event payloads BYPASS recipient-side §6a.4 author checks: they
+//   are server-authored and authoritative. Tampering is foreclosed by
+//   the WSS transport + authenticated sender stamping on the envelope.
+//
+// =============================================================================
+
+
+// -----------------------------------------------------------------------------
+// ServerEventPayload — what the server puts inside Envelope.payload bytes
+// for synthetic fanout from REST writes.
+// -----------------------------------------------------------------------------
+//
+// One ServerEventPayload per fanout envelope. Recipients decode and
+// dispatch on `type`; the populated `body` oneof variant carries the
+// changed fields.
+//
+message ServerEventPayload {
+  // Server-authored schema version. Bumped only when the wire shape
+  // changes in a way clients must opt into; additive variants do NOT
+  // bump this.
+  uint32 version = 1;
+
+  // What kind of server-state change this envelope describes. Recipients
+  // route on this; the matching `body` variant carries the data.
+  ServerEventType type = 2;
+
+  // Exactly one variant populated, matching `type`. Field numbers start
+  // at 10 to leave headroom (3-9) for future top-level scalars without
+  // disturbing variant tags.
+  oneof body {
+    ChannelCreated channel_created = 10;
+    ChannelMemberAdded member_added = 11;
+    ChannelMemberRemoved member_removed = 12;
+    ChannelEdited channel_edited = 13;
+    ChannelDeleted channel_deleted = 14;
+    ProfileEdited profile_edited = 15;
+    UsernameChanged username_changed = 16;
+    MessageStateChanged message_state_changed = 17;
+    Typing typing = 18;
+  }
+}
+
+enum ServerEventType {
+  SERVER_EVENT_UNSPECIFIED = 0;
+  CHANNEL_CREATED = 1;
+  CHANNEL_MEMBER_ADDED = 2;
+  CHANNEL_MEMBER_REMOVED = 3;
+  CHANNEL_EDITED = 4;
+  CHANNEL_DELETED = 5;
+  PROFILE_EDITED = 6;
+  USERNAME_CHANGED = 7;
+  MESSAGE_STATE_CHANGED = 8;
+  TYPING = 9;
+}
+
+// Receipt lifecycle a message can transition through after the author's
+// initial `sent`. Sent back to the AUTHOR only — not fanned to other
+// recipients (those see the actual message via WS_PUSH already).
+//
+// Adding a new state is additive (recipients tolerate unknown enum
+// values, falling back to MESSAGE_STATE_UNSPECIFIED → no-op).
+enum MessageStateValue {
+  MESSAGE_STATE_UNSPECIFIED = 0;
+  // Server fanned to at least one other recipient's WS, OR the
+  // recipient drained it from the undelivered queue. Author's local
+  // tick goes single → double.
+  MESSAGE_STATE_DELIVERED = 1;
+  // Recipient marked as read. Author's tick goes double → blue-double.
+  MESSAGE_STATE_READ = 2;
+  // Server permanently rejected the message after the initial ACK.
+  // Reserved for moderation / quota / banned-content paths.
+  MESSAGE_STATE_REJECTED = 3;
+}
+
+
+// -----------------------------------------------------------------------------
+// Variant payloads.
+// -----------------------------------------------------------------------------
+
+// Emitted on REST `POST /v3.0/channels` to every member (creator included
+// — see commit e0e6bfe aligning the contract with chat-server behavior).
+//
+// Recipients use this to materialize the channel locally without waiting
+// for the next list refresh.
+message ChannelCreated {
+  // Server-assigned channel id.
+  string channel_id = 1;
+
+  // "one_to_one" or "group". Kept as a string (not an enum) to mirror the
+  // wire vocabulary in REST and keep this proto evolution-friendly when
+  // new kinds appear (e.g. "broadcast"); recipients that don't recognize
+  // a kind SHOULD treat the channel as a group with read-only fallbacks.
+  string kind = 2;
+
+  // Display name. May be empty for one_to_one channels — clients derive
+  // the displayed name from the peer's profile in that case.
+  string name = 3;
+
+  // Full member roster including the creator. Recipients persist this
+  // verbatim into `channel_members`.
+  repeated string members = 4;
+
+  // Creator's user_id (9 lowercase hex chars). Always one of `members`.
+  string creator = 5;
+
+  // Server's authoritative creation timestamp, ms since epoch. Maps to
+  // the `channels.created_at_ms` column on the recipient. Sourced from
+  // the same clock the server stamps on `POST /v3.0/channels` REST
+  // responses.
+  uint64 created_at_ms = 6;
+}
+
+// Emitted on REST `add_members` to existing members + the newly added
+// users. The recipient's view: "these `members` joined `channel_id`."
+message ChannelMemberAdded {
+  string channel_id = 1;
+
+  // Newly added user_ids. Existing members are NOT included here — the
+  // recipient already has them in local state.
+  repeated string members = 2;
+
+  // When the server applied the add, ms since epoch.
+  uint64 added_at_ms = 3;
+}
+
+// Emitted on REST `remove_member` to remaining members + the removed
+// member (so the removed user's client knows to leave).
+message ChannelMemberRemoved {
+  string channel_id = 1;
+
+  // Single removed user_id. The doc spec lists this as scalar (not
+  // repeated) — server emits one event per removal.
+  string member = 2;
+
+  // When the server applied the removal, ms since epoch.
+  uint64 removed_at_ms = 3;
+}
+
+// Emitted on REST `edit_channel` (rename / avatar change) to all members.
+// Both `name` and `avatar_url` are proto3 `optional` so absent-vs-empty
+// survives — an edit that clears the avatar sends `avatar_url=""` with
+// the field present; an edit that only renames omits `avatar_url`.
+message ChannelEdited {
+  string channel_id = 1;
+  optional string name = 2;
+  optional string avatar_url = 3;
+
+  // When the server applied the edit, ms since epoch.
+  uint64 edited_at_ms = 4;
+}
+
+// Emitted on REST `DELETE /v3.0/channels/<id>` (or equivalent) to all
+// members. Recipients tombstone the channel locally.
+message ChannelDeleted {
+  string channel_id = 1;
+
+  // When the server applied the delete, ms since epoch.
+  uint64 deleted_at_ms = 2;
+}
+
+// Emitted on REST `PATCH /v3.0/users/me` with profile fields, to every
+// user sharing at least one channel with the editor (v3.0 scope).
+//
+// Each field is `optional` so a partial patch (e.g. only display_name)
+// can be transmitted without forcing recipients to guess at unset vs
+// cleared. An explicit empty string with the field PRESENT means the
+// user cleared that field.
+message ProfileEdited {
+  // The editing user's user_id.
+  string user_id = 1;
+
+  optional string display_name = 2;
+  optional string avatar_url = 3;
+  optional string status_text = 4;
+
+  // When the server applied the edit, ms since epoch.
+  uint64 edited_at_ms = 5;
+}
+
+// Emitted on REST `PATCH /v3.0/users/me` with `username`, same fanout
+// scope as ProfileEdited.
+//
+// `new_username` MAY be empty: per SYNC_PROTOCOL.md §10.2 the new
+// username may be null, signaling the user cleared their handle.
+// Recipients treat empty as null (drop the cached username; fall back
+// to phone / placeholder per AUTH_CONTRACT §2.4).
+message UsernameChanged {
+  string user_id = 1;
+
+  // New handle. Empty string == cleared (treat as null).
+  string new_username = 2;
+
+  // When the server applied the change, ms since epoch.
+  uint64 changed_at_ms = 3;
+}
+
+// EPHEMERAL: typing indicator. Client-authored despite living under the
+// 0x53 ServerEventPayload namespace (see the §10.2 routing-tag note —
+// 0x53 is the wire discriminator, not a provenance claim).
+//
+// CONTRACT (different from every other variant in this file):
+//   - The originating client bypasses `outbound_ops` entirely and calls
+//     `WsTransport.send` directly with a one-shot op_id. If the WS is
+//     not connected the event is DROPPED — typing is lossy by design.
+//   - The server fans the frame verbatim to the other channel members
+//     and DOES NOT persist or queue it. Recipients who are offline at
+//     fanout time MUST NOT receive it on reconnect.
+//   - Recipients show the indicator with a short TTL (~6s in v3.0) so
+//     a missed `is_typing=false` doesn't strand the UI.
+//
+// Why server-event-namespaced rather than a new ChatPayload variant:
+// the 0x53 prefix already routes unconditionally to the receiver's
+// no-op-friendly dispatcher; ChatPayload mutations would be more
+// invasive and would imply persistence on the receiver side.
+message Typing {
+  // True = composing started/ongoing; false = composing stopped.
+  // Senders typically emit `true` once on first keystroke after a
+  // quiet period and `false` after ~4s of inactivity (or on send).
+  //
+  // Channel, sender, and timestamp are all carried by the surrounding
+  // Envelope (`channel_id`, `sender_user_id`, `client_timestamp_ms`)
+  // and intentionally NOT duplicated here — keeping the typing payload
+  // a single byte on the wire (proto3 default-false is not encoded;
+  // is_typing=true encodes as 2 bytes).
+  bool is_typing = 1;
+}
+
+// Generic message receipt event: sent back to the message AUTHOR when
+// the server observes the message transitioning to a new state. One
+// event per transition. v3.0 emits this on:
+//   - delivered: server fans out to a recipient WS, or a recipient
+//     drains from undelivered queue.
+//   - read: a recipient client posts a read receipt.
+//   - rejected: server retracts a previously-acked message (moderation,
+//     quota, etc.) — rare; reserved.
+//
+// Recipients flip the local `messages.message_state` accordingly.
+// Out-of-order events are tolerated: states are monotonic in the
+// author's UI (delivered cannot revert to sent), so a stale event is
+// dropped client-side if `new_state` is "older" than what's stored.
+message MessageStateChanged {
+  // Channel the original message was sent to.
+  string channel_id = 1;
+
+  // The original message_id (chat payload's message_id, NOT op_id).
+  string message_id = 2;
+
+  // The state being transitioned INTO.
+  MessageStateValue new_state = 3;
+
+  // When the server observed the transition, ms since epoch.
+  uint64 changed_at_ms = 4;
+
+  // For per-recipient granularity in group DMs (v3.1+). Empty in v3.0
+  // one-to-one channels.
+  string recipient_user_id = 5;
+}

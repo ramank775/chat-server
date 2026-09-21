@@ -1,5 +1,5 @@
 const WebSocket = require('ws');
-const URL = require('url');
+const Joi = require('joi');
 const {
   initDefaultOptions,
   initDefaultResources,
@@ -7,26 +7,53 @@ const {
 } = require('../../libs/service-base');
 const { addHttpOptions, initHttpResource, HttpServiceBase } = require('../../libs/http-service-base');
 const EventStore = require('../../libs/event-store');
-const { uuidv4, shortuuid, getUTCTime } = require('../../helper');
-const { MessageEvent, MESSAGE_TYPE } = require('../../libs/event-args');
+const MemCache = require('../../libs/cache');
+const ChannelServiceClient = require('../../libs/channel-service-client');
 const DeliveryManager = require('../../libs/delivery-manager');
+const { ConnectionStateEvent } = require('../../libs/event-args');
+const {
+  WS_TYPE,
+  ACK_OUTCOME,
+  REASON,
+  SERVER_EVENT_MARKER,
+  EnvelopeEvent,
+  decodeWsEnvelope,
+  ackFrame,
+  reauthFrame,
+  errorFrame,
+  opIdUserBits
+} = require('../../libs/v3-envelope');
 
 const asMain = require.main === module;
 
 const EVENT_TYPE = {
   NEW_MESSAGE_EVENT: 'new-message',
-  CLIENT_ACK: 'client-ack',
-  OFFLINE_EVENT: 'offline-event',
+  CONNECTION_STATE: 'connection-state',
 }
+
+/** Locked by SYNC_PROTOCOL.md §19; not operator-tunable, so not flags. */
+const MAX_BATCH = 20;                       // §19 decision 7
+const DEDUP_MAX_ENTRIES = 10000;            // §19 decision 3
+const DEDUP_TTL_SEC = 7 * 24 * 60 * 60;     // §19 decision 3
+const SEQ_TTL_SEC = DEDUP_TTL_SEC;          // §16: seq tracking aligns with dedup
+const RATE_LIMIT = {                        // §14.1 / §19 decision 4
+  user: { capacity: 100, refillPerSec: 30 },
+  ip: { capacity: 100, refillPerSec: 100 }
+};
+
+/** AUTH_CONTRACT.md §6.5 — the only application close codes this server may use. */
+const REVOKE_REASON = {
+  expired: { code: 4001, reason: 'accesskey_expired' },
+  revoked: { code: 4002, reason: 'session_revoked' },
+  rebind: { code: 4003, reason: 'phone_rebind' }
+};
 
 async function prepareListEvent(context) {
   const { options } = context;
-  const eventName = {
+  context.events = {
     [EVENT_TYPE.NEW_MESSAGE_EVENT]: options.newMessageTopic,
-    [EVENT_TYPE.CLIENT_ACK]: options.clientAckTopic,
-    [EVENT_TYPE.OFFLINE_EVENT]: options.offlineMessageTopic,
+    [EVENT_TYPE.CONNECTION_STATE]: options.userConnectionStateTopic,
   };
-  context.events = eventName;
   return context;
 }
 
@@ -34,6 +61,8 @@ async function initResources(options) {
   const context = await initDefaultResources(options)
     .then(prepareListEvent)
     .then(initHttpResource)
+    .then(MemCache.initMemCache)
+    .then(ChannelServiceClient.init)
     .then(EventStore.initializeEventStore({ producer: true }))
     .then(DeliveryManager.init);
 
@@ -44,6 +73,8 @@ function parseOptions(argv) {
   let cmd = initDefaultOptions();
   cmd = addHttpOptions(cmd);
   cmd = EventStore.addEventStoreOptions(cmd);
+  cmd = MemCache.addMemCacheOptions(cmd);
+  cmd = ChannelServiceClient.addOptions(cmd);
   cmd = DeliveryManager.addOptions(cmd);
   cmd
     .option(
@@ -55,210 +86,443 @@ function parseOptions(argv) {
       'Used by producer to produce new message for each new incoming message'
     )
     .option(
-      '--client-ack-topic <client-ack-topic>',
-      'Used by producer to produce for ack message received by client.'
+      '--user-connection-state-topic <user-connection-state-topic>',
+      'Used by producer to publish user connect/disconnect state'
     )
     .option(
-      '--offline-message-topic <offline-message-topic>',
-      'Used by producer to produce new message for offline'
+      '--reauth-grace-ms <reauth-grace-ms>',
+      'Grace period between WS_REAUTH_REQUIRED and the close frame',
+      (value) => Number(value),
+      5000
     )
   return cmd.parse(argv).opts();
 }
 
-/**
- * Helper function to parser cookie from Raw request
- */
-function getUserInfoFromRequest(request) {
-  const { user } = request.headers;
-  if (user) return user;
-  const rc = request.headers.cookie;
-  const cookies = {};
-  if (rc) {
-    rc.split(';').forEach((cookie) => {
-      const parts = cookie.split('=');
-      cookies[parts.shift().trim()] = decodeURI(parts.join('='));
-    });
-  }
-  return cookies.user || uuidv4();
+function sessionKey(userId, deviceId) {
+  return `${userId}:${deviceId}`;
 }
 
+/**
+ * v3 sync gateway (SYNC_PROTOCOL.md §5-§10, AUTH_CONTRACT.md §6).
+ *
+ * Auth happens ahead of us: nginx runs the `auth_request` subrequest against
+ * profile-ms and, on success, proxies the upgrade with `x-user: <user_id>`
+ * and `x-device: <deviceId>`. We echo the client's `accesskey.<uuid>`
+ * subprotocol on the 101 and bind the socket to that identity.
+ */
 class Gateway extends HttpServiceBase {
   constructor(context) {
     super(context);
     /** @type {{eventStore: import('../../libs/event-store/iEventStore').IEventStore}} */
-    const {
-      eventStore,
-      events
-    } = this.context;
+    const { eventStore, events } = this.context;
 
     this.publishEvent = async (event, eventArgs, key) => {
-      await eventStore.emit(events[event], eventArgs, key);
+      const topic = events[event];
+      if (!topic) return;
+      await eventStore.emit(topic, eventArgs, key);
     };
-    this.userSocketMapping = new Map();
 
+    /** (user_id:deviceId) -> socket. v3.0 is one active socket per pair. */
+    this.sessions = new Map();
+    /** user_id -> Set<socket>, so a push reaches every device of a user. */
+    this.userSessions = new Map();
+
+    this.memCache = context.memCache;
+    /** @type { import('../../libs/channel-service-client').ChannelServiceClient } */
+    this.channelClient = context.channelServiceClient;
     /** @type { import('../../libs/delivery-manager').DeliveryManager } */
     this.deliveryManager = context.deliveryManager;
+    this.reauthGraceMs = this.options.reauthGraceMs ?? 5000;
   }
 
   async init() {
     await super.init();
     this.initWebsocket();
-    this.deliveryManager.offlineMessageHandler = () => { }
-    this.deliveryManager.messageHandler = this.messageHandler.bind(this)
+    this.addInternalRoute('/sessions/revoke', 'POST', this.revokeSessions.bind(this), {
+      validate: {
+        payload: Joi.object({
+          user_id: Joi.string().required(),
+          deviceId: Joi.string().optional(),
+          reason: Joi.string().valid(...Object.keys(REVOKE_REASON)).required()
+        })
+      }
+    });
+
+    this.deliveryManager.eventArg = EnvelopeEvent;
+    this.deliveryManager.messageHandler = this.messageHandler.bind(this);
+    // The undelivered queue is message-delivery's (V3_RELEASE_PLAN §3.3). It
+    // owns `offlineMessageHandler` and is expected to expose
+    //   queueForUser(user_id, wsEnvelopeBytes, deliverySequence)
+    // over the recipients it gets back from us. Nothing to do here.
+    this.deliveryManager.offlineMessageHandler = () => { };
     await this.deliveryManager.startConsumer();
   }
 
   initWebsocket() {
-    const wss = new WebSocket.Server({ server: this.httpServer });
+    const wss = new WebSocket.Server({
+      server: this.httpServer,
+      // AUTH_CONTRACT.md §6.2 step 3 — echo the accesskey subprotocol on the
+      // 101 so the client's handshake completes.
+      handleProtocols: (protocols) =>
+        [...protocols].find((protocol) => protocol.startsWith('accesskey.')) || false
+    });
     this.context.wss = wss;
     wss.on('connection', (ws, request) => {
-      const user = getUserInfoFromRequest(request);
-      const url = new URL.URL(request.url, this.uri);
-      ws.isbinary = url.searchParams.get('format') === 'binary';
-      ws.ackEnabled = url.searchParams.get('ack') === 'true';
-      this.onConnect(user, ws);
-      ws.on('message', (payload, isBinary) => this.onMessage(payload, isBinary, user));
-      ws.on('close', () => this.onDisconnect(user));
+      const userId = request.headers['x-user'];
+      const deviceId = request.headers['x-device'] || 'default';
+      if (!userId) {
+        // nginx should never proxy an unauthenticated upgrade; if it does,
+        // fail closed rather than serving an anonymous socket.
+        ws.send(errorFrame('UNAUTHENTICATED', 'missing x-user on upgrade'), { binary: true });
+        ws.close(1008, 'unauthenticated');
+        return;
+      }
+      ws.userId = userId;
+      ws.deviceId = deviceId;
+      ws.remoteIp = (request.headers['x-forwarded-for'] || '').split(',')[0].trim()
+        || request.socket.remoteAddress;
+      this.onConnect(ws);
+      ws.on('message', (payload, isBinary) => this.onMessage(ws, payload, isBinary));
+      ws.on('close', () => this.onDisconnect(ws));
     });
   }
 
-  async onMessage(payload, isBinary, user) {
-    this.statsClient.increment({
-      stat: 'message.received.count',
-      tags: {
-        channel: 'websocket',
-        gateway: this.options.gatewayName,
-        user,
-      }
-    });
-    const ws = this.userSocketMapping.get(user);
-    if (!isBinary) {
-      const msg = payload.toString();
-      if (msg === "ping") {
-        ws.send("pong");
-        return
-      }
-    }
-    const trackId = shortuuid();
-    const options = {
-      source: user
-    }
-    const message = isBinary ?
-      MessageEvent.fromBinary(payload, options)
-      : MessageEvent.fromString(payload.toString(), options)
-    message.set_server_id(trackId);
-    message.set_server_timestamp();
-    const event = message.type === MESSAGE_TYPE.CLIENT_ACK ? EVENT_TYPE.CLIENT_ACK : EVENT_TYPE.NEW_MESSAGE_EVENT;
-    await this.publishEvent(event, message, message.destination);
-    if (ws.ackEnabled && event === EVENT_TYPE.NEW_MESSAGE_EVENT) {
-      const ack = message.buildServerAckMessage()
-      this.sendWebsocketMessage(user, ack)
-    }
+  // ---- connection lifecycle -------------------------------------------
 
-  }
+  async onConnect(ws) {
+    const { userId, deviceId } = ws;
+    const key = sessionKey(userId, deviceId);
+    const previous = this.sessions.get(key);
+    if (previous && previous !== ws) {
+      // One active socket per (user_id, deviceId); the newer one wins.
+      this._unregister(previous);
+      previous.close(1000, 'replaced');
+    }
+    this.sessions.set(key, ws);
+    if (!this.userSessions.has(userId)) this.userSessions.set(userId, new Set());
+    this.userSessions.get(userId).add(ws);
 
-  async onConnect(user, ws) {
-    this.userSocketMapping.set(user, ws);
     this.statsClient.gauge({
       stat: 'user.connected.count',
       value: '+1',
-      tags: {
-        service: 'gateway',
-        gateway: this.options.gatewayName,
-        user,
-      }
+      tags: { service: 'gateway', gateway: this.options.gatewayName, user: userId }
     });
-    await this.deliveryManager.userJoin(user);
+    await this.deliveryManager.userJoin(userId);
+    await this.publishEvent(
+      EVENT_TYPE.CONNECTION_STATE,
+      ConnectionStateEvent.connect(userId, this.options.gatewayName),
+      userId
+    );
   }
 
-  async onDisconnect(user) {
-    this.userSocketMapping.delete(user);
+  async onDisconnect(ws) {
+    const { userId } = ws;
+    if (!this._unregister(ws)) return;
     this.statsClient.gauge({
       stat: 'user.connected.count',
       value: -1,
-      tags: {
-        service: 'gateway',
-        gateway: this.options.gatewayName,
-        user,
-      }
+      tags: { service: 'gateway', gateway: this.options.gatewayName, user: userId }
     });
-    await this.deliveryManager.userLeft(user);
+    if (this.userSessions.has(userId)) return; // another device is still online
+    await this.deliveryManager.userLeft(userId);
+    await this.publishEvent(
+      EVENT_TYPE.CONNECTION_STATE,
+      ConnectionStateEvent.disconnect(userId, this.options.gatewayName),
+      userId
+    );
   }
 
-  async messageHandler(msg) {
-    const failure = msg.recipients.filter((rcpt) => {
-      const success = this.sendWebsocketMessage(rcpt, msg);
-      return !success
+  /** Drop a socket from both indexes. Returns false when it was already gone. */
+  _unregister(ws) {
+    const { userId, deviceId } = ws;
+    const key = sessionKey(userId, deviceId);
+    const sockets = this.userSessions.get(userId);
+    const known = sockets ? sockets.delete(ws) : false;
+    if (sockets && !sockets.size) this.userSessions.delete(userId);
+    if (this.sessions.get(key) === ws) this.sessions.delete(key);
+    return known;
+  }
+
+  // ---- client -> server ------------------------------------------------
+
+  async onMessage(ws, payload, isBinary) {
+    this.statsClient.increment({
+      stat: 'message.received.count',
+      tags: { channel: 'websocket', gateway: this.options.gatewayName, user: ws.userId }
     });
-    return failure;
+
+    if (!isBinary) {
+      const text = payload.toString();
+      // The only text frames on the v3 wire are the legacy keepalive.
+      if (text === 'ping') {
+        ws.send('pong');
+        return;
+      }
+      if (text === 'pong') return;
+      this.protocolError(ws, 'VALIDATION_FAILED', 'v3 frames must be binary WsEnvelope');
+      return;
+    }
+
+    let frame;
+    try {
+      frame = decodeWsEnvelope(payload);
+    } catch (e) {
+      this.log.error('Malformed WsEnvelope', { err: e, user: ws.userId });
+      this.protocolError(ws, 'MALFORMED_FRAME', 'WsEnvelope could not be decoded');
+      return;
+    }
+
+    if (frame.type !== WS_TYPE.WS_OP) {
+      this.protocolError(ws, 'VALIDATION_FAILED', `unexpected WsType ${frame.type}`);
+      return;
+    }
+
+    const envelopes = (frame.ops && frame.ops.envelopes) || [];
+    if (!envelopes.length) return;
+
+    // §5.4 — over the batch cap the whole frame is rejected, one permanent
+    // ack per envelope.
+    if (envelopes.length > MAX_BATCH) {
+      this.sendAcks(ws, envelopes.map((envelope) => ({
+        opId: envelope.opId,
+        outcome: ACK_OUTCOME.PERMANENT,
+        reason: REASON.VALIDATION_FAILED
+      })));
+      return;
+    }
+
+    const acks = [];
+    for (let i = 0; i < envelopes.length; i += 1) {
+      // Serial on purpose: envelopes in one frame may target one resource,
+      // and the resource_seq compare-and-set has to see them in order.
+      // eslint-disable-next-line no-await-in-loop
+      const ack = await this.processEnvelope(ws, envelopes[i]);
+      if (ack) acks.push(ack);
+    }
+    // §5.4 — acks for one incoming frame ride back in one WS_ACK.
+    if (acks.length) this.sendAcks(ws, acks);
   }
 
   /**
-   * Send messages to user via websocket
-   * @param {string} user
-   * @param {import('../../libs/event-args').MessageEvent} message 
+   * SYNC_PROTOCOL.md §6a.3. Returns the Ack to send back, or null for an
+   * ephemeral envelope (which is never acked).
    */
-  sendWebsocketMessage(user, message) {
-    const ws = this.userSocketMapping.get(user)
-    let errorCode = 404;
-    if (ws) {
-      try {
-        const options = {
-          ignore: ['recipients'],
-        };
-        if (ws.isbinary) {
-          ws.send(message.toBinary(options), { isBinary: true })
-        } else {
-          ws.send(message.toString(options));
-        }
-        this.statsClient.timing({
-          stat: 'message.delivery.latency',
-          value: getUTCTime() - message.server_timestamp,
-          tags: {
-            gateway: this.options.gatewayName,
-            channel: 'websocket',
-            user,
-            sid: message.server_id,
-          }
-        })
-        this.statsClient.increment({
-          stat: 'message.delivery.count',
-          tags: {
-            serverAck: message.isServerAck,
-            channel: 'websocket',
-            gateway: this.options.gatewayName,
-            user,
-            format: ws.isbinary ? 'binary' : 'text',
-          }
-        });
-        errorCode = null
-      } catch (e) {
-        this.log.error('Error while sending websocket message', {
-          err: e
-        });
-        errorCode = 500
-      }
+  async processEnvelope(ws, envelope) {
+    const { userId } = ws;
+    const { opId } = envelope;
+    const dedupKey = `dedup:${userId}`;
+
+    // §14 rate limits. Checked first so a flood cannot burn resource_seq
+    // slots or downstream calls, and never recorded in the dedup window —
+    // a transient outcome has to stay retryable.
+    const retryAfterMs = await this.checkRate(ws);
+    if (retryAfterMs) {
+      return { opId, outcome: ACK_OUTCOME.TRANSIENT, reason: REASON.RATE_LIMITED, retryAfterMs };
     }
-    if (errorCode) {
+
+    // §3 — op_id must embed this session's user_id.
+    const bits = opIdUserBits(opId);
+    if (bits === null) return this.rejectPermanent(dedupKey, opId, REASON.VALIDATION_FAILED);
+    if (bits !== parseInt(userId, 16)) {
+      return this.rejectPermanent(dedupKey, opId, REASON.PREFIX_MISMATCH);
+    }
+
+    // §7.1 — a replayed op_id returns the stored outcome, never re-processed.
+    if (!envelope.ephemeral) {
+      const stored = await this.memCache.dedupGet(dedupKey, opId);
+      if (stored) return JSON.parse(stored);
+    }
+
+    // §6a.3 step 3 — membership. Before sequencing so a non-member never
+    // advances the channel's counter.
+    let isMember;
+    try {
+      isMember = await this.channelClient.isMember(envelope.channelId, userId);
+    } catch (e) {
+      this.log.error('channel-ms membership lookup failed', { err: e, user: userId });
+      return {
+        opId,
+        outcome: ACK_OUTCOME.TRANSIENT,
+        reason: REASON.DOWNSTREAM_TIMEOUT,
+        retryAfterMs: 1000
+      };
+    }
+    if (!isMember) return this.rejectPermanent(dedupKey, opId, REASON.FORBIDDEN);
+
+    // §10.2 / §19 decision 15 — a 0x53 payload is a server-authored event.
+    // Clients may not mint one. This is the ONLY byte of `payload` we look
+    // at; §6a.2 forbids parsing the rest.
+    if (envelope.payload && envelope.payload.length && envelope.payload[0] === SERVER_EVENT_MARKER) {
+      return this.rejectPermanent(dedupKey, opId, REASON.VALIDATION_FAILED);
+    }
+
+    // Ephemeral (typing): no dedup, no sequencing, no delivery_sequence, no
+    // ack, and message-delivery drops it rather than queueing it offline.
+    if (envelope.ephemeral) {
+      await this.publishEnvelope({
+        ...envelope,
+        senderUserId: userId,
+        serverTimestampMs: Date.now()
+      });
+      return null;
+    }
+
+    // §6 — resource_seq must be exactly last + 1 for (user_id, channel_id).
+    const seqKey = `seq:${userId}:${envelope.channelId}`;
+    const inOrder = await this.memCache.casNext(seqKey, envelope.resourceSeq, SEQ_TTL_SEC);
+    if (!inOrder) return this.rejectPermanent(dedupKey, opId, REASON.OUT_OF_ORDER);
+
+    const serverTimestampMs = Date.now();
+    const deliverySequence = await this.memCache.incr(`dseq:${envelope.channelId}`);
+    try {
+      await this.publishEnvelope({
+        ...envelope,
+        senderUserId: userId,
+        serverTimestampMs,
+        deliverySequence
+      });
+    } catch (e) {
+      this.log.error('Failed to publish envelope', { err: e, user: userId, opId });
+      // Give the seq slot back so the client's retry of the same op is not
+      // met with out_of_order. Safe because §6 lets the client keep only one
+      // op per resource in flight.
+      await this.memCache.set(seqKey, envelope.resourceSeq - 1);
+      return {
+        opId,
+        outcome: ACK_OUTCOME.TRANSIENT,
+        reason: REASON.STORAGE_UNAVAILABLE,
+        retryAfterMs: 1000
+      };
+    }
+
+    const ack = { opId, outcome: ACK_OUTCOME.SUCCESS, serverTimestampMs, deliverySequence };
+    await this.memCache.dedupPut(
+      dedupKey, opId, JSON.stringify(ack), DEDUP_MAX_ENTRIES, DEDUP_TTL_SEC
+    );
+    return ack;
+  }
+
+  async publishEnvelope(envelope) {
+    await this.publishEvent(
+      EVENT_TYPE.NEW_MESSAGE_EVENT,
+      EnvelopeEvent.of(envelope),
+      envelope.channelId
+    );
+  }
+
+  /** §7.1 case 2 — permanent rejects are remembered so a replay repeats them. */
+  async rejectPermanent(dedupKey, opId, reason) {
+    const ack = { opId, outcome: ACK_OUTCOME.PERMANENT, reason };
+    await this.memCache.dedupPut(
+      dedupKey, opId, JSON.stringify(ack), DEDUP_MAX_ENTRIES, DEDUP_TTL_SEC
+    );
+    return ack;
+  }
+
+  /** §14.1 — per-user then per-IP. Returns 0 when the envelope may proceed. */
+  async checkRate(ws) {
+    const userWait = await this.memCache.takeToken(
+      `rate:user:${ws.userId}`, RATE_LIMIT.user.capacity, RATE_LIMIT.user.refillPerSec
+    );
+    if (userWait) return userWait;
+    return this.memCache.takeToken(
+      `rate:ip:${ws.remoteIp}`, RATE_LIMIT.ip.capacity, RATE_LIMIT.ip.refillPerSec
+    );
+  }
+
+  sendAcks(ws, acks) {
+    this.send(ws, ackFrame(acks));
+  }
+
+  /** §5.3 / §5.8 — protocol-level failure: one WS_ERROR, then close 1002. */
+  protocolError(ws, code, message) {
+    this.send(ws, errorFrame(code, message));
+    ws.close(1002, code);
+  }
+
+  // ---- server -> client ------------------------------------------------
+
+  /**
+   * Called by delivery-manager with a server-stamped fanout envelope.
+   * Returns the recipients we could not reach so delivery-manager routes
+   * them on (and ultimately to message-delivery's undelivered queue).
+   * Synchronous by contract — delivery-manager does not await this.
+   * @param {EnvelopeEvent} event
+   */
+  messageHandler(event) {
+    const frame = event.toPushFrame();
+    return event.recipients.filter((userId) => !this.pushToUser(userId, frame, event));
+  }
+
+  /**
+   * §10.3 step 2 — deliver a WS_PUSH frame to every open socket of a user.
+   * False means "offline": nothing was reachable.
+   * @param {string} userId
+   * @param {Buffer} frame serialized WsEnvelope{type: WS_PUSH}
+   */
+  pushToUser(userId, frame, event) {
+    const sockets = this.userSessions.get(userId);
+    if (!sockets || !sockets.size) {
       this.statsClient.increment({
         stat: 'message.delivery.error_count',
-        tags: {
-          channel: 'websocket',
-          gateway: this.options.gatewayName,
-          user,
-          code: errorCode,
-        }
+        tags: { channel: 'websocket', gateway: this.options.gatewayName, user: userId, code: 404 }
+      });
+      return false;
+    }
+    let delivered = false;
+    sockets.forEach((ws) => {
+      if (this.send(ws, frame)) delivered = true;
+    });
+    if (delivered && event) {
+      this.statsClient.timing({
+        stat: 'message.delivery.latency',
+        value: Date.now() - (event.envelope.serverTimestampMs || Date.now()),
+        tags: { gateway: this.options.gatewayName, channel: 'websocket', user: userId }
       });
     }
-    return errorCode == null;
+    return delivered;
+  }
+
+  send(ws, frame) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    try {
+      ws.send(frame, { binary: Buffer.isBuffer(frame) });
+      return true;
+    } catch (e) {
+      this.log.error('Error while sending websocket message', { err: e });
+      return false;
+    }
+  }
+
+  // ---- session revocation (AUTH_CONTRACT.md §6.3-§6.5) -----------------
+
+  /**
+   * `POST /_internal/sessions/revoke` — profile-ms calls this when an
+   * accesskey expires, a session is revoked, or a phone rebind invalidates
+   * the session. We warn the client, then close with the matching code.
+   */
+  async revokeSessions(req) {
+    const { user_id: userId, deviceId, reason } = req.payload;
+    const { code, reason: closeReason } = REVOKE_REASON[reason];
+    const sockets = deviceId
+      ? [this.sessions.get(sessionKey(userId, deviceId))].filter(Boolean)
+      : [...(this.userSessions.get(userId) || [])];
+
+    sockets.forEach((ws) => {
+      this.send(ws, reauthFrame());
+      const timer = setTimeout(() => ws.close(code, closeReason), this.reauthGraceMs);
+      if (timer.unref) timer.unref();
+    });
+    this.log.info(`Revoked ${sockets.length} session(s) for ${userId} (${reason})`);
+    return { status: true, sessions: sockets.length };
   }
 
   async shutdown() {
-    await super.shutdown()
+    if (this.context.wss) this.context.wss.close();
+    await super.shutdown();
     const { eventStore } = this.context;
-    await eventStore.dispose()
+    if (eventStore) await eventStore.dispose();
   }
-
 }
 
 if (asMain) {
@@ -279,4 +543,5 @@ module.exports = {
   Gateway,
   parseOptions,
   initResources,
+  EVENT_TYPE,
 };

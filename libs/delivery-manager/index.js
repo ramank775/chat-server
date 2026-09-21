@@ -20,6 +20,14 @@ class DeliveryManager {
   /** @type {(msg: MessageEvent) => Promise<string[]> } */
   messageHandler;
 
+  /**
+   * Codec for the pubsub payload. v2 carries `MessageEvent`; the v3 sync
+   * wire sets this to `EnvelopeEvent` (libs/v3-envelope.js) so a fanout
+   * envelope travels between gateways without a v2 `Message` round trip.
+   * @type {{ fromBinary: (payload: Buffer) => MessageEvent }}
+   */
+  eventArg = MessageEvent;
+
 
   async _onMessage(msg, retry = 0) {
     if (!this.messageHandler) {
@@ -46,12 +54,13 @@ class DeliveryManager {
     this._redis = options.redis || new Redis(options.redisEndpoint);
     this.serverId = options.serverId;
     this.maxRetry = options.maxRetry || 3;
+    if (options.eventArg) this.eventArg = options.eventArg;
   }
 
   async startConsumer(redis = null) {
     this._subscriber = redis  || new Redis(this._redis.options);
     this._subscriber.on('pmessageBuffer', async (pattern, key, value) => {
-      const msg = MessageEvent.fromBinary(value);
+      const msg = this.eventArg.fromBinary(value);
       const [, retryStr] = key.toString().split('|');
       const retry = Number(retryStr);
       await this._onMessage(msg, retry);
