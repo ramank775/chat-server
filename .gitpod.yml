@@ -18,12 +18,17 @@ tasks:
   - name: Nginx
     command: export NGINX_DOCROOT="${GITPOD_REPO_ROOT}/www" && nginx
   - name: mongodb
-    command: mkdir -p /workspace/data && mongod --dbpath /workspace/data
+    command: mkdir -p /workspace/data/mongo && mongod --dbpath /workspace/data/mongo
   - name: redis
     command: redis-server
   - name: statsd
     init: chmod +x deployment/scripts/*.bash && ./deployment/scripts/setup.bash
     command: ./deployment/scripts/init-statsd.bash
+  - name: minio
+    command: >
+      mkdir -p /workspace/data/minio &&
+      export MINIO_ROOT_USER=access_key MINIO_ROOT_PASSWORD=secret_access_key &&
+      /minio/minio server /workspace/data/minio --console-address ":9001"
 
 vscode:
   extensions:

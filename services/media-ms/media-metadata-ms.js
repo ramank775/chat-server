@@ -17,6 +17,12 @@ function parseOptions(argv) {
   cmd = addHttpOptions(cmd);
   cmd = Database.addOptions(cmd);
   cmd = MediaStorage.addOptions(cmd);
+  cmd.option(
+    '--max-upload-size <max-upload-size>',
+    'Maximum size in bytes of a single upload (default 25MB)',
+    (c) => Number(c),
+    25 * 1024 * 1024
+  );
   return cmd.parse(argv).opts();
 }
 
@@ -50,7 +56,8 @@ class MediaMetadataMS extends HttpServiceBase {
           headers: schemas.authHeaders,
           query: Joi.object({
             ext: Joi.string().required(),
-            category: Joi.string().required()
+            category: Joi.string().required(),
+            size: Joi.number().integer().min(1).max(this.options.maxUploadSize).required()
           })
         }
       }
@@ -90,7 +97,7 @@ class MediaMetadataMS extends HttpServiceBase {
   async updateFileUploadStatus(req, h) {
     const { fileId } = req.params
     const { status } = req.payload;
-    const user = extractInfoFromRequest(req, 'user');
+    const user = extractInfoFromRequest(req, 'x-user');
     const file = await this.db.getRecord(fileId);
     if (!file || file.owner !== user) {
       return h.response({ error: 'file not found' }).code(404);
@@ -102,6 +109,11 @@ class MediaMetadataMS extends HttpServiceBase {
     return h.response().code(200);
   }
 
+  /**
+   * The unguessable fileId is the capability: it only ever reaches a user
+   * through a message or profile they are entitled to. So any authenticated
+   * caller holding one may download it. Upload and status stay owner scoped.
+   */
   async getDownloadURL(req, h) {
     const { fileId } = req.params;
 
@@ -119,21 +131,16 @@ class MediaMetadataMS extends HttpServiceBase {
   }
 
   async getUploadURL(req) {
-    const username = extractInfoFromRequest(req, 'user');
-    const { ext, category } = req.query;
-    return await this.getUploadPreSignedUrl(ext, category, username);
+    const owner = extractInfoFromRequest(req, 'x-user');
+    const { ext, category, size } = req.query;
+    return await this.getUploadPreSignedUrl(ext, category, owner, size);
   }
 
-  async generateUploadURL(req) {
-    const username = extractInfoFromRequest(req, 'user');
-    const { ext, category } = req.payload;
-    return await this.getUploadPreSignedUrl(ext, category, username);
-  }
-
-  async getUploadPreSignedUrl(ext, category, owner) {
+  async getUploadPreSignedUrl(ext, category, owner, contentLength) {
     const contentType = getContentTypeByExt(ext);
     const payload = {
       contentType,
+      contentLength,
       category,
     };
     const fileRecord = {
@@ -155,6 +162,7 @@ class MediaMetadataMS extends HttpServiceBase {
       fileId: payload.fileId,
       category: payload.category,
       contentType: payload.contentType,
+      contentLength: payload.contentLength,
     })
     return preSignedURL;
   }

@@ -14,12 +14,11 @@ class MockPushNotificationService extends IPushNotificationService {
   }
 
   /**
-   *  Push the notification
-   * @param {string} token 
-   * @param {Object} payload 
+   *  Publish a wake notification on the recipient topic
+   * @param {string} topicUrl
    */
-  async push(token, payload) {
-    this.#logger.info('new push notification', token, payload);
+  async push(topicUrl) {
+    this.#logger.info('new push notification', topicUrl);
   }
 }
 

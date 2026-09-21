@@ -23,7 +23,6 @@
     "@hapi/hapi": "^21.3.9",
     "axios": "^1.7.2",
     "commander": "^11.1.0",
-    "firebase-admin": "^12.1.1",
     "hot-shots": "^10.0.0",
     "ioredis": "^5.4.1",
     "joi": "^17.13.1",
