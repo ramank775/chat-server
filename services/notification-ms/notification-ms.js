@@ -10,7 +10,7 @@ const { addDatabaseOptions, initializeDatabase } = require('./database');
 const { addPNSOptions, initializePNS } = require('./pns');
 const { isAllowedTopicUrl } = require('./pns/ntfy-pn-service');
 const { EnvelopeEvent } = require('../../libs/v3-envelope');
-const { extractInfoFromRequest, schemas } = require('../../helper');
+const { extractInfoFromRequest, schemas, errorEnvelope } = require('../../helper');
 
 const asMain = require.main === module;
 
@@ -99,6 +99,20 @@ class NotificationMS extends HttpServiceBase {
       }
     };
 
+    // every non-envelope error (joi rejection, unknown route, crash) still leaves
+    // the service through the AUTH_CONTRACT 11 envelope
+    this.hapiServer.ext('onPreResponse', (req, h) => {
+      const { response } = req;
+      if (!response.isBoom) return h.continue;
+      const status = response.output.statusCode;
+      if (status >= 500) {
+        this.log.error(`Unhandled error on ${req.path}: ${response.message}`);
+        return h.response(errorEnvelope('INTERNAL_ERROR', 'Internal server error')).code(status);
+      }
+      const code = status === 404 ? 'NOT_FOUND' : 'validation_failed';
+      return h.response(errorEnvelope(code, response.message)).code(status);
+    });
+
     this.addRoute(
       '/topic',
       'POST',
@@ -112,6 +126,29 @@ class NotificationMS extends HttpServiceBase {
         }
       }
     );
+
+    // AUTH_CONTRACT 4.6 step 3 / 8.2 step 4 — profile-ms calls this on
+    // session revoke (scoped to one device) and account delete (every
+    // device). No internal readback route exists; deviceId absent = all.
+    this.addInternalRoute(
+      '/push/topics/delete',
+      'POST',
+      this.deleteTopics.bind(this),
+      {
+        validate: {
+          payload: Joi.object({
+            user_id: Joi.string().required(),
+            deviceId: Joi.string()
+          })
+        }
+      }
+    );
+  }
+
+  async deleteTopics(req) {
+    const { user_id: userId, deviceId } = req.payload;
+    await this.notifDB.removeTopic(userId, { deviceId });
+    return { status: true };
   }
 
   /**
@@ -122,7 +159,7 @@ class NotificationMS extends HttpServiceBase {
     const userId = extractInfoFromRequest(req, 'x-user');
     const deviceId = extractInfoFromRequest(req, 'x-device', 'default');
     if (!userId) {
-      return h.response({ error: 'unauthorized' }).code(401);
+      return h.response(errorEnvelope('UNAUTHORIZED', 'x-user header is required')).code(401);
     }
     const { topicUrl } = req.payload;
     if (!topicUrl) {
@@ -130,7 +167,8 @@ class NotificationMS extends HttpServiceBase {
       return { status: true };
     }
     if (!isAllowedTopicUrl(topicUrl, this.options.ntfyBaseUrl)) {
-      return h.response({ error: 'validation_failed' }).code(400);
+      // AUTH_CONTRACT 5.1
+      return h.response(errorEnvelope('INVALID_TOPIC_URL', 'topicUrl must be https on the configured ntfy host')).code(400);
     }
     await this.notifDB.upsertTopic(userId, { deviceId, topicUrl });
     return { status: true };

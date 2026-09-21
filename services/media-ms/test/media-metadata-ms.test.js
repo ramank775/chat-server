@@ -99,6 +99,7 @@ test('upload presign refuses a size over the configured maximum', async () => {
   });
 
   assert.strictEqual(res.statusCode, 400);
+  assert.strictEqual(JSON.parse(res.payload).error.code, 'validation_failed');
   assert.deepStrictEqual(db.created, []);
 });
 
@@ -149,6 +150,7 @@ test('download presign 404s an unknown fileId', async () => {
   });
 
   assert.strictEqual(res.statusCode, 404);
+  assert.strictEqual(JSON.parse(res.payload).error.code, 'NOT_FOUND');
   assert.deepStrictEqual(storage.signed, []);
 });
 
@@ -166,6 +168,7 @@ test('file status update stays scoped to the owner', async () => {
   });
 
   assert.strictEqual(res.statusCode, 404);
+  assert.strictEqual(JSON.parse(res.payload).error.code, 'NOT_FOUND');
 });
 
 test('content type lookup resolves every extension a record names', async () => {

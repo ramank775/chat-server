@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const path = require('path');
 const protobufjs = require('protobufjs');
 const WebSocket = require('ws');
+const { MongoClient } = require('mongodb');
 const {
   WS_TYPE,
   SERVER_EVENT_MARKER,
@@ -16,6 +17,10 @@ const { mintOpId } = require('../../services/connection-gateway/test/helper');
  * Skipped entirely unless CONFORMANCE_BASE_URL points at a running nginx.
  */
 const BASE = process.env.CONFORMANCE_BASE_URL || null;
+
+/** deployment/docker-compose.infra.yml maps mongo's 27017 straight to the host. */
+const MONGO_URL = process.env.CONFORMANCE_MONGO_URL
+  || 'mongodb://root:password@localhost:27017/chat?authSource=admin';
 
 /** @type {protobufjs.Type} */
 let serverEventType = null;
@@ -63,6 +68,25 @@ async function devOtp(phone) {
   const { status, body } = await api('GET', `/v3.0/auth/dev/otp?phone=${encodeURIComponent(phone)}`);
   if (status !== 200) throw new Error(`dev otp unavailable (${status}): ${JSON.stringify(body)}`);
   return body.code;
+}
+
+/**
+ * Direct read of notification-ms's `push_topics` collection — there is no
+ * internal readback route, so this is the only way to prove a deregister
+ * actually happened.
+ * @param {string} userId
+ * @param {string} deviceId
+ */
+async function pushTopic(userId, deviceId) {
+  const client = new MongoClient(MONGO_URL, { auth: null });
+  try {
+    await client.connect();
+    // must be awaited here: `finally` closes the connection before an
+    // un-awaited return value would get the chance to use it
+    return await client.db().collection('push_topics').findOne({ user_id: userId, deviceId });
+  } finally {
+    await client.close();
+  }
 }
 
 /** A phone nobody else in this run owns. */
@@ -192,6 +216,7 @@ module.exports = {
   eventually,
   mintOpId,
   opFrame,
+  pushTopic,
   signup,
   signupWithUsername,
   uniquePhone

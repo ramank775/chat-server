@@ -16,7 +16,7 @@ const { SmsGatewayError, SmsGatewayUnavailableError } = require('./auth-provider
 const { HttpClient } = require('../../libs/http-client');
 const { EnvelopeEvent, SERVER_EVENT_MARKER } = require('../../libs/v3-envelope');
 const { validateUsername } = require('./username');
-const { uuidv4, hashSecret, verifySecret, sha256 } = require('../../helper');
+const { uuidv4, hashSecret, verifySecret, sha256, errorEnvelope } = require('../../helper');
 
 const asMain = require.main === module;
 
@@ -72,6 +72,7 @@ function parseOptions(argv) {
   );
   cmd.option('--channel-ms-endpoint <channel-ms-endpoint>', 'Base url for channel service');
   cmd.option('--gateway-endpoint <gateway-endpoint>', 'Base url for connection gateway');
+  cmd.option('--notification-ms-endpoint <notification-ms-endpoint>', 'Base url for notification service');
   cmd.option('--otp-rate-phone-hour <count>', 'OTP sends per phone per hour', (c) => Number(c), 5);
   cmd.option('--otp-rate-phone-day <count>', 'OTP sends per phone per day', (c) => Number(c), 15);
   cmd.option('--otp-rate-ip-hour <count>', 'OTP sends per ip per hour', (c) => Number(c), 20);
@@ -110,13 +111,6 @@ async function initResource(options) {
     .then(initializeAuthProvider)
     .then(initMemCache)
     .then(eventStore.initializeEventStore({ producer: true }));
-}
-
-/**
- * AUTH_CONTRACT 11.1 error envelope
- */
-function errorEnvelope(code, message, extra = {}) {
-  return { error: { code, message, ...extra } };
 }
 
 /**
@@ -219,6 +213,7 @@ class ProfileMs extends HttpServiceBase {
     // when channel-ms grows one.
     this.channelClient = new HttpClient(this.options.channelMsEndpoint);
     this.gatewayClient = new HttpClient(this.options.gatewayEndpoint);
+    this.notificationClient = new HttpClient(this.options.notificationMsEndpoint);
   }
 
   async init() {
@@ -536,6 +531,8 @@ class ProfileMs extends HttpServiceBase {
     await this.authProvider.revoke(accesskey);
     if (session) {
       await this.revokeGatewaySessions(session.user_id, 'revoked', session.deviceId);
+      // 4.6 side effect 3: deregister this device's ntfy topic
+      await this.revokePushTopics(session.user_id, session.deviceId);
     }
     return { status: true };
   }
@@ -768,6 +765,24 @@ class ProfileMs extends HttpServiceBase {
   }
 
   /**
+   * AUTH_CONTRACT 4.6 step 3 / 8.2 step 4 — notification-ms owns push_topics,
+   * so deregistering it is a cross-service call. Best effort: the accesskey
+   * is already revoked either way.
+   * @param {string} userId
+   * @param {string} [deviceId] limit to one device; omitted = every device
+   */
+  async revokePushTopics(userId, deviceId = undefined) {
+    try {
+      await this.notificationClient.post('/_internal/push/topics/delete', {
+        user_id: userId,
+        ...(deviceId ? { deviceId } : {})
+      });
+    } catch (error) {
+      this.log.error(`Push topic deregister failed for ${userId}: ${error.message}`);
+    }
+  }
+
+  /**
    * AUTH_CONTRACT 7.5 — any authenticated user may read any public profile.
    * A tombstoned account is a 404 like an unknown one (8.3).
    */
@@ -855,7 +870,7 @@ class ProfileMs extends HttpServiceBase {
    * AUTH_CONTRACT 8.2 — tombstone the account. The row keeps `user_id` and
    * `usernameLower` (both stay reserved by their unique indexes) and leaves
    * the partial phone index, which is what releases the number for a fresh
-   * signup. Deregistering the push topic is notification-ms's job (5.4).
+   * signup.
    */
   async deleteMe(req, res) {
     const { user } = req.pre.auth;
@@ -867,6 +882,8 @@ class ProfileMs extends HttpServiceBase {
     await this.profileDB.updateUser(user.user_id, { deletedAt: new Date() });
     await this.authProvider.revokeAll(user.user_id);
     await this.revokeGatewaySessions(user.user_id, 'revoked');
+    // 8.2 step 4: every device's ntfy topic goes with the account
+    await this.revokePushTopics(user.user_id);
     return { status: true };
   }
 

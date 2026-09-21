@@ -78,6 +78,17 @@ function base64ToProtoBuffer(base64) {
   return new Uint8Array(Buffer.from(base64, 'base64'));
 }
 
+/**
+ * AUTH_CONTRACT 11.1 error envelope, shared by every http service so a 4xx
+ * body is `{error: {code, message}}` regardless of which service answered.
+ * @param {string} code
+ * @param {string} message
+ * @param {object} [extra]
+ */
+function errorEnvelope(code, message, extra = {}) {
+  return { error: { code, message, ...extra } };
+}
+
 module.exports = {
   uuidv4,
   extractInfoFromRequest,
@@ -89,5 +100,6 @@ module.exports = {
   verifySecret,
   sha256,
   base64ToProtoBuffer,
+  errorEnvelope,
   schemas
 };

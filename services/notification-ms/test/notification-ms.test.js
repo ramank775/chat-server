@@ -153,7 +153,7 @@ test('push topic registration rejects a topic on another host', async () => {
   });
 
   assert.strictEqual(res.statusCode, 400);
-  assert.strictEqual(JSON.parse(res.payload).error, 'validation_failed');
+  assert.strictEqual(JSON.parse(res.payload).error.code, 'INVALID_TOPIC_URL');
   assert.deepStrictEqual(db.calls, []);
 });
 
@@ -170,4 +170,33 @@ test('push topic registration deregisters on null', async () => {
 
   assert.strictEqual(res.statusCode, 200);
   assert.deepStrictEqual(db.calls, [['remove', USER, { deviceId: 'device-1' }]]);
+});
+
+test('internal push topic delete scopes to one device when deviceId is given', async () => {
+  const db = stubDb();
+  const service = await buildService(db, stubAxios());
+
+  const res = await service.hapiServer.inject({
+    method: 'POST',
+    url: '/_internal/push/topics/delete',
+    payload: { user_id: USER, deviceId: 'device-1' }
+  });
+
+  assert.strictEqual(res.statusCode, 200);
+  assert.deepStrictEqual(JSON.parse(res.payload), { status: true });
+  assert.deepStrictEqual(db.calls, [['remove', USER, { deviceId: 'device-1' }]]);
+});
+
+test('internal push topic delete removes every device when deviceId is absent', async () => {
+  const db = stubDb();
+  const service = await buildService(db, stubAxios());
+
+  const res = await service.hapiServer.inject({
+    method: 'POST',
+    url: '/_internal/push/topics/delete',
+    payload: { user_id: USER }
+  });
+
+  assert.strictEqual(res.statusCode, 200);
+  assert.deepStrictEqual(db.calls, [['remove', USER, { deviceId: undefined }]]);
 });

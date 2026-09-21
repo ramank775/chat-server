@@ -36,9 +36,10 @@ async function startProfileMs(dbName) {
     '--event-store=memory',
     '--new-login-topic=new-login',
     '--new-message-topic=new-message',
-    // no service is listening: `stubChannels` / `revokes` replace both clients
+    // no service is listening: `stubChannels` / `revokes` / `pushTopicDeletes` replace all three clients
     '--channel-ms-endpoint=http://channel-ms.invalid',
     '--gateway-endpoint=http://gateway.invalid',
+    '--notification-ms-endpoint=http://notification-ms.invalid',
     // every injected request shares one remote address, so the per IP OTP budget
     // would be a cross test file limit. Per phone budgets stay at their defaults.
     '--otp-rate-ip-hour=100000'
@@ -66,11 +67,13 @@ async function startProfileMs(dbName) {
     if (keys.length) await redis.del(keys);
   }
 
-  // Nothing answers the channel-ms / gateway endpoints in a test, so the two
-  // http clients are replaced here: `channels` is what channel-ms would list
-  // for whoever asks, `revokes` records the gateway's internal revoke calls.
+  // Nothing answers the channel-ms / gateway / notification-ms endpoints in a
+  // test, so the three http clients are replaced here: `channels` is what
+  // channel-ms would list for whoever asks, `revokes` records the gateway's
+  // internal revoke calls, `pushTopicDeletes` records notification-ms's.
   let channels = [];
   const revokes = [];
+  const pushTopicDeletes = [];
   service.channelClient.get = async (_path, request) => {
     const kind = request.params.type;
     const me = request.headers['x-user'];
@@ -84,6 +87,10 @@ async function startProfileMs(dbName) {
     revokes.push(payload);
     return { status: true };
   };
+  service.notificationClient.post = async (_path, payload) => {
+    pushTopicDeletes.push(payload);
+    return { status: true };
+  };
 
   return {
     server: service,
@@ -92,6 +99,7 @@ async function startProfileMs(dbName) {
     sms: context.smsSender,
     eventStore: context.eventStore,
     revokes,
+    pushTopicDeletes,
     /**
      * Stand in for channel-ms's channel list.
      * @param {{channelId: string, type?: string, members: {user_id: string}[]}[]} rows

@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { WS_TYPE } = require('../../libs/v3-envelope');
-const { BASE, api, connect, signupWithUsername } = require('./helper');
+const { BASE, api, connect, pushTopic, signupWithUsername } = require('./helper');
 
 /**
  * Session rotation / revocation (AUTH_CONTRACT 4.4-4.6, 6.3-6.5), push topic
@@ -64,12 +64,26 @@ describe('conformance: sessions, push and media', { skip: BASE ? false : 'CONFOR
     socket = connect(victim.accesskey);
     await socket.opened;
 
+    // 5.1/4.6 step 3 — register a topic so the revoke has something to deregister
+    const registered = await api('POST', '/v3.0/push/topic', {
+      token: victim.accesskey,
+      body: { topicUrl: `https://ntfy.vartalap/${victim.user_id}-revoke-topic` }
+    });
+    assert.equal(registered.status, 200);
+    assert.ok(await pushTopic(victim.user_id, victim.deviceId), 'topic was not registered');
+
     const revoked = await api('POST', '/v3.0/auth/session/revoke', {
       token: victim.accesskey,
       body: { refreshToken: victim.refreshToken }
     });
     assert.equal(revoked.status, 200);
     assert.deepEqual(revoked.body, { status: true });
+
+    assert.equal(
+      await pushTopic(victim.user_id, victim.deviceId),
+      null,
+      'revoke must deregister the device push topic (4.6 step 3)'
+    );
 
     const warning = await socket.waitFor((frame) => frame.type === WS_TYPE.WS_REAUTH_REQUIRED);
     assert.equal(warning.reauthRequired, true);
@@ -119,7 +133,7 @@ describe('conformance: sessions, push and media', { skip: BASE ? false : 'CONFOR
       body: { topicUrl: 'https://ntfy.example.com/somebody-elses-topic' }
     });
     assert.equal(foreign.status, 400);
-    assert.equal(foreign.body.error, 'validation_failed');
+    assert.equal(foreign.body.error.code, 'INVALID_TOPIC_URL');
 
     const plaintext = await api('POST', '/v3.0/push/topic', {
       token: user.accesskey,

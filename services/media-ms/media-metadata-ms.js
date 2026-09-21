@@ -7,7 +7,7 @@ const {
 const { HttpServiceBase, addHttpOptions, initHttpResource } = require('../../libs/http-service-base');
 const Database = require('./database');
 const MediaStorage = require('./media-storage')
-const { extractInfoFromRequest, schemas } = require('../../helper');
+const { extractInfoFromRequest, schemas, errorEnvelope } = require('../../helper');
 const { getContentTypeByExt } = require('../../libs/content-type-utils');
 
 const asMain = require.main === module;
@@ -46,6 +46,20 @@ class MediaMetadataMS extends HttpServiceBase {
 
   async init() {
     await super.init();
+
+    // every non-envelope error (joi rejection, unknown route, crash) still leaves
+    // the service through the AUTH_CONTRACT 11 envelope
+    this.hapiServer.ext('onPreResponse', (req, h) => {
+      const { response } = req;
+      if (!response.isBoom) return h.continue;
+      const status = response.output.statusCode;
+      if (status >= 500) {
+        this.log.error(`Unhandled error on ${req.path}: ${response.message}`);
+        return h.response(errorEnvelope('INTERNAL_ERROR', 'Internal server error')).code(status);
+      }
+      const code = status === 404 ? 'NOT_FOUND' : 'validation_failed';
+      return h.response(errorEnvelope(code, response.message)).code(status);
+    });
 
     this.addRoute(
       '/upload/presigned_url',
@@ -100,10 +114,10 @@ class MediaMetadataMS extends HttpServiceBase {
     const user = extractInfoFromRequest(req, 'x-user');
     const file = await this.db.getRecord(fileId);
     if (!file || file.owner !== user) {
-      return h.response({ error: 'file not found' }).code(404);
+      return h.response(errorEnvelope('NOT_FOUND', 'file not found')).code(404);
     }
     if (file.status === true) {
-      return h.response({ error: 'bad request' }).code(400);
+      return h.response(errorEnvelope('ALREADY_MARKED', 'file status is already set')).code(400);
     }
     await this.db.updateFileStatus(fileId, !!status);
     return h.response().code(200);
@@ -119,7 +133,7 @@ class MediaMetadataMS extends HttpServiceBase {
 
     const file = await this.db.getRecord(fileId);
     if (file == null) {
-      return h.response({ error: 'file not found' }).code(404);
+      return h.response(errorEnvelope('NOT_FOUND', 'file not found')).code(404);
     }
     const payload = {
       fileId,

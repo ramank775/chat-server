@@ -26,9 +26,10 @@ class INotificationDB {
 
   /**
    * @abstract
-   * Deregister the ntfy topic of a (user_id, deviceId) pair
+   * Deregister the ntfy topic of a (user_id, deviceId) pair. No `deviceId`
+   * removes every topic registered for the user (AUTH_CONTRACT 8.2).
    * @param {string} userId
-   * @param {{deviceId: string}} options
+   * @param {{deviceId?: string}} options
    */
   // eslint-disable-next-line no-unused-vars
   async removeTopic(userId, options) {

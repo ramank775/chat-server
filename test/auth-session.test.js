@@ -76,6 +76,22 @@ describe('auth/session and the /auth subrequest', () => {
     assert.equal(JSON.parse(res.payload).error.code, 'MISSING_ACCESSKEY');
   });
 
+  test('revoke deregisters the device push topic with notification-ms (4.6 step 3)', async () => {
+    const session = await signup(app, { phone: '+919100000006', deviceId: 'd-push' });
+    const priorCalls = app.pushTopicDeletes.length;
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/auth/session/revoke',
+      headers: bearer(session.accesskey),
+      payload: { refreshToken: session.refreshToken }
+    });
+    assert.equal(res.statusCode, 200);
+
+    const calls = app.pushTopicDeletes.slice(priorCalls);
+    assert.deepEqual(calls, [{ user_id: session.user_id, deviceId: 'd-push' }]);
+  });
+
   test('/auth accepts a bearer accesskey and answers with the identity headers', async () => {
     const session = await signupWithUsername(app, {
       phone: '+919100000004',

@@ -44,12 +44,15 @@ class MongoNotificationDB extends INotificationDB {
   }
 
   /**
-   * Deregister the ntfy topic of a (user_id, deviceId) pair
+   * Deregister the ntfy topic of a (user_id, deviceId) pair. No `deviceId`
+   * removes every topic registered for the user (AUTH_CONTRACT 8.2).
    * @param {string} userId
-   * @param {{deviceId: string}} options
+   * @param {{deviceId?: string}} options
    */
-  async removeTopic(userId, options) {
-    await this.#collection.deleteOne({ user_id: userId, deviceId: options.deviceId });
+  async removeTopic(userId, options = {}) {
+    const filter = { user_id: userId };
+    if (options.deviceId) filter.deviceId = options.deviceId;
+    await this.#collection.deleteMany(filter);
   }
 
   /**

@@ -5,7 +5,7 @@ const {
   resolveEnvVariables
 } = require('../../libs/service-base');
 const { addHttpOptions, initHttpResource, HttpServiceBase } = require('../../libs/http-service-base');
-const { extractInfoFromRequest, schemas, verifySecret } = require('../../helper');
+const { extractInfoFromRequest, schemas, verifySecret, errorEnvelope } = require('../../helper');
 const eventStore = require('../../libs/event-store');
 const MemCache = require('../../libs/cache');
 const { opIdUserBits } = require('../../libs/v3-envelope');
@@ -34,11 +34,6 @@ const OP_FIELDS = {
   resource_seq: Joi.number().integer().min(1).required(),
   client_timestamp_ms: Joi.number().integer()
 };
-
-/** AUTH_CONTRACT.md §11.1 error envelope. */
-function errorEnvelope(code, message) {
-  return { error: { code, message } };
-}
 
 function parseOptions(argv) {
   let cmd = initDefaultOptions();
