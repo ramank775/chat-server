@@ -232,4 +232,5 @@ module.exports = {
   NotificationMS,
   parseOptions,
   initResources,
+  prepareEventList,
 }

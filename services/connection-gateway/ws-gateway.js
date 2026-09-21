@@ -153,14 +153,23 @@ class Gateway extends HttpServiceBase {
     // The undelivered queue is message-delivery's (V3_RELEASE_PLAN §3.3). It
     // owns `offlineMessageHandler` and is expected to expose
     //   queueForUser(user_id, wsEnvelopeBytes, deliverySequence)
-    // over the recipients it gets back from us. Nothing to do here.
-    this.deliveryManager.offlineMessageHandler = () => { };
+    // over the recipients it gets back from us. Nothing to do here — and when
+    // we share one manager with it (monolith), leave its handler alone.
+    if (!this.deliveryManager.offlineMessageHandler) {
+      this.deliveryManager.offlineMessageHandler = () => { };
+    }
     await this.deliveryManager.startConsumer();
   }
 
   initWebsocket() {
     const wss = new WebSocket.Server({
       server: this.httpServer,
+      // Mounted, the raw server also serves every other service's http, so
+      // only upgrades on our own prefix are ours, and the authentication
+      // nginx did ahead of us is a hook the runner supplies (the upgrade
+      // never reaches fastify, so the global auth hook cannot see it).
+      path: this.mount ? this.mount.prefix : undefined,
+      verifyClient: this.context.wsVerify,
       // AUTH_CONTRACT.md §6.2 step 3 — echo the accesskey subprotocol on the
       // 101 so the client's handshake completes.
       handleProtocols: (protocols) =>
@@ -543,5 +552,6 @@ module.exports = {
   Gateway,
   parseOptions,
   initResources,
+  prepareListEvent,
   EVENT_TYPE,
 };

@@ -688,7 +688,9 @@ class ProfileMs extends HttpServiceBase {
   async coMembers(userId) {
     const lists = await Promise.all(
       ['group', 'one_to_one'].map((type) =>
-        this.channelClient.get('/', { headers: { 'x-user': userId }, params: { type } })
+        // the internal list: this runs on the user's behalf, not on a request
+        // of theirs, so it must not go through the authenticated prefix
+        this.channelClient.get('/_internal/', { headers: { 'x-user': userId }, params: { type } })
       )
     );
     const members = new Set();
@@ -1079,5 +1081,6 @@ if (asMain) {
 module.exports = {
   ProfileMs,
   parseOptions,
-  initResource
+  initResource,
+  isUsernameGated
 };

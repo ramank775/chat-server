@@ -1,0 +1,86 @@
+# Decisions 70 and 71: the same services in one process. No nginx (the auth
+# subrequest is an in-process hook), no redis (in-process cache and delivery),
+# no nats (in-process event bus). Its own compose project, so it can run beside
+# the microservice stack; override NGINX_PORT / MONGO_PORT / MINIO_PORT /
+# S3_ENDPOINT when it does.
+name: vartalap-monolith
+
+networks:
+  vartalap:
+
+volumes:
+  mongo-data:
+  minio-data:
+  ntfy-data:
+
+services:
+  app:
+    image: ramank775/chatserver:${CHAT_SERVER_TAG}
+    restart: unless-stopped
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+    # the front door nginx used to be, so CONFORMANCE_BASE_URL is unchanged
+    ports:
+      - "${NGINX_PORT:-8085}:8000"
+    networks:
+      - vartalap
+    logging:
+      options:
+        max-size: "100m"
+    entrypoint: node
+    command: /app/services/monolith.js --app-name=monolith --host=0.0.0.0 --port=8000 --mongo-url=${MONGO_URL} --mongo-user=${MONGO_USER} --mongo-password=${MONGO_PASSWORD} --mongo-auth --profile-db=mongo --auth-db=mongo --channel-db=mongo --notification-db=mongo --media-metadata-db=mongo --auth-provider=${AUTH_PROVIDER:-self-hosted-otp} ${PROFILE_DEV_FLAGS} --sms-sender=${SMS_SENDER:-mock} --sms-gate-url=${SMS_GATE_URL} --sms-gate-user=${SMS_GATE_USER} --sms-gate-password=${SMS_GATE_PASSWORD} --pn-service=${PN_SERVICE:-ntfy} --ntfy-base-url=${NTFY_BASE_URL} --media-storage=s3 --s3-bucket-name=${S3_BUCKET_NAME} --s3-access-key-id=${S3_ACCESS_KEY_ID} --s3-secret-access-key=${S3_SECRET_ACCESS_KEY} --s3-endpoint=${S3_ENDPOINT} --s3-force-path-style --base-upload-dir=/dev --url-expire-time=${URL_EXPIRE_TIME:-3600} --max-upload-size=${MAX_UPLOAD_SIZE:-26214400} --new-message-topic=${TOPIC_NEW_MESSAGE} --offline-message-topic=${TOPIC_OFFLINE_MESSAGE} --new-login-topic=${TOPIC_NEW_LOGIN} --offline-msg-initial=${PERSISTENCE_MESSAGE_MS_INITIAL} --gateway-name=monolith-gateway
+
+  mongo:
+    image: mongo:7.0
+    ports:
+      - "${MONGO_PORT:-27017}:27017"
+    volumes:
+      - mongo-data:/data/db
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_USER}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_PASSWORD}
+      - MONGO_INITDB_DATABASE=chat
+    networks:
+      - vartalap
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    environment:
+      - MINIO_ROOT_USER=${S3_ACCESS_KEY_ID}
+      - MINIO_ROOT_PASSWORD=${S3_SECRET_ACCESS_KEY}
+    volumes:
+      - minio-data:/data
+    networks:
+      - vartalap
+
+  minio-init:
+    image: minio/minio:latest
+    depends_on:
+      - minio
+    environment:
+      - S3_ACCESS_KEY_ID=${S3_ACCESS_KEY_ID}
+      - S3_SECRET_ACCESS_KEY=${S3_SECRET_ACCESS_KEY}
+      - S3_BUCKET_NAME=${S3_BUCKET_NAME}
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 $$S3_ACCESS_KEY_ID $$S3_SECRET_ACCESS_KEY; do sleep 1; done &&
+      mc mb --ignore-existing local/$$S3_BUCKET_NAME
+      "
+    networks:
+      - vartalap
+
+  ntfy:
+    image: binwiederhier/ntfy
+    command: serve
+    environment:
+      - NTFY_BASE_URL=${NTFY_BASE_URL}
+      - NTFY_CACHE_FILE=/var/cache/ntfy/cache.db
+    volumes:
+      - ntfy-data:/var/cache/ntfy
+    networks:
+      - vartalap

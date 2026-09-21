@@ -12,7 +12,9 @@
     "test:infra": "docker compose --env-file deployment/.env.tmpl -f deployment/docker-compose.infra.yml up -d mongo redis",
     "lint:fix": "eslint --fix .",
     "prepare": "husky install",
-    "test:conformance": "CONFORMANCE_BASE_URL=${CONFORMANCE_BASE_URL:-http://localhost:8085} node --test test/conformance/*.test.js"
+    "test:conformance": "CONFORMANCE_BASE_URL=${CONFORMANCE_BASE_URL:-http://localhost:8085} node --test test/conformance/*.test.js",
+    "monolith": "node services/monolith.js",
+    "monolith:up": "docker compose --env-file deployment/.env.tmpl -f deployment/docker-compose.monolith.yml up -d"
   },
   "engines": {
     "node": ">=20.0.0"

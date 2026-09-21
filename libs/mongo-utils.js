@@ -28,10 +28,26 @@ function prepareMongoOptions(options) {
   return { url, options: dbOptions };
 }
 
+/**
+ * One client per context: profile-ms opens two databases, the monolith opens
+ * six, and they all talk to the same `--mongo-url` with one connection pool.
+ */
 function initMongoClient(context) {
-  const { url, options } = prepareMongoOptions(context.options);
-  const mongoClient = new MongoClient(url, options);
-  return mongoClient;
+  if (!context.mongoClient) {
+    const { url, options } = prepareMongoOptions(context.options);
+    const client = new MongoClient(url, options);
+    // every database sharing this client closes it on dispose, and the
+    // driver's second close races with the first (it reads a topology the
+    // first one already dropped). One close, everyone awaits it.
+    const close = client.close.bind(client);
+    let closing = null;
+    client.close = (...args) => {
+      closing = closing || close(...args);
+      return closing;
+    };
+    context.mongoClient = client;
+  }
+  return context.mongoClient;
 }
 
 module.exports = {

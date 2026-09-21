@@ -1,5 +1,29 @@
+/* eslint-disable max-classes-per-file -- the registry is the redis-shaped half of the manager */
 const { Redis } = require('ioredis');
 const { MessageEvent } = require('../event-args');
+
+/**
+ * Stands in for redis when the whole stack is one process (`--single-gateway`):
+ * the user -> gateway routing table and nothing else. Every recipient resolves
+ * to this process' own gateway, so `_send` hands them to `messageHandler`
+ * directly and nothing is ever published.
+ * ponytail: one gateway by definition. Drop the flag and give it a redis
+ * endpoint the moment a second gateway exists.
+ */
+class LocalRegistry {
+  #kv = new Map();
+
+  async set(key, value) { this.#kv.set(key, String(value)); }
+
+  async get(key) { return this.#kv.get(key) ?? null; }
+
+  async del(key) { this.#kv.delete(key); }
+
+  async mget(keys) { return keys.map((key) => this.#kv.get(key) ?? null); }
+
+  /* eslint-disable-next-line class-methods-use-this, no-empty-function */
+  async publish() { }
+}
 
 class DeliveryManager {
 
@@ -51,7 +75,9 @@ class DeliveryManager {
   }
 
   constructor(options) {
-    this._redis = options.redis || new Redis(options.redisEndpoint);
+    this.singleGateway = !!options.singleGateway;
+    this._redis = options.redis
+      || (this.singleGateway ? new LocalRegistry() : new Redis(options.redisEndpoint));
     this.serverId = options.serverId;
     this.maxRetry = options.maxRetry || 3;
     if (options.eventArg) this.eventArg = options.eventArg;
@@ -63,6 +89,9 @@ class DeliveryManager {
   }
 
   async startConsumer(redis = null) {
+    // one process, one gateway: `_send` never leaves this manager, so there is
+    // no pubsub to subscribe to and no health key for anyone to read.
+    if (this.singleGateway) return;
     this._subscriber = redis  || new Redis(this._redis.options);
     this._subscriber.on('pmessageBuffer', async (pattern, key, value) => {
       const msg = this.eventArg.fromBinary(value);
@@ -165,8 +194,13 @@ function addOptions(cmd) {
     )
     .option(
       '--redis-endpoint <redis-endpoint>',
-      'Redis endpoint to connet with in case of redis cache', 
+      'Redis endpoint to connet with in case of redis cache',
       '127.0.0.1:6379'
+    )
+    .option(
+      '--single-gateway',
+      'One gateway in this process: deliver in process instead of over redis pubsub',
+      false
     )
   return cmd;
 }
@@ -177,11 +211,12 @@ function addOptions(cmd) {
  * @returns 
  */
 function init(context) {
-  const { redisEndpoint, gatewayName, maxDeliveryAttempt } = context.options
+  const { redisEndpoint, gatewayName, maxDeliveryAttempt, singleGateway } = context.options
   const options = {
     redisEndpoint,
     serverId: gatewayName,
     maxRetry: maxDeliveryAttempt,
+    singleGateway,
   };
   context.deliveryManager = new DeliveryManager(options);
   return context;
@@ -189,6 +224,7 @@ function init(context) {
 
 module.exports = {
   DeliveryManager,
+  LocalRegistry,
   addOptions,
   init
 }

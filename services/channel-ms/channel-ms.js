@@ -178,6 +178,12 @@ class ChannelMs extends HttpServiceBase {
     this.addInternalRoute('/{channelId}', 'GET', this.getChannelInfo.bind(this), {
       validate: { params: channelParam }
     });
+
+    // Same list, off the authenticated prefix: profile-ms reads it for the
+    // §10.2 fanout on behalf of a user, which is not a request that user made.
+    this.addInternalRoute('/', 'GET', this.getChannels.bind(this), {
+      validate: { headers: schemas.authHeaders }
+    });
   }
 
   // ---- §11.2 preamble ---------------------------------------------------

@@ -167,5 +167,6 @@ if (asMain) {
 module.exports = {
   MessageDeliveryWorker,
   parseOptions,
-  initResources
+  initResources,
+  prepareEventList
 }

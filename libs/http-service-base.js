@@ -86,6 +86,16 @@ class HttpServiceBase extends ServiceBase {
     this.meterDict = {};
     this.histDict = {};
     this.httpServer = context.httpServer;
+    /**
+     * Mounted mode (services/monolith.js): the runner owns the Fastify
+     * instance and the raw http server and hands this service an encapsulated
+     * scope under `prefix` (assigned to `this.server` before `init()`).
+     * `internal` collects the `/_internal/...` routes, which stay at the root
+     * prefix so every internal http client keeps one base url.
+     * Null means standalone: this service owns its server.
+     * @type {{prefix: string, internal: object[]}|null}
+     */
+    this.mount = context.mount || null;
     this.baseRoute = this.options.baseRoute || '';
     this.internalBaseRoute = '/_internal';
     /** §11 envelope code for an unknown route; channel-ms answers lowercase. */
@@ -98,31 +108,40 @@ class HttpServiceBase extends ServiceBase {
   }
 
   async init() {
-    // media-ms and notification-ms tests build a service without initHttpResource
-    this.httpServer = this.httpServer || http.createServer();
-    this.server = Fastify({
-      serverFactory: (handler) => {
-        // the whole lifecycle - parsing, hooks, handler, serialization - runs
-        // inside the store, so nothing below can lose the request id
-        this.httpServer.on('request', (req, res) => als.run(newStore(req), handler, req, res));
-        return this.httpServer;
-      }
-    });
+    if (!this.mount) {
+      // media-ms and notification-ms tests build a service without initHttpResource
+      this.httpServer = this.httpServer || http.createServer();
+      this.server = Fastify({
+        serverFactory: (handler) => {
+          // the whole lifecycle - parsing, hooks, handler, serialization - runs
+          // inside the store, so nothing below can lose the request id
+          this.httpServer.on('request', (req, res) => als.run(newStore(req), handler, req, res));
+          return this.httpServer;
+        }
+      });
 
+      // per http server, not per mounted service: the monolith's root scope
+      // already carries these and fastify inherits them down every prefix.
+      // hapi read an empty body as `null`, and nginx's auth_request subrequest
+      // forwards the caller's content-type with no body, so an empty json body
+      // must reach the route (and its schema) instead of failing with a 400.
+      const json = this.server.getDefaultJsonParser('error', 'error');
+      this.server.addContentTypeParser(
+        'application/json',
+        { parseAs: 'string' },
+        (req, body, done) => (body === '' ? done(null, null) : json(req, body, done))
+      );
+      this.server.decorateRequest('payload', { getter() { return this.body; } });
+      this.server.decorateRequest('internal', false);
+      this.server.decorateRequest('pre', null);
+      this.server.decorateRequest('startTime', null);
+    }
+
+    // Everything below is fastify-encapsulated, so when mounted it covers this
+    // service's prefix only: its own validator, hooks, error and 404 handler.
     this.server.setValidatorCompiler(({ schema }) => (data) =>
       schema.validate(data, { abortEarly: false })
     );
-    // hapi read an empty body as `null`, and nginx's auth_request subrequest
-    // forwards the caller's content-type with no body, so an empty json body
-    // must reach the route (and its schema) instead of failing with a 400.
-    const json = this.server.getDefaultJsonParser('error', 'error');
-    this.server.addContentTypeParser('application/json', { parseAs: 'string' }, (req, body, done) =>
-      (body === '' ? done(null, null) : json(req, body, done))
-    );
-    this.server.decorateRequest('payload', { getter() { return this.body; } });
-    this.server.decorateRequest('internal', false);
-    this.server.decorateRequest('pre', null);
-    this.server.decorateRequest('startTime', null);
 
     this.server.addHook('onRequest', (req, _reply, done) => {
       // `inject` never reaches the http server above, so it enters the store
@@ -207,7 +226,7 @@ class HttpServiceBase extends ServiceBase {
     [['params', 'params'], ['querystring', 'query'], ['body', 'payload'], ['headers', 'headers']]
       .filter(([, source]) => validate && validate[source])
       .forEach(([part, source]) => { schema[part] = validate[source]; });
-    this.server.route({
+    const config = {
       method: (Array.isArray(method) ? method : [method]).map((m) => m.toUpperCase()),
       url: path.replace(/{(\w+)}/g, ':$1'),
       schema,
@@ -227,17 +246,22 @@ class HttpServiceBase extends ServiceBase {
         const result = await handler(req, h);
         return result && result[kResponse] ? send(reply, result) : result;
       }
-    });
+    };
+    // mounted, `/_internal/...` must not pick up the service's prefix, and the
+    // runner registers what lands here once every service has been mounted.
+    if (internal && this.mount) this.mount.internal.push(config);
+    else this.server.route(config);
   }
 
   async run() {
     await super.run();
+    if (this.mount) return;
     await this.server.listen({ port: this.options.port, host: this.options.host });
     this.log.info(`Fastify Http server start at ${this.uri}`);
   }
 
   async shutdown() {
-    await this.server.close();
+    if (!this.mount) await this.server.close();
   }
 }
 
