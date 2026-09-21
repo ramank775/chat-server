@@ -94,6 +94,13 @@ class MongoAuthDB extends IAuthDB {
     );
   }
 
+  async revokeAllSessions(userId) {
+    await this.#sessions.updateMany(
+      { user_id: userId, revokedAt: null },
+      { $set: { revokedAt: new Date() } }
+    );
+  }
+
   async init() {
     await this.#client.connect();
     const db = this.#client.db();

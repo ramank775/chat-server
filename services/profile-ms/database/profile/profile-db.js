@@ -90,11 +90,36 @@ class IProfileDB {
 
   /**
    * @abstract
+   * Find the holder of a lower cased username, tombstones included. A deleted
+   * account keeps its handle reserved forever (AUTH_CONTRACT 8.3).
+   * @param {string} _usernameLower
+   * @returns {Promise<User|null>}
+   */
+  // eslint-disable-next-line no-unused-vars
+  async getUsernameHolder(_usernameLower) {
+    throw new Error('Method not implemented');
+  }
+
+  /**
+   * @abstract
+   * Find the active users behind a batch of phone hashes (AUTH_CONTRACT 7.2).
+   * Hashes with no account are simply absent from the result.
+   * @param {string[]} _phoneHashes
+   * @returns {Promise<User[]>}
+   */
+  // eslint-disable-next-line no-unused-vars
+  async getByPhoneHashes(_phoneHashes) {
+    throw new Error('Method not implemented');
+  }
+
+  /**
+   * @abstract
    * Update an active user.
    * @param {string} _userId
    * @param {Partial<User>} _updates
    * @returns {Promise<User|null>} updated user, null when not found
-   * @throws {Error} with `code === 'USERNAME_TAKEN'` when usernameLower collides
+   * @throws {Error} with `code === 'USERNAME_TAKEN'` / `'PHONE_TAKEN'` on a
+   *   unique index collision
    */
   // eslint-disable-next-line no-unused-vars
   async updateUser(_userId, _updates) {

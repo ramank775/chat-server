@@ -1,5 +1,7 @@
 const crypto = require('crypto');
+const { join } = require('path');
 const Joi = require('joi');
+const protobufjs = require('protobufjs');
 const {
   initDefaultOptions,
   initDefaultResources,
@@ -11,14 +13,39 @@ const eventStore = require('../../libs/event-store');
 const { profileDB } = require('./database');
 const { addAuthProviderOptions, initializeAuthProvider, AuthError } = require('./auth-provider');
 const { SmsGatewayError, SmsGatewayUnavailableError } = require('./auth-provider/sms-sender');
+const { HttpClient } = require('../../libs/http-client');
+const { EnvelopeEvent, SERVER_EVENT_MARKER } = require('../../libs/v3-envelope');
 const { validateUsername } = require('./username');
-const { hashSecret, sha256 } = require('../../helper');
+const { uuidv4, hashSecret, verifySecret, sha256 } = require('../../helper');
 
 const asMain = require.main === module;
 
 const E164 = /^\+\d{8,15}$/;
 const USERNAME_CHANGE_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
 const USER_ID_MAX_RETRY = 10;
+const CONTACT_LOOKUP_MAX = 100;
+const SHA256_HEX = /^[0-9a-f]{64}$/;
+/** proto/v3-server-event-payload.proto `ServerEventType` */
+const SERVER_EVENT_TYPE = { PROFILE_EDITED: 6, USERNAME_CHANGED: 7 };
+
+/** @type {import('protobufjs').Type} */
+let serverEventPayload = null;
+
+/**
+ * SYNC_PROTOCOL 10.2: the `Envelope.payload` of a REST-write fanout is a
+ * `ServerEventPayload` behind the 0x53 marker byte.
+ * @param {object} body one populated `ServerEventPayload`
+ * @returns {Buffer}
+ */
+function encodeServerEvent(body) {
+  if (!serverEventPayload) {
+    serverEventPayload = protobufjs
+      .loadSync(join(__dirname, '..', '..', 'proto', 'v3-server-event-payload.proto'))
+      .lookupType('vartalap.v3.payload.ServerEventPayload');
+  }
+  const bytes = serverEventPayload.encode(serverEventPayload.create(body)).finish();
+  return Buffer.concat([Buffer.from([SERVER_EVENT_MARKER]), bytes]);
+}
 
 // AUTH_CONTRACT 2.4: routes reachable while `username` is still null
 const GATE_EXEMPT = [/^\/users\/me$/, /^\/users\/username\/check$/, /^\/auth\//];
@@ -34,6 +61,12 @@ function parseOptions(argv) {
     '--new-login-topic <new-login-topic>',
     'New login topic used to produce new login events'
   );
+  cmd.option(
+    '--new-message-topic <new-message-topic>',
+    'Topic the REST-write fanout envelopes are published to (SYNC_PROTOCOL 10.2)'
+  );
+  cmd.option('--channel-ms-endpoint <channel-ms-endpoint>', 'Base url for channel service');
+  cmd.option('--gateway-endpoint <gateway-endpoint>', 'Base url for connection gateway');
   cmd.option('--otp-rate-phone-hour <count>', 'OTP sends per phone per hour', (c) => Number(c), 5);
   cmd.option('--otp-rate-phone-day <count>', 'OTP sends per phone per day', (c) => Number(c), 15);
   cmd.option('--otp-rate-ip-hour <count>', 'OTP sends per ip per hour', (c) => Number(c), 20);
@@ -42,6 +75,25 @@ function parseOptions(argv) {
     'Profile field updates per user per hour',
     (c) => Number(c),
     50
+  );
+  cmd.option('--contact-lookup-day <count>', 'Phone hashes per user per day', (c) => Number(c), 500);
+  cmd.option(
+    '--contact-lookup-ip-day <count>',
+    'Phone hashes per ip per day',
+    (c) => Number(c),
+    5000
+  );
+  cmd.option(
+    '--username-lookup-min <count>',
+    'by-username lookups per user per minute',
+    (c) => Number(c),
+    60
+  );
+  cmd.option(
+    '--username-lookup-ip-day <count>',
+    'by-username lookups per ip per day',
+    (c) => Number(c),
+    5000
   );
   return cmd.parse(argv).opts();
 }
@@ -115,6 +167,20 @@ function selfProfile(user) {
   };
 }
 
+/**
+ * The view every other user gets (AUTH_CONTRACT 7.5). Never carries `phone`.
+ * @param {import('./database/profile/profile-db').User} user
+ */
+function publicProfile(user) {
+  return {
+    user_id: user.user_id,
+    username: user.username || null,
+    displayName: user.displayName || null,
+    avatarUrl: user.avatarUrl || null,
+    statusText: user.statusText || null
+  };
+}
+
 class ProfileMs extends HttpServiceBase {
   constructor(context) {
     super(context);
@@ -126,6 +192,13 @@ class ProfileMs extends HttpServiceBase {
     this.eventStore = context.eventStore;
     this.memCache = context.memCache;
     this.newLoginTopic = this.options.newLoginTopic;
+    this.newMessageTopic = this.options.newMessageTopic;
+    // ponytail: channel-ms exposes no "channels of a user" internal route and
+    // libs/channel-service-client only answers `isMember`, so the fanout reads
+    // the public list route per channel kind. Collapse to one internal call
+    // when channel-ms grows one.
+    this.channelClient = new HttpClient(this.options.channelMsEndpoint);
+    this.gatewayClient = new HttpClient(this.options.gatewayEndpoint);
   }
 
   async init() {
@@ -225,6 +298,58 @@ class ProfileMs extends HttpServiceBase {
       pre: [this.authPre(false)],
       validate: { payload: Joi.object({ username: Joi.string().required() }).required() }
     });
+
+    this.addRoute('/users/me/delete', 'POST', this.guard(this.deleteMe), {
+      pre: [this.authPre()],
+      validate: { payload: Joi.object({ confirmation: Joi.string().required() }).required() }
+    });
+
+    this.addRoute('/users/by-username/{username}', 'GET', this.guard(this.getUserByUsername), {
+      pre: [this.authPre()],
+      validate: {
+        params: Joi.object({ username: Joi.string().required() }),
+        query: Joi.object({ key: Joi.string().allow('') })
+      }
+    });
+
+    this.addRoute('/users/{userId}', 'GET', this.guard(this.getUser), {
+      pre: [this.authPre()],
+      validate: { params: Joi.object({ userId: Joi.string().required() }) }
+    });
+
+    this.addRoute('/contacts/lookup', 'POST', this.guard(this.contactsLookup), {
+      pre: [this.authPre()],
+      validate: {
+        payload: Joi.object({
+          phoneHashes: Joi.array().items(Joi.string().pattern(SHA256_HEX)).min(1).required()
+        }).required()
+      }
+    });
+
+    this.addRoute(
+      '/auth/phone/rebind/start',
+      'POST',
+      this.guard(this.rebindStart),
+      {
+        pre: [this.authPre(false)],
+        validate: { payload: Joi.object({ newPhone: Joi.string().required() }).required() }
+      }
+    );
+
+    this.addRoute(
+      '/auth/phone/rebind/verify',
+      'POST',
+      this.guard(this.rebindVerify),
+      {
+        pre: [this.authPre(false)],
+        validate: {
+          payload: Joi.object({
+            rebindSessionId: Joi.string().required(),
+            code: Joi.string().pattern(/^\d{6}$/).required()
+          }).required()
+        }
+      }
+    );
   }
 
   /**
@@ -311,11 +436,7 @@ class ProfileMs extends HttpServiceBase {
         .response(errorEnvelope('INVALID_PHONE_FORMAT', 'phone must be in E.164 format'))
         .code(400);
     }
-    const { otpRatePhoneHour, otpRatePhoneDay, otpRateIpHour } = this.options;
-    const phoneKey = sha256(phone).slice(0, 32);
-    await this.rateLimit(`otp:rate:phone:${phoneKey}:h`, otpRatePhoneHour, 3600, 'phone');
-    await this.rateLimit(`otp:rate:phone:${phoneKey}:d`, otpRatePhoneDay, 86400, 'phone');
-    await this.rateLimit(`otp:rate:ip:${req.info.remoteAddress}:h`, otpRateIpHour, 3600, 'ip');
+    await this.otpRateLimits(phone, req.info.remoteAddress);
 
     const challenge = await this.sendOtp(() => this.authProvider.startOtp({ phone, deviceId }), res);
     if (challenge.isBoom || !challenge.sessionId) return challenge;
@@ -430,7 +551,8 @@ class ProfileMs extends HttpServiceBase {
         // a key is meaningless with no handle to gate (4.5)
         updates.usernameKeyHash = null;
       } else {
-        const taken = await this.profileDB.getByUsername(next);
+        // a tombstoned handle is still taken (8.3)
+        const taken = await this.profileDB.getUsernameHolder(next);
         if (taken) {
           return res
             .response(errorEnvelope('USERNAME_TAKEN', 'That username is already taken'))
@@ -471,9 +593,9 @@ class ProfileMs extends HttpServiceBase {
       'user'
     );
 
+    let updated;
     try {
-      const updated = await this.profileDB.updateUser(user.user_id, updates);
-      return selfProfile(updated);
+      updated = await this.profileDB.updateUser(user.user_id, updates);
     } catch (error) {
       if (error.code === 'USERNAME_TAKEN') {
         return res
@@ -482,6 +604,305 @@ class ProfileMs extends HttpServiceBase {
       }
       throw error;
     }
+    await this.fanoutProfileChange(updated, updates, now);
+    return selfProfile(updated);
+  }
+
+  /**
+   * SYNC_PROTOCOL 10.2/10.3 - a profile or username edit reaches every user
+   * sharing at least one channel with the editor, as a server-event envelope
+   * on the same topic (and so the same delivery path) as chat. Best effort:
+   * an edit already written is not failed by a fanout that could not publish.
+   * @param {import('./database/profile/profile-db').User} user
+   * @param {Partial<import('./database/profile/profile-db').User>} updates
+   * @param {Date} now
+   */
+  async fanoutProfileChange(user, updates, now) {
+    const events = [];
+    const has = (field) => Object.prototype.hasOwnProperty.call(updates, field);
+    if (has('displayName') || has('avatarUrl') || has('statusText')) {
+      const body = { userId: user.user_id, editedAtMs: now.getTime() };
+      // present and empty means cleared, absent means untouched (proto3 optional)
+      if (has('displayName')) body.displayName = updates.displayName || '';
+      if (has('avatarUrl')) body.avatarUrl = updates.avatarUrl || '';
+      if (has('statusText')) body.statusText = updates.statusText || '';
+      events.push({ version: 1, type: SERVER_EVENT_TYPE.PROFILE_EDITED, profileEdited: body });
+    }
+    // `username` only lands in `updates` when it actually changed
+    if (has('username')) {
+      events.push({
+        version: 1,
+        type: SERVER_EVENT_TYPE.USERNAME_CHANGED,
+        usernameChanged: {
+          userId: user.user_id,
+          newUsername: updates.username || '',
+          changedAtMs: now.getTime()
+        }
+      });
+    }
+    if (!events.length || !this.newMessageTopic) return;
+    try {
+      const { recipients, channelId } = await this.coMembers(user.user_id);
+      if (!recipients.length) return;
+      for (let i = 0; i < events.length; i += 1) {
+        // eslint-disable-next-line no-await-in-loop
+        await this.publishServerEvent(events[i], recipients, channelId);
+      }
+    } catch (error) {
+      this.log.error(`Profile fanout failed for ${user.user_id}: ${error.message}`);
+    }
+  }
+
+  /**
+   * Every user sharing a channel with `userId`, and one of those channels to
+   * carry the envelope. A profile edit is not channel scoped but `Envelope`
+   * is, so every recipient gets the same arbitrary shared channel id; the
+   * client only uses it to record the op id (SYNC_PROTOCOL 10.2).
+   * @param {string} userId
+   */
+  async coMembers(userId) {
+    const lists = await Promise.all(
+      ['group', 'one_to_one'].map((type) =>
+        this.channelClient.get('/', { headers: { 'x-user': userId }, params: { type } })
+      )
+    );
+    const members = new Set();
+    let channelId = null;
+    lists.flat().forEach((channel) => {
+      channelId = channelId || channel.channelId;
+      // ponytail: channel-ms still keys members by `username`; v3 step 3.4 renames it
+      (channel.members || []).forEach((member) =>
+        members.add(member.user_id ?? member.username ?? member)
+      );
+    });
+    // 10.3 rule 4: the editor does not receive their own fanout
+    members.delete(userId);
+    return { recipients: [...members], channelId };
+  }
+
+  /**
+   * Publish one server-event envelope the way the gateway publishes a chat
+   * envelope, so message-delivery fans it out unchanged.
+   * @param {object} body populated `ServerEventPayload`
+   * @param {string[]} recipients
+   * @param {string} channelId
+   */
+  async publishServerEvent(body, recipients, channelId) {
+    const nowMs = Date.now();
+    const envelope = {
+      opId: uuidv4(),
+      channelId,
+      resourceSeq: 0,
+      clientTimestampMs: nowMs,
+      payload: encodeServerEvent(body),
+      senderUserId: '', // server authored
+      serverTimestampMs: nowMs,
+      deliverySequence: await this.memCache.incr(`dseq:${channelId}`)
+    };
+    await this.eventStore.emit(
+      this.newMessageTopic,
+      EnvelopeEvent.of(envelope, recipients),
+      channelId
+    );
+  }
+
+  /**
+   * AUTH_CONTRACT 6.3 - tell the gateway to drop this user's sockets. Best
+   * effort: the credentials are already gone from the database either way.
+   * @param {string} userId
+   * @param {'expired'|'revoked'|'rebind'} reason
+   */
+  async revokeGatewaySessions(userId, reason) {
+    try {
+      await this.gatewayClient.post('/_internal/sessions/revoke', { user_id: userId, reason });
+    } catch (error) {
+      this.log.error(`Gateway session revoke (${reason}) failed for ${userId}: ${error.message}`);
+    }
+  }
+
+  /**
+   * AUTH_CONTRACT 7.5 — any authenticated user may read any public profile.
+   * A tombstoned account is a 404 like an unknown one (8.3).
+   */
+  async getUser(req, res) {
+    const target = await this.profileDB.getByUserId(req.params.userId);
+    if (!target) {
+      return res.response(errorEnvelope('USER_NOT_FOUND', 'No such user')).code(404);
+    }
+    return publicProfile(target);
+  }
+
+  /**
+   * AUTH_CONTRACT 7.6 — exact, case insensitive handle lookup. A keyed handle
+   * needs `?key=NNNN`; a wrong key is indistinguishable from an unknown
+   * handle, a *missing* one is not (decision 33).
+   */
+  async getUserByUsername(req, res) {
+    const { user } = req.pre.auth;
+    await this.rateLimit(
+      `uname:rate:user:${user.user_id}:m`,
+      this.options.usernameLookupMin,
+      60,
+      'user'
+    );
+    await this.rateLimit(
+      `uname:rate:ip:${req.info.remoteAddress}:d`,
+      this.options.usernameLookupIpDay,
+      86400,
+      'ip'
+    );
+    const notFound = (code = 'USER_NOT_FOUND') =>
+      res.response(errorEnvelope(code, 'No such user')).code(404);
+
+    const target = await this.profileDB.getByUsername(req.params.username.toLowerCase());
+    if (!target) return notFound();
+    if (target.usernameKeyHash) {
+      const { key } = req.query;
+      if (!key) return notFound('USERNAME_KEY_REQUIRED');
+      if (!(await verifySecret(key, target.usernameKeyHash))) return notFound();
+    }
+    return publicProfile(target);
+  }
+
+  /**
+   * AUTH_CONTRACT 7.2 — phone hash batch to `(user_id, username)`. Hashes with
+   * no live account are simply absent; negatives are never reported (7.1).
+   */
+  async contactsLookup(req, res) {
+    const { user } = req.pre.auth;
+    const { phoneHashes } = req.payload;
+    if (phoneHashes.length > CONTACT_LOOKUP_MAX) {
+      return res
+        .response(errorEnvelope('BATCH_TOO_LARGE', `At most ${CONTACT_LOOKUP_MAX} hashes per request`))
+        .code(400);
+    }
+    // 7.4 budgets are counted in hashes, not requests
+    await this.rateLimit(
+      `lookup:rate:user:${user.user_id}:d`,
+      this.options.contactLookupDay,
+      86400,
+      'user',
+      phoneHashes.length
+    );
+    await this.rateLimit(
+      `lookup:rate:ip:${req.info.remoteAddress}:d`,
+      this.options.contactLookupIpDay,
+      86400,
+      'ip',
+      phoneHashes.length
+    );
+    const matches = await this.profileDB.getByPhoneHashes([...new Set(phoneHashes)]);
+    return {
+      matches: matches
+        // the caller's own number is in their own address book; nothing to chat about
+        .filter((match) => match.user_id !== user.user_id)
+        .map((match) => ({
+          phoneHash: match.phoneHash,
+          user_id: match.user_id,
+          username: match.username || null
+        }))
+    };
+  }
+
+  /**
+   * AUTH_CONTRACT 8.2 — tombstone the account. The row keeps `user_id` and
+   * `usernameLower` (both stay reserved by their unique indexes) and leaves
+   * the partial phone index, which is what releases the number for a fresh
+   * signup. Deregistering the push topic is notification-ms's job (5.4).
+   */
+  async deleteMe(req, res) {
+    const { user } = req.pre.auth;
+    if (req.payload.confirmation !== `DELETE ${user.username}`) {
+      return res
+        .response(errorEnvelope('INVALID_CONFIRMATION', 'confirmation must be "DELETE <username>"'))
+        .code(400);
+    }
+    await this.profileDB.updateUser(user.user_id, { deletedAt: new Date() });
+    await this.authProvider.revokeAll(user.user_id);
+    await this.revokeGatewaySessions(user.user_id, 'revoked');
+    return { status: true };
+  }
+
+  /**
+   * AUTH_CONTRACT 9.2 — OTP on the new number while authenticated on the old.
+   * The challenge is bound to this user, so nobody else can spend it.
+   */
+  async rebindStart(req, res) {
+    const { user, session } = req.pre.auth;
+    const { newPhone } = req.payload;
+    if (!E164.test(newPhone)) {
+      return res
+        .response(errorEnvelope('INVALID_PHONE_FORMAT', 'newPhone must be in E.164 format'))
+        .code(400);
+    }
+    if (newPhone === user.phone) {
+      return res
+        .response(errorEnvelope('SAME_PHONE', 'newPhone is already bound to this account'))
+        .code(409);
+    }
+    if (await this.profileDB.getByPhone(newPhone)) {
+      return res
+        .response(errorEnvelope('PHONE_TAKEN', 'newPhone is bound to another account'))
+        .code(409);
+    }
+    await this.otpRateLimits(newPhone, req.info.remoteAddress);
+    const challenge = await this.sendOtp(
+      () =>
+        this.authProvider.startOtp({
+          phone: newPhone,
+          deviceId: session.deviceId,
+          userId: user.user_id
+        }),
+      res
+    );
+    if (challenge.isBoom || !challenge.sessionId) return challenge;
+    return {
+      rebindSessionId: challenge.sessionId,
+      resendAfterSec: challenge.resendAfterSec,
+      expiresInSec: challenge.expiresInSec
+    };
+  }
+
+  /**
+   * AUTH_CONTRACT 9.3 — swap the bound number. `user_id`, `username` and every
+   * session survive; the other devices are only nudged off their socket so
+   * they reconnect (6.5 close 4003).
+   */
+  async rebindVerify(req, res) {
+    const { user, session } = req.pre.auth;
+    const { rebindSessionId, code } = req.payload;
+    const verified = await this.authProvider.verifyOtp({
+      sessionId: rebindSessionId,
+      code,
+      deviceId: session.deviceId
+    });
+    if (verified.userId !== user.user_id) {
+      throw new AuthError(404, 'SESSION_NOT_FOUND', 'Unknown session');
+    }
+    const phoneTaken = () =>
+      res.response(errorEnvelope('PHONE_TAKEN', 'newPhone is bound to another account')).code(409);
+    // 9.3 step 2: somebody may have signed up on it between start and verify
+    if (await this.profileDB.getByPhone(verified.phone)) return phoneTaken();
+    let updated;
+    try {
+      updated = await this.profileDB.updateUser(user.user_id, {
+        phone: verified.phone,
+        phoneHash: sha256(verified.phone)
+      });
+    } catch (error) {
+      if (error.code === 'PHONE_TAKEN') return phoneTaken();
+      throw error;
+    }
+    // ponytail: the gateway's revoke route takes one device or all of them,
+    // never "all but this one", so the rebinding device is nudged too. Harmless
+    // - its credentials still resolve - and it saves a route change in a file
+    // another agent owns this cycle.
+    await this.revokeGatewaySessions(user.user_id, 'rebind');
+    return {
+      user_id: updated.user_id,
+      username: updated.username || null,
+      phone: updated.phone
+    };
   }
 
   async usernameCheck(req) {
@@ -490,7 +911,7 @@ class ProfileMs extends HttpServiceBase {
     if (invalid) {
       return { available: false, reason: invalid === 'USERNAME_RESERVED' ? 'reserved' : 'invalid' };
     }
-    const owner = await this.profileDB.getByUsername(username);
+    const owner = await this.profileDB.getUsernameHolder(username);
     if (owner && owner.user_id !== req.pre.auth.user.user_id) {
       return { available: false, reason: 'taken' };
     }
@@ -517,13 +938,33 @@ class ProfileMs extends HttpServiceBase {
   }
 
   /**
+   * The three SMS budgets of AUTH_CONTRACT 10.1, shared by a login challenge
+   * and a rebind challenge (same gateway bill either way).
+   * @param {string} phone
+   * @param {string} remoteAddress
+   */
+  async otpRateLimits(phone, remoteAddress) {
+    const { otpRatePhoneHour, otpRatePhoneDay, otpRateIpHour } = this.options;
+    const phoneKey = sha256(phone).slice(0, 32);
+    await this.rateLimit(`otp:rate:phone:${phoneKey}:h`, otpRatePhoneHour, 3600, 'phone');
+    await this.rateLimit(`otp:rate:phone:${phoneKey}:d`, otpRatePhoneDay, 86400, 'phone');
+    await this.rateLimit(`otp:rate:ip:${remoteAddress}:h`, otpRateIpHour, 3600, 'ip');
+  }
+
+  /**
    * @param {string} key
    * @param {number} limit
    * @param {number} windowSec
    * @param {string} scope
+   * @param {number} units how much of the budget this request spends
    */
-  async rateLimit(key, limit, windowSec, scope) {
-    const count = await this.memCache.incr(key, windowSec);
+  async rateLimit(key, limit, windowSec, scope, units = 1) {
+    // ponytail: the cache counts by one, so a 100 hash lookup is 100 (pipelined)
+    // incrs. One INCRBY on libs/cache would do it, when that file is free to touch.
+    const counts = await Promise.all(
+      Array.from({ length: units }, () => this.memCache.incr(key, windowSec))
+    );
+    const count = Math.max(...counts);
     if (count > limit) {
       const code = key.startsWith('otp:') ? 'OTP_RATE_LIMITED' : 'RATE_LIMITED';
       throw new AuthError(429, code, 'Too many requests. Try again later.', {

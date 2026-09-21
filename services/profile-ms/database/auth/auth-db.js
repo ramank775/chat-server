@@ -159,6 +159,17 @@ class IAuthDB {
 
   /**
    * @abstract
+   * Revoke every live session of a user (AUTH_CONTRACT 8.2 step 3).
+   * @param {string} _userId
+   * @returns {Promise<void>}
+   */
+  // eslint-disable-next-line no-unused-vars
+  async revokeAllSessions(_userId) {
+    throw new Error('Method not implemented');
+  }
+
+  /**
+   * @abstract
    * Initialize the database instance
    */
   async init() {

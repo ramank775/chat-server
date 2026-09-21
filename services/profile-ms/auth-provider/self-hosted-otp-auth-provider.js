@@ -32,10 +32,12 @@ class SelfHostedOtpAuthProvider extends IAuthProvider {
     this.#sms = context.smsSender;
   }
 
-  async startOtp({ phone, deviceId }) {
+  async startOtp({ phone, deviceId, userId = null }) {
     const now = new Date();
     const active = await this.#db.getActiveOtpSession(phone, deviceId, now);
-    if (active) {
+    // a login challenge is never reused as a rebind challenge (or the other
+    // way round): the binding is what 9.3 step 1 checks
+    if (active && (active.userId || null) === userId) {
       // 3.1 idempotency: no second code, no second SMS, no second gateway bill
       return {
         sessionId: active.sessionId,
@@ -52,6 +54,7 @@ class SelfHostedOtpAuthProvider extends IAuthProvider {
       sessionId,
       phone,
       deviceId,
+      userId,
       codeHash: await hashSecret(code),
       attempts: 0,
       consumed: false,
@@ -110,7 +113,7 @@ class SelfHostedOtpAuthProvider extends IAuthProvider {
     if (!consumed) {
       throw new AuthError(410, 'SESSION_CONSUMED', 'This session was already verified');
     }
-    return { phone: session.phone, deviceId: session.deviceId };
+    return { phone: session.phone, deviceId: session.deviceId, userId: session.userId || null };
   }
 
   async issueSession(userId, deviceId) {
@@ -181,6 +184,10 @@ class SelfHostedOtpAuthProvider extends IAuthProvider {
 
   async revoke(accesskey) {
     await this.#db.revokeSessionByAccesskey(accesskey);
+  }
+
+  async revokeAll(userId) {
+    await this.#db.revokeAllSessions(userId);
   }
 
   async #liveOtpSession(sessionId, now, deviceId) {
