@@ -1,42 +1,84 @@
 name: "ci"
 
 on:
-  workflow_dispatch:
   push:
     branches:
+      - "v3.0"
       - "master"
-    tags:
-      - "v*"
+  pull_request:
+    branches:
+      - "v3.0"
+      - "master"
+  # ponytail: conformance needs the full compose stack (nats/kafka/minio/mongo/redis),
+  # too heavy to run on every push. Trigger it by hand from the Actions tab when needed.
+  workflow_dispatch:
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "npm"
+      - run: npm ci
+      - run: npm run lint
+
+  unit:
+    runs-on: ubuntu-latest
+    services:
+      mongo:
+        image: mongo:7.0
+        env:
+          MONGO_INITDB_ROOT_USERNAME: root
+          MONGO_INITDB_ROOT_PASSWORD: password
+        ports:
+          - 27017:27017
+      redis:
+        image: redis:7.2
+        ports:
+          - 6379:6379
+    env:
+      MONGO_URL: "mongodb://root:password@localhost:27017/?authSource=admin"
+      REDIS_ENDPOINT: "localhost:6379"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "npm"
+      - run: npm ci
+      - run: npm test
+
   docker:
     runs-on: ubuntu-latest
-    environment: ci
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-      - name: Docker meta
-        id: meta
-        uses: docker/metadata-action@v4
-        with:
-          images: ${{ vars.REGISTRY_IMAGE }}
-          tags: |
-            type=ref,event=branch
-            type=ref,event=tag
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v2
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
-      - name: Login to Docker Hub
-        uses: docker/login-action@v2
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Build and push
-        uses: docker/build-push-action@v4
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          push: false
+          tags: chat-server:ci
+
+  # Manual only: exercises the real request/response contract (auth, sessions,
+  # push topics, presigned media) against the whole docker-compose.infra.yml
+  # stack instead of mocks. Needs secrets/topic env vars the compose file reads
+  # (TOPIC_NEW_MESSAGE etc., S3_*, MONGO_USER/PASSWORD) so it isn't safe to run
+  # on every PR from a fork.
+  #
+  # To run it here, this job would need to:
+  #   1. `docker compose --env-file deployment/.env.tmpl -f deployment/docker-compose.infra.yml up -d`
+  #      (plus building/starting the chat-server service images themselves,
+  #      which the infra compose file expects to already exist)
+  #   2. wait for the stack to be healthy (nats-init/minio-init complete)
+  #   3. `CONFORMANCE_BASE_URL=http://localhost:<gateway-port> npm run test:conformance`
+  #   4. `docker compose -f deployment/docker-compose.infra.yml down -v`
+  conformance:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "See the comments above this job in ci.yml for the manual conformance run steps"
+          echo "(not implemented here - needs the full compose stack plus built service images)."
