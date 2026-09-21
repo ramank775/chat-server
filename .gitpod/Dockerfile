@@ -29,3 +29,9 @@ RUN curl -L https://github.com/nats-io/natscli/releases/download/v${NATS_CLI_VER
   unzip nats-cli.zip -d nats-cli && \
   sudo cp nats-cli/nats-${NATS_CLI_VERSION}-linux-amd64/nats /usr/bin && \
   rm -rf nats-cli.zip nats-cli
+
+RUN wget https://dl.min.io/server/minio/release/linux-amd64/minio && \
+  sudo mkdir -p /minio && \
+  sudo mv minio /minio/minio && \
+  sudo chmod +x /minio/minio
+
