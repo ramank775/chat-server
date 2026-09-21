@@ -38,8 +38,8 @@ class ChannelServiceClient {
       return cached.members;
     }
     const channel = await this.getChannelInfo(channelId);
-    // ponytail: channel-ms still stores members as `{username}`; v3 step 3.4
-    // renames that field to user_id, hence the fallback chain.
+    // channel-ms returns only the active roster (removed members are
+    // tombstoned, not listed). The fallback chain tolerates a v2 row.
     const members = new Set(
       (channel?.members || []).map((member) => member.user_id ?? member.username ?? member)
     );

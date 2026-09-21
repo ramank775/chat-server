@@ -1,9 +1,27 @@
 const { IChannelDB } = require('./channel-db');
 const { addMongodbOptions, initMongoClient } = require('../../../libs/mongo-utils');
-const { uuidv4, } = require('../../../helper');
+
+const PROJECTION = {
+  projection: {
+    _id: 0,
+    channelId: 1,
+    kind: 1,
+    name: 1,
+    avatarUrl: 1,
+    owner: 1,
+    initiatedVia: 1,
+    members: 1,
+    createdAt: 1
+  }
+};
+
+/** Reads only ever expose the live roster; tombstoned rows stay for `removedAt`. */
+function active(channel) {
+  if (channel) channel.members = channel.members.filter((member) => !member.removedAt);
+  return channel;
+}
 
 class MongoChannelDB extends IChannelDB {
-
   /** @type { import('mongodb').MongoClient } */
   #client;
 
@@ -11,171 +29,123 @@ class MongoChannelDB extends IChannelDB {
   #collection;
 
   /**
-   * Channel Database interface
-   * @param {*} context 
+   * ponytail: channel-ms and profile-ms are deployed against the same
+   * `--mongo-url` (deployment/docker-compose.yml), so the username-key gate
+   * reads profile-ms' `users` collection directly rather than adding an HTTP
+   * client + endpoint + option for one hash lookup. Split the databases and
+   * this becomes a call to profile-ms.
+   * @type { import('mongodb').Collection }
+   */
+  #users;
+
+  /**
+   * @param {*} context
    */
   constructor(context) {
     super(context);
     this.#client = initMongoClient(context);
   }
 
-  /**
-   * Get all the channels of a member
-   * @param {string} memberId
-   * @param {string|null} type
-   */
-  async getMemberChannels(memberId, type = null) {
-    const query = { 'members.username': memberId };
-    if (type) {
-      query.type = type.toLowerCase()
+  async getMemberChannels(memberId, kind = null) {
+    const query = { members: { $elemMatch: { user_id: memberId, removedAt: null } } };
+    if (kind) query.kind = kind;
+    const channels = await this.#collection.find(query, PROJECTION).toArray();
+    return channels.map(active);
+  }
+
+  async create(channel) {
+    try {
+      await this.#collection.insertOne({ ...channel });
+    } catch (error) {
+      if (error.code === 11000) {
+        const taken = new Error(`channel ${channel.channelId} already exists`);
+        taken.code = 'CHANNEL_EXISTS';
+        throw taken;
+      }
+      throw error;
     }
-    const channels = await this.#collection.find(
-      query,
+    return this.getChannelInfo(channel.channelId);
+  }
+
+  async getChannelInfo(channelId, memberId = null) {
+    const query = { channelId };
+    if (memberId) query.members = { $elemMatch: { user_id: memberId, removedAt: null } };
+    return active(await this.#collection.findOne(query, PROJECTION));
+  }
+
+  async findOneToOne(userIds) {
+    const channel = await this.#collection.findOne(
       {
-        projection: {
-          _id: 0,
-          channelId: 1,
-          name: 1,
-          type: 1,
-          members: 1,
-          profilePic: 1
-        }
-      }
-    )
-      .toArray();
-    return channels || []
-  }
-
-  /**
-   * Create new Channel
-   * @param {{name: string; type: string; members: {username: string, role: string; since: number;}[]; profilePic: string|null}} payload
-   * @returns {Promise<string>}
-   */
-  async create(payload) {
-    const channelDoc = {
-      channelId: uuidv4(),
-      type: payload.type.toLowerCase(),
-      name: payload.name,
-      members: payload.members,
-      profilePic: payload.profilePic,
-      addedOn: new Date()
-    }
-    await this.#collection.insertOne(channelDoc);
-    return channelDoc.channelId
-  }
-
-  /**
-   * Get Channel info
-   * @param {string} channelId 
-   * @param {string|null} memberId
-   */
-  async getChannelInfo(channelId, memberId) {
-    const query = {
-      channelId,
-    };
-    if (memberId) {
-      query['members.username']  = memberId;
-    }
-    const channel = await this.#collection.findOne(query, {
-      projection: {
-        channelId: 1,
-        name: 1,
-        type: 1,
-        members: 1,
-        profilePic: 1
-      }
-    })
-    return channel;
-  }
-
-  /**
-   * Add Members to existing channel
-   * @param {string} channelId
-   * @param {string} memberId
-   * @param {{username: string; role: string; since: number;}[]} members
-   */
-  async addMember(channelId, newMembers) {
-    await this.#collection.updateOne({
-      channelId,
-    }, {
-      $addToSet: { members: { $each: newMembers } }
-    })
-  }
-
-  /**
-   * Remove member from the channel
-   * @param {string} channelId 
-   * @param {string} memberId
-   * @param {string[]} exitMemberIds
-   */
-  async removeMember(channelId, exitMemberIds) {
-    await this.#collection.updateOne({
-      channelId,
-    }, {
-      $pull: {
-        members: {
-          username: {
-            $in: exitMemberIds
-          }
-        }
-      }
-    })
-  }
-
-  /**
-   * Update channel details
-   * @param {string} channelId
-   * @param {{name?: string, profilePic?: string}} updates
-   * @returns {Promise<object|null>}
-   */
-  async updateChannel(channelId, updates) {
-    const result = await this.#collection.findOneAndUpdate(
-      { channelId },
-      { $set: { ...updates, updatedOn: new Date() } },
-      { returnDocument: 'after', projection: { _id: 0, channelId: 1, name: 1, profilePic: 1 } }
+        kind: 'one_to_one',
+        // exactly this pair, both still active
+        $and: userIds.map((id) => ({ members: { $elemMatch: { user_id: id, removedAt: null } } }))
+      },
+      PROJECTION
     );
-    return result;
+    return active(channel);
   }
 
-  /**
-   * Update Member role
-   * @param {string} channelId
-   * @param {string} memberId
-   * @param {string} role
-   */
-  async updateMemberRole(channelId, role) {
-    await this.#collection.updateOne({
-      channelId,
-    }, {
-      $set: { 'members.$.role': role }
-    })
+  async addMembers(channelId, members) {
+    // pull-then-push so re-adding a removed member revives one row rather
+    // than leaving the tombstone next to a duplicate.
+    const ids = members.map((member) => member.user_id);
+    await this.#collection.updateOne(
+      { channelId },
+      { $pull: { members: { user_id: { $in: ids } } } }
+    );
+    await this.#collection.updateOne({ channelId }, { $push: { members: { $each: members } } });
   }
 
-  /**
-   * Initialize the database instance
-   */
+  async removeMember(channelId, userId, at) {
+    await this.#collection.updateOne(
+      { channelId, 'members.user_id': userId },
+      { $set: { 'members.$.removedAt': at } }
+    );
+  }
+
+  async updateChannel(channelId, updates) {
+    const channel = await this.#collection.findOneAndUpdate(
+      { channelId },
+      { $set: { ...updates, updatedAt: Date.now() } },
+      { returnDocument: 'after', ...PROJECTION }
+    );
+    return active(channel);
+  }
+
+  async deleteChannel(channelId) {
+    await this.#collection.deleteOne({ channelId });
+  }
+
+  async usernameKeyHash(userId) {
+    const user = await this.#users.findOne(
+      { user_id: userId, deletedAt: null },
+      { projection: { _id: 0, usernameKeyHash: 1 } }
+    );
+    return user ? user.usernameKeyHash || null : null;
+  }
+
   async init() {
     await this.#client.connect();
     const db = this.#client.db();
     this.#collection = db.collection('channels');
+    this.#users = db.collection('users');
+    // client-supplied ids: the unique index is what turns a collision into 409.
+    await this.#collection.createIndex({ channelId: 1 }, { unique: true });
+    await this.#collection.createIndex({ 'members.user_id': 1 });
   }
 
-  /**
-   * Dispose the database internal resources
-   */
   async dispose() {
     await this.#client.close();
   }
 }
 
 function addDatabaseOptions(cmd) {
-  cmd = addMongodbOptions(cmd)
+  cmd = addMongodbOptions(cmd);
   return cmd;
 }
-
 
 module.exports = {
   code: 'mongo',
   addOptions: addDatabaseOptions,
-  Implementation: MongoChannelDB,
-}
+  Implementation: MongoChannelDB
+};
