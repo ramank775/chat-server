@@ -1,5 +1,3 @@
-version: "3.9"
-
 networks:
   vartalap:
 
@@ -35,6 +33,8 @@ services:
 
   mongo:
     image: mongo:7.0
+    ports:
+      - "27017:27017"
     volumes:
       - mongo-data:/data/db
     environment:
@@ -45,6 +45,7 @@ services:
       - vartalap
 
   nginx:
+    image: nginx:stable
     ports:
       - "8081:80"
     networks:
@@ -55,6 +56,8 @@ services:
 
   redis:
     image: redis:7.2
+    ports:
+      - "6379:6379"
     logging:
       options:
         max-size: "50m"
@@ -62,6 +65,7 @@ services:
       - vartalap
 
   ws-gateway:
+    image: ramank775/chatserver:${CHAT_SERVER_TAG}
     networks:
       - vartalap
     logging:
@@ -85,6 +89,7 @@ services:
         condition: on-failure
 
   message:
+    image: ramank775/chatserver:${CHAT_SERVER_TAG}
     networks:
       - vartalap
     logging:
@@ -96,6 +101,7 @@ services:
         condition: on-failure
 
   message-storage:
+    image: ramank775/chatserver:${CHAT_SERVER_TAG}
     networks:
       - vartalap
     logging:
@@ -107,6 +113,7 @@ services:
         condition: on-failure
 
   channel:
+    image: ramank775/chatserver:${CHAT_SERVER_TAG}
     networks:
       - vartalap
     logging:
@@ -118,6 +125,7 @@ services:
         condition: on-failure
 
   profile:
+    image: ramank775/chatserver:${CHAT_SERVER_TAG}
     networks:
       - vartalap
     logging:
@@ -129,6 +137,7 @@ services:
         condition: on-failure
 
   notification:
+    image: ramank775/chatserver:${CHAT_SERVER_TAG}
     networks:
       - vartalap
     logging:
@@ -140,6 +149,7 @@ services:
         condition: on-failure
 
   media-metadata-ms:
+    image: ramank775/chatserver:${CHAT_SERVER_TAG}
     networks:
       - vartalap
     logging:

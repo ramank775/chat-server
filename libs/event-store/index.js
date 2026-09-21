@@ -2,10 +2,12 @@ const { IEventStore } = require('./iEventStore')
 const { IEventArg } = require('./iEventArg')
 const Kafka = require('./kafka');
 const Nats = require('./nats');
+const Memory = require('./memory');
 
 const EVENT_STORE = [
   Kafka,
   Nats,
+  Memory,
 ];
 
 /**
@@ -14,7 +16,7 @@ const EVENT_STORE = [
  * @returns {import('commander').Command}
  */
 function addOptions(cmd) {
-  cmd = cmd.option('--event-store <event-source>', 'Which event store to use (kafka, nats)', 'nats');
+  cmd = cmd.option('--event-store <event-source>', 'Which event store to use (kafka, nats, memory)', 'nats');
   EVENT_STORE.forEach((store) => {
     if (store.initOptions) {
       cmd = store.initOptions(cmd);

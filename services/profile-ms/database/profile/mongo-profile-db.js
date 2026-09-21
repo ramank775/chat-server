@@ -1,6 +1,7 @@
-const { IProfileDB } = require('./profile-db')
+const { IProfileDB } = require('./profile-db');
 const { addMongodbOptions, initMongoClient } = require('../../../../libs/mongo-utils');
 
+const PROJECTION = { projection: { _id: 0 } };
 
 class MongoProfileDB extends IProfileDB {
   /** @type { import('mongodb').MongoClient } */
@@ -15,95 +16,85 @@ class MongoProfileDB extends IProfileDB {
   }
 
   /**
-   * Verify if user exits by username
-   * @param {string} _username 
+   * Check if a user_id is already assigned (tombstoned users keep their row)
+   * @param {string} userId
    * @returns {Promise<boolean>}
    */
-  async isExits(username) {
-    const count = await this.#collection.countDocuments({ username });
+  async existsUserId(userId) {
+    const count = await this.#collection.countDocuments({ user_id: userId }, { limit: 1 });
     return count > 0;
   }
 
   /**
-   * Create new user profile
-   * @param {UserProfile} _profile 
-   * @returns {Promise<void>}
+   * Create a new user
+   * @param {import('./profile-db').User} user
+   * @returns {Promise<import('./profile-db').User>}
    */
-  async create(profile) {
-    this.#collection.insertOne(profile);
+  async createUser(user) {
+    await this.#collection.insertOne({ ...user });
+    return this.getByUserId(user.user_id);
+  }
+
+  async getByUserId(userId) {
+    return this.#collection.findOne({ user_id: userId, deletedAt: null }, PROJECTION);
+  }
+
+  async getByPhone(phone) {
+    return this.#collection.findOne({ phone, deletedAt: null }, PROJECTION);
+  }
+
+  async getByUsername(usernameLower) {
+    return this.#collection.findOne({ usernameLower, deletedAt: null }, PROJECTION);
   }
 
   /**
-   * Find active user by username
-   * @param {string} username 
-   * @param {{[key:string]: 0|1}} projection 
+   * Update an active user
+   * @param {string} userId
+   * @param {Partial<import('./profile-db').User>} updates
+   * @returns {Promise<import('./profile-db').User|null>}
    */
-  async findActiveUser(username, projection) {
-    const result = await this.#collection.findOne({
-      username,
-      isActive: true
-    }, { projection: { ...projection, _id: 0 } });
-    return result;
+  async updateUser(userId, updates) {
+    try {
+      return await this.#collection.findOneAndUpdate(
+        { user_id: userId, deletedAt: null },
+        { $set: { ...updates, updatedAt: new Date() } },
+        { returnDocument: 'after', ...PROJECTION }
+      );
+    } catch (error) {
+      if (error.code === 11000) {
+        const taken = new Error('username already taken');
+        taken.code = 'USERNAME_TAKEN';
+        throw taken;
+      }
+      throw error;
+    }
   }
 
-  /**
-   * Update user profile
-   * @param {string} username
-   * @param {Partial<import('./profile-db').UserProfile>} updates
-   * @returns {Promise<import('./profile-db').UserProfile|null>}
-   */
-  async updateProfile(username, updates) {
-    const result = await this.#collection.findOneAndUpdate(
-      { username, isActive: true },
-      { $set: { ...updates, updatedOn: new Date() } },
-      { returnDocument: 'after', projection: { _id: 0, username: 1, name: 1 } }
-    );
-    return result;
-  }
-
-  /**
-   * Sync contact book with username
-   * @param {string} username
-   * @param {string[]} contacts
-   */
-  async contactBookSyncByUsername(username, contacts) {
-    const availableUsers = await this.#collection
-      .find({ username: { $in: contacts }, isActive: true }, { projection: { _id: 0, username: 1 } })
-      .toArray();
-    const result = {};
-    availableUsers.forEach((u) => {
-      result[u.username] = true;
-    });
-    await this.#collection.updateOne(
-      { username },
-      { $set: { syncAt: new Date() } }
-    );
-    const response = availableUsers.reduce((acc, user) => {
-      acc[user.username] = true;
-      return acc;
-    }, {});
-    return response
-  }
-
-  /**
-   * Initialize the database instance
-   */
   async init() {
     await this.#client.connect();
-    const db = this.#client.db();
-    this.#collection = db.collection('profile');
+    this.#collection = this.#client.db().collection('users');
+    // user_id stays unique across tombstones: a deleted id is never reassigned
+    await this.#collection.createIndex({ user_id: 1 }, { unique: true });
+    // a deleted account releases its phone, so the phone is only unique among live users
+    await this.#collection.createIndex(
+      { phone: 1 },
+      { unique: true, partialFilterExpression: { deletedAt: { $type: 'null' } } }
+    );
+    await this.#collection.createIndex({ phoneHash: 1 });
+    // partial index so the many `null` usernames do not collide with each other
+    await this.#collection.createIndex(
+      { usernameLower: 1 },
+      { unique: true, partialFilterExpression: { usernameLower: { $type: 'string' } } }
+    );
   }
 
-  /**
-   * Dispose the database internal resources
-   */
   async dispose() {
     await this.#client.close();
   }
 }
 
 function addOptions(cmd) {
-  cmd = addMongodbOptions(cmd)
+  cmd = addMongodbOptions(cmd);
   return cmd;
 }
 
@@ -111,4 +102,4 @@ module.exports = {
   code: 'mongo',
   addOptions,
   Implementation: MongoProfileDB
-}
+};

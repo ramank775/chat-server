@@ -1,80 +1,122 @@
-const { IAuthDB } = require('./auth-db')
+const { IAuthDB } = require('./auth-db');
 const { addMongodbOptions, initMongoClient } = require('../../../../libs/mongo-utils');
 
- class MongoAuthDB extends IAuthDB {
+const OTP_SESSION_TTL_SEC = 600;
+const PROJECTION = { projection: { _id: 0 } };
 
+class MongoAuthDB extends IAuthDB {
   /** @type { import('mongodb').MongoClient } */
   #client;
 
   /** @type { import('mongodb').Collection } */
-  #collection;
+  #otpSessions;
+
+  /** @type { import('mongodb').Collection } */
+  #sessions;
 
   /**
    * Auth Database interface
-   * @param {*} context 
+   * @param {*} context
    */
   constructor(context) {
     super(context);
     this.#client = initMongoClient(context);
   }
 
-  /**
-   * Verify if accesskey is exits for the username
-   * @param {string} username 
-   * @param {string} accesskey
-   * @returns {Promise<boolean>}
-   */
-  async isExits(username, accesskey) {
-    const count = await this.#collection.countDocuments({ username, accesskey });
-    return count > 0;
+  async createOtpSession(session) {
+    await this.#otpSessions.insertOne({ ...session });
   }
 
-  /**
-   * Create new accesskey for the username
-   * @param {string} username
-   * @param {string} accesskey
-   * @returns {Promise<void>}
-   */
-  async create(username, accesskey) {
-    await this.#collection.insertOne({
-      username,
-      accesskey,
-      addedOn: new Date(),
-      updatedOn: new Date()
-    })
+  async getOtpSession(sessionId) {
+    return this.#otpSessions.findOne({ sessionId }, PROJECTION);
   }
 
-  /**
-   * Revoke the accesskey for username
-   * @param {string} username 
-   * @param {string} accesskey
-   */
-  async revoke(username, accesskey) {
-    await this.#collection.deleteOne({
-      username,
-      accesskey
-    })
+  async getActiveOtpSession(phone, deviceId, now) {
+    return this.#otpSessions.findOne(
+      { phone, deviceId, consumed: false, resendAfter: { $gt: now }, expiresAt: { $gt: now } },
+      PROJECTION
+    );
   }
 
-  /**
-   * Initialize the database instance
-   */
+  async updateOtpSession(sessionId, updates) {
+    return this.#otpSessions.findOneAndUpdate(
+      { sessionId },
+      { $set: updates },
+      { returnDocument: 'after', ...PROJECTION }
+    );
+  }
+
+  async incrementOtpAttempts(sessionId) {
+    return this.#otpSessions.findOneAndUpdate(
+      { sessionId },
+      { $inc: { attempts: 1 } },
+      { returnDocument: 'after', ...PROJECTION }
+    );
+  }
+
+  async consumeOtpSession(sessionId) {
+    return this.#otpSessions.findOneAndUpdate(
+      { sessionId, consumed: false },
+      { $set: { consumed: true } },
+      { returnDocument: 'after', ...PROJECTION }
+    );
+  }
+
+  async upsertSession(session) {
+    const { user_id: userId, deviceId } = session;
+    await this.#sessions.replaceOne({ user_id: userId, deviceId }, { ...session }, { upsert: true });
+  }
+
+  async getLiveSessionByAccesskey(accesskey, now) {
+    return this.#sessions.findOne(
+      { accesskey, revokedAt: null, expiresAt: { $gt: now } },
+      PROJECTION
+    );
+  }
+
+  async rotateSession(refreshTokenHash, deviceId, next, now) {
+    return this.#sessions.findOneAndUpdate(
+      {
+        refreshTokenHash,
+        deviceId,
+        revokedAt: null,
+        refreshTokenExpiresAt: { $gt: now }
+      },
+      { $set: next },
+      { returnDocument: 'after', ...PROJECTION }
+    );
+  }
+
+  async revokeSessionByAccesskey(accesskey) {
+    await this.#sessions.updateOne(
+      { accesskey, revokedAt: null },
+      { $set: { revokedAt: new Date() } }
+    );
+  }
+
   async init() {
     await this.#client.connect();
     const db = this.#client.db();
-    this.#collection = db.collection('session_auth');
+    this.#otpSessions = db.collection('otp_sessions');
+    this.#sessions = db.collection('sessions');
+    await this.#otpSessions.createIndex({ sessionId: 1 }, { unique: true });
+    await this.#otpSessions.createIndex({ phone: 1, deviceId: 1 });
+    await this.#otpSessions.createIndex(
+      { createdAt: 1 },
+      { expireAfterSeconds: OTP_SESSION_TTL_SEC }
+    );
+    await this.#sessions.createIndex({ user_id: 1, deviceId: 1 }, { unique: true });
+    await this.#sessions.createIndex({ accesskey: 1 });
+    await this.#sessions.createIndex({ refreshTokenHash: 1 });
   }
 
-  /**
-   * Dispose the database internal resources
-   */
   async dispose() {
     await this.#client.close();
   }
 }
 
 function addDatabaseOptions(cmd) {
-  cmd = addMongodbOptions(cmd)
+  cmd = addMongodbOptions(cmd);
   return cmd;
 }
 
@@ -82,4 +124,5 @@ module.exports = {
   code: 'mongo',
   addOptions: addDatabaseOptions,
   Implementation: MongoAuthDB,
-}
+  OTP_SESSION_TTL_SEC
+};
