@@ -21,12 +21,7 @@ services:
   message:
     image: ramank775/chatserver:${CHAT_SERVER_TAG}
     entrypoint: node
-    command: /app/services/message-ms/message-ms.js --host=0.0.0.0 --port=4003 --app-name=message-ms --gateway-name=message-ms-1 --new-message-topic=${TOPIC_NEW_MESSAGE} --offline-message-topic=${TOPIC_OFFLINE_MESSAGE} --event-store=${EVENT_STORE} --kafka-client-id=${MESSAGE_ROUTER_CLIENT_ID:-message-ms-1} --kafka-broker-list=${BROKER_LIST} --kafka-security-protocol=${KAFKA_SECURITY_PROTOCOL} --kafka-sasl-username=${KAFKA_SASL_USERNAME} --kafka-sasl-password=${KAFKA_SASL_PASSWORD} --nats-server-list=${NATS_SERVER_LIST} --nats-auth-type=${NATS_AUTH} --nats-auth-user=${NATS_USER} --nats-auth-pass=${NATS_PASS} --nats-auth-token=${NATS_AUTH_TOKEN} --nats-auth-nkey=${NATS_NKEY} --nats-auth-jwt=${NATS_USER_JWT} --message-db=mongo --mongo-url=${MONGO_URL} --mongo-user=${MONGO_USER} --mongo-password=${MONGO_PASSWORD} --mongo-auth 
-
-  message-storage:
-    image: ramank775/chatserver:${CHAT_SERVER_TAG}
-    entrypoint: node
-    command: /app/services/message-ms/message-storage-worker.js --app-name=message-storage-worker --new-message-topic=${TOPIC_NEW_MESSAGE} --client-ack-topic=${TOPIC_CLIENT_ACK_MESSAGE} --event-store=${EVENT_STORE} --kafka-client-id=${MESSAGE_STORAGE_CLIENT_ID:-message-storage-worker-1} --kafka-consumer-group=${CONSUMER_GROUP_MESSAGE_STORAGE} --kafka-broker-list=${BROKER_LIST} --kafka-security-protocol=${KAFKA_SECURITY_PROTOCOL} --kafka-sasl-username=${KAFKA_SASL_USERNAME} --kafka-sasl-password=${KAFKA_SASL_PASSWORD} --nats-server-list=${NATS_SERVER_LIST} --nats-auth-type=${NATS_AUTH} --nats-auth-user=${NATS_USER} --nats-auth-pass=${NATS_PASS} --nats-auth-token=${NATS_AUTH_TOKEN} --nats-auth-nkey=${NATS_NKEY} --nats-auth-jwt=${NATS_USER_JWT} --nats-consumer-group=${CONSUMER_GROUP_MESSAGE_STORAGE} --message-db=mongo --mongo-url=${MONGO_URL} --mongo-user=${MONGO_USER} --mongo-password=${MONGO_PASSWORD} --mongo-auth 
+    command: /app/services/message-ms/message-ms.js --host=0.0.0.0 --port=4003 --app-name=message-ms --cache-type=redis --redis-endpoint=${REDIS_ENDPOINT}
 
   channel:
     image: ramank775/chatserver:${CHAT_SERVER_TAG}

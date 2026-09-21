@@ -6,8 +6,9 @@ const {
   resolveEnvVariables
 } = require('../../libs/service-base');
 const ChannelServiceClient = require('../../libs/channel-service-client');
-const { MessageEvent, CHANNEL_TYPE } = require('../../libs/event-args');
-const DeliveryManager = require('../../libs/delivery-manager')
+const DeliveryManager = require('../../libs/delivery-manager');
+const { UndeliveredQueue } = require('../../libs/delivery-manager/undelivered-queue');
+const { EnvelopeEvent } = require('../../libs/v3-envelope');
 
 const asMain = require.main === module;
 
@@ -29,16 +30,23 @@ async function prepareEventList(context) {
   return context;
 }
 
+/** Shares the delivery manager's redis client — no second connection. */
+async function initUndeliveredQueue(context) {
+  context.undeliveredQueue = new UndeliveredQueue({ redis: context.deliveryManager.redis });
+  return context;
+}
+
 async function initResources(options) {
   let context = await initDefaultResources(options)
     .then(ChannelServiceClient.init)
     .then(DeliveryManager.init)
+    .then(initUndeliveredQueue)
     .then(prepareEventList);
 
   context = await eventStore.initializeEventStore({
     producer: true,
     consumer: true,
-    decodeMessageCb: () => MessageEvent
+    decodeMessageCb: () => EnvelopeEvent
   })(context);
   return context;
 }
@@ -80,58 +88,63 @@ class MessageDeliveryWorker extends ServiceBase {
 
     /** @type { import('../../libs/delivery-manager').DeliveryManager } */
     this.deliveryManager = this.context.deliveryManager;
+
+    /** @type { import('../../libs/delivery-manager/undelivered-queue').UndeliveredQueue } */
+    this.undeliveredQueue = this.context.undeliveredQueue;
   }
 
   init() {
     this.eventStore.on = async (event, message, key) => {
-      this.onMessage(message, key);
+      await this.onMessage(message, key);
     };
+    // The v3 fanout bus carries stamped envelopes, not v2 `Message`s.
+    this.deliveryManager.eventArg = EnvelopeEvent;
     this.deliveryManager.offlineMessageHandler = this.handleOfflineMessage.bind(this);
   }
 
   /**
-   * @param {import('../../libs/event-args').MessageEvent} message 
+   * SYNC_PROTOCOL.md §10.3 step 1 — resolve the recipient set and fan out.
+   * Server-authored events (REST-write bridge, §10.2) arrive with their
+   * recipients already spelled out; those are taken as given.
+   * @param {EnvelopeEvent} event
    */
-  async onMessage(message) {
-    if (!message.hasRecipients()) {
-      let channel = await this.channelClient.getChannelInfo(message.destination)
-      if (!channel) {
-        this.log.info(`No channel found against ${message.destination}`)
-        if (message.channel === CHANNEL_TYPE.INDIVIDUAL) {
-          this.log.info(`Channel is of type individual, using destination as recipient`);
-          channel = {
-            members: [{
-              username: message.destination
-            }]
-          };
-        } else {
-          return;
-        }
+  async onMessage(event) {
+    if (!event.hasRecipients()) {
+      const members = await this.channelClient.members(event.channelId);
+      // §10.3 step 4 — the sender gets no fanout for its own op. Cross-device
+      // fanout is v3.1, so the whole sending user is excluded.
+      const recipients = [...members].filter((userId) => userId !== event.senderUserId);
+      if (!recipients.length) {
+        this.log.info(`No fanout recipients for channel ${event.channelId}`);
+        return;
       }
-      const recipients = channel.members.map((member) => member.username)
-      message.setRecipients(recipients);
+      event.setRecipients(recipients);
     }
-    await this.deliveryManager.dispatch(message);
+    await this.deliveryManager.dispatch(event);
   }
 
   /**
-   * Handle offline message delivery
-   * @param {import('../../libs/event-args').MessageEvent}  message 
+   * SYNC_PROTOCOL.md §10.3 step 3 — every recipient delivery-manager could
+   * not reach gets the push frame queued, then an offline-message event so
+   * notification-ms fires the ntfy wake (§12.1; it owns the debounce).
+   * @param {EnvelopeEvent} event
    */
-  async handleOfflineMessage(message) {
-    if (message.ephemeral) {
-      return
-    }
-    await this.eventStore.emit(
-      this.events[EVENT_TYPE.OFFLINE_EVENT],
-      message,
-      message.destination
-    );
+  async handleOfflineMessage(event) {
+    // Ephemeral envelopes (typing, presence) are worthless once missed.
+    if (event.ephemeral) return;
+    const frame = event.toPushFrame();
+    await Promise.all(event.recipients.map(async (userId) => {
+      await this.undeliveredQueue.enqueue(userId, frame);
+      await this.eventStore.emit(this.events[EVENT_TYPE.OFFLINE_EVENT], event, userId);
+      this.statsClient.increment({
+        stat: 'message.undelivered.count',
+        tags: { user: userId }
+      });
+    }));
   }
 
   async shutdown() {
     await this.eventStore.dispose();
-    await this.db.close();
   }
 }
 

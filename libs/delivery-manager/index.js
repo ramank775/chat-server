@@ -57,6 +57,11 @@ class DeliveryManager {
     if (options.eventArg) this.eventArg = options.eventArg;
   }
 
+  /** The connected client, so the undelivered queue can share it. */
+  get redis() {
+    return this._redis;
+  }
+
   async startConsumer(redis = null) {
     this._subscriber = redis  || new Redis(this._redis.options);
     this._subscriber.on('pmessageBuffer', async (pattern, key, value) => {

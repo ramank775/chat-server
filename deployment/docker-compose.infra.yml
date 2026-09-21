@@ -140,18 +140,6 @@ services:
       restart_policy:
         condition: on-failure
 
-  message-storage:
-    image: ramank775/chatserver:${CHAT_SERVER_TAG}
-    networks:
-      - vartalap
-    logging:
-      options:
-        max-size: "100m"
-    deploy:
-      replicas: 1
-      restart_policy:
-        condition: on-failure
-
   channel:
     image: ramank775/chatserver:${CHAT_SERVER_TAG}
     networks:

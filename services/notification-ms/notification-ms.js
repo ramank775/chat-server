@@ -9,7 +9,7 @@ const eventStore = require('../../libs/event-store');
 const { addDatabaseOptions, initializeDatabase } = require('./database');
 const { addPNSOptions, initializePNS } = require('./pns');
 const { isAllowedTopicUrl } = require('./pns/ntfy-pn-service');
-const { MessageEvent, MESSAGE_TYPE } = require('../../libs/event-args');
+const { EnvelopeEvent } = require('../../libs/v3-envelope');
 const { extractInfoFromRequest, schemas } = require('../../helper');
 
 const asMain = require.main === module;
@@ -39,7 +39,7 @@ async function initResources(options) {
     .then(initializePNS);
   context = await eventStore.initializeEventStore({
     consumer: true,
-    decodeMessageCb: () => MessageEvent
+    decodeMessageCb: () => EnvelopeEvent
   })(context);
   return context;
 }
@@ -138,12 +138,11 @@ class NotificationMS extends HttpServiceBase {
 
   /**
    * Wake every device of an offline recipient
-   * @param {import('../../libs/event-args').MessageEvent} message
+   * @param {import('../../libs/v3-envelope').EnvelopeEvent} message
    * @param {string} user recipient user_id
    */
   async pushNotification(message, user) {
-    if (message.type === MESSAGE_TYPE.NOTIFICATION) return;
-    if (!user) return;
+    if (!user || (message && message.ephemeral)) return;
 
     const now = Date.now();
     const lastWakeAt = this.#lastWakeAt.get(user);

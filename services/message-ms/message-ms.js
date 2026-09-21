@@ -1,188 +1,73 @@
-const Joi = require('joi');
 const {
   initDefaultOptions,
   initDefaultResources,
   resolveEnvVariables
 } = require('../../libs/service-base');
 const { addHttpOptions, initHttpResource, HttpServiceBase } = require('../../libs/http-service-base');
-const EventStore = require('../../libs/event-store');
-const { extractInfoFromRequest, schemas, base64ToProtoBuffer } = require('../../helper');
-const { MessageEvent, MESSAGE_TYPE } = require('../../libs/event-args');
-const Database = require('./database');
+const UndeliveredQueue = require('../../libs/delivery-manager/undelivered-queue');
+const { extractInfoFromRequest, schemas } = require('../../helper');
 
 const asMain = require.main === module;
 
-const EVENT_TYPE = {
-  CONNECTION_EVENT: 'connection-state',
-  NEW_MESSAGE_EVENT: 'new-message',
-  CLIENT_ACK: 'client-ack',
-}
-
-async function prepareListEvent(context) {
-  const { options } = context;
-  const eventName = {
-    [EVENT_TYPE.CONNECTION_EVENT]: options.userConnectionStateTopic,
-    [EVENT_TYPE.NEW_MESSAGE_EVENT]: options.newMessageTopic,
-    [EVENT_TYPE.CLIENT_ACK]: options.clientAckTopic,
-  };
-  context.events = eventName;
-  return context;
-}
-
 async function initResources(options) {
   const context = await initDefaultResources(options)
-    .then(prepareListEvent)
     .then(initHttpResource)
-    .then(EventStore.initializeEventStore({ producer: true }));
-
+    .then(UndeliveredQueue.init);
   return context;
 }
 
 function parseOptions(argv) {
   let cmd = initDefaultOptions();
   cmd = addHttpOptions(cmd);
-  cmd = EventStore.addEventStoreOptions(cmd);
-  cmd = Database.addDatabaseOptions(cmd);
-  cmd
-    .option(
-      '--gateway-name <app-name>',
-      'Used as gateway server idenitifer for the user connected to this server.'
-    )
-    .option(
-      '--new-message-topic <new-message-topic>',
-      'Used by producer to produce new message for each new incoming message'
-    )
-    .option(
-      '--client-ack-topic <client-ack-topic>',
-      'Used by producer to produce for ack message received by client.'
-    );
+  cmd = UndeliveredQueue.addOptions(cmd);
   return cmd.parse(argv).opts();
 }
 
-class RestGateway extends HttpServiceBase {
+/**
+ * The REST half of the sync wire (SYNC_PROTOCOL.md §10.6). v3 makes the
+ * server a relay, so all this serves is the undelivered-queue drain —
+ * message history lives on the client.
+ */
+class MessageMs extends HttpServiceBase {
   constructor(context) {
     super(context);
-    /** @type {import('../../libs/event-store/iEventStore').IEventStore} */
-    this.eventStore = this.context.eventStore;
-    this.events = this.context.events;
-    /** @type {import('./database/message-db').IMessageDB} */
-    this.db = this.context.db;
+    /** @type {import('../../libs/delivery-manager/undelivered-queue').UndeliveredQueue} */
+    this.undeliveredQueue = this.context.undeliveredQueue;
   }
 
   async init() {
     await super.init();
+    // nginx strips `/v3.0` and the `/sync` prefix before proxying here.
     this.addRoute(
-      '/',
+      '/pending',
       'get',
-      this.getMessage.bind(this),
+      this.pendingSync.bind(this),
       {
         validate: {
           headers: schemas.authHeaders,
-        }
-      }
-    );
-    this.addRoute(
-      '/',
-      'post',
-      this.newMessage.bind(this),
-      {
-        validate: {
-          headers: schemas.authHeaders,
-          payload: Joi.array().items(
-            Joi.any()
-          ).min(1).required()
         }
       }
     );
   }
 
-  async publishEvent(event, eventArgs, key) {
-    await this.eventStore.emit(this.events[event], eventArgs, key);
-  };
-
-  async newMessage(req, res) {
-    const user = extractInfoFromRequest(req, 'user');
-    const { format, ack } = req.query;
-    const messages = req.payload;
-    if (!messages.length) return res.response({}).code(200);
-
+  /**
+   * `GET /v3.0/sync/pending` — hand back every queued push frame for the
+   * caller and clear the queue in the same request (at-most-once by design).
+   */
+  async pendingSync(req, res) {
+    const user = extractInfoFromRequest(req, 'x-user');
+    const frames = await this.undeliveredQueue.drain(user);
     this.statsClient.increment({
-      stat: 'message.received.count',
-      value: messages.length,
-      tags: {
-        channel: 'rest',
-        gateway: this.options.gatewayName,
-        user,
-      }
+      stat: 'sync.pending.frame_count',
+      value: frames.length,
+      tags: { user }
     });
-
-    const msgFormat = format || typeof messages[0];
-    const promises = messages.map(async (msg) => {
-      let event;
-      const options = {
-        source: user
-      }
-      switch (msgFormat) {
-        case 'binary':
-          {
-            const bmsg = base64ToProtoBuffer(msg);
-            event = MessageEvent.fromBinary(bmsg, options);
-          }
-          break;
-        case 'string':
-          event = MessageEvent.fromString(msg, options);
-          break;
-        default:
-          event = MessageEvent.fromObject(msg, options)
-          break;
-      }
-      event.set_server_id();
-      event.set_server_timestamp();
-      const type = event.type === MESSAGE_TYPE.CLIENT_ACK ? EVENT_TYPE.CLIENT_ACK : EVENT_TYPE.NEW_MESSAGE_EVENT;
-      await this.publishEvent(type, event, event.destination);
-      if (ack) {
-        return event.buildServerAckMessage()
-      }
-    })
-    const acks = await Promise.all(promises);
-    const options = {
-      ignore: ['recipients'],
-    };
-    const response = ack ? {
-      acks: acks.map((m) => {
-        switch(msgFormat) {
-          case 'binary':
-            return m.toBinary(options).toString('base64');
-          case 'string':
-            return m.toString(options);
-          default:
-            return m.toObject(options)
-        }
-      })
-    } : {}
-    return res.response(response).code(201);
+    return res.response({ frames: frames.map((frame) => frame.toString('base64')) }).code(200);
   }
 
-  async getMessage(req, res) {
-    const user = extractInfoFromRequest(req, 'user');
-    if (!user) {
-      return res.response().code(403);
-    }
-    const { format } = req.query;
-    const isbinary = format === 'binary';
-    const chats = [];
-    const messages = await this.db.getUndeliveredMessage(chats, user);
-    const options = {
-      ignore: ['recipients'],
-    };
-    const finalMessages = messages.map((message) => {
-      if (isbinary) return message.toBinary(options);
-      return message.toObject(options)
-    })
-    const response = {
-      messages: finalMessages,
-    };
-    return res.response(response).code(200)
+  async shutdown() {
+    await super.shutdown();
+    await this.undeliveredQueue.dispose();
   }
 }
 
@@ -191,17 +76,17 @@ if (asMain) {
   const options = parseOptions(argv);
   initResources(options)
     .then(async (context) => {
-      await new RestGateway(context).run();
+      await new MessageMs(context).run();
     })
     .catch(async (error) => {
       // eslint-disable-next-line no-console
-      console.error('Failed to initialized Rest Gatway', error);
+      console.error('Failed to initialized Message MS', error);
       process.exit(1);
     });
 }
 
 module.exports = {
-  RestGateway,
+  MessageMs,
   parseOptions,
   initResources
 }
