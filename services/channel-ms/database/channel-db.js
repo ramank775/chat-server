@@ -1,100 +1,130 @@
-/* eslint-disable class-methods-use-this */
+/* eslint-disable class-methods-use-this, no-unused-vars */
+
+/**
+ * @typedef {object} Member
+ * @property {string} user_id 9 lowercase hex chars
+ * @property {'owner'|'admin'|'member'} role
+ * @property {number} joinedAt ms since epoch
+ * @property {number|null} removedAt ms since epoch, null while the member is active
+ */
+
+/**
+ * @typedef {object} Channel
+ * @property {string} channelId client-generated UUIDv7 (SYNC_PROTOCOL 11.3)
+ * @property {'one_to_one'|'group'} kind
+ * @property {string|null} name
+ * @property {string|null} avatarUrl
+ * @property {string} owner creator's user_id
+ * @property {'phone'|'username'|null} initiatedVia one_to_one only (AUTH_CONTRACT 2.5)
+ * @property {Member[]} members active members only on every read
+ * @property {number} createdAt
+ */
 
 /**
  * @abstract
  * Interface for Channel Database
  */
- class IChannelDB {
-
+class IChannelDB {
   /**
-   * Channel Database interface
-   * @param {*} context 
+   * @param {*} context
    */
-  // eslint-disable-next-line no-unused-vars
   constructor(context) {
     if (this.constructor === IChannelDB) {
       throw new Error("Abstract classes can't be instantiated.");
     }
   }
 
-   /**
-    * @abstract
-   * Get all the channels of a member
+  /**
+   * @abstract
+   * Every channel `memberId` is currently a member of
    * @param {string} memberId
-   * @param {string|null} type
-   * @returns {Promise<[]>}
+   * @param {string|null} kind
+   * @returns {Promise<Channel[]>}
    */
-  // eslint-disable-next-line no-unused-vars
-    async getMemberChannels(memberId, type = null) {
-      throw new Error('Method not implemented')
-    }
-  
-  /**
-   * @abstract
-   * Create new Channel
-   * @param {{name: string; type: string; members: {username: string, role: string}[]; profilePic: string|null}} payload
-   * @returns {Promise<string>}
-   */
-  // eslint-disable-next-line no-unused-vars
-  async create(payload) {
-    throw new Error('Method not implemented')
-  }
-
-  /**
-   * Get Channel info
-   * @param {string} channelId 
-   * @param {string|null} memberId
-   * @returns {Promise<{name: string; type: string; members: {username: string, role: string}[]; profilePic: string|null}>}
-   */
-  // eslint-disable-next-line no-unused-vars
-  async getChannelInfo(channelId, memberId) {
-    throw new Error('Method not implemented')
+  async getMemberChannels(memberId, kind = null) {
+    throw new Error('Method not implemented');
   }
 
   /**
    * @abstract
-   * Add Member to existing channel
+   * Insert a channel at its client-supplied id.
+   * @param {Channel} channel
+   * @throws an error with `code === 'CHANNEL_EXISTS'` when the id is taken
+   * @returns {Promise<Channel>}
+   */
+  async create(channel) {
+    throw new Error('Method not implemented');
+  }
+
+  /**
+   * @abstract
    * @param {string} channelId
-   * @param {{username: string; role: string}} newMembers
+   * @param {string|null} memberId when set, only matches if they are an active member
+   * @returns {Promise<Channel|null>}
    */
-  // eslint-disable-next-line no-unused-vars
-  async addMember(channelId, newMembers) {
-    throw new Error('Method not implemented')
+  async getChannelInfo(channelId, memberId = null) {
+    throw new Error('Method not implemented');
   }
-
-  /**
-   * Remove member from the channel
-   * @param {string} channelId 
-   * @param {string[]} exitMemberIds
-   */
-  // eslint-disable-next-line no-unused-vars
-  async removeMember(channelId, exitMemberIds) {
-    throw new Error('Method not implemented')
-  }
-
 
   /**
    * @abstract
-   * Update channel details
-   * @param {string} channelId
-   * @param {{name?: string, profilePic?: string}} updates
-   * @returns {Promise<object|null>}
+   * The existing one_to_one channel between exactly these two users, if any.
+   * @param {[string, string]} userIds
+   * @returns {Promise<Channel|null>}
    */
-  // eslint-disable-next-line no-unused-vars
+  async findOneToOne(userIds) {
+    throw new Error('Method not implemented');
+  }
+
+  /**
+   * @abstract
+   * Add members, reviving any row a previous removal tombstoned.
+   * @param {string} channelId
+   * @param {Member[]} members
+   */
+  async addMembers(channelId, members) {
+    throw new Error('Method not implemented');
+  }
+
+  /**
+   * @abstract
+   * Tombstone a member (keeps the row so `removedAt` survives).
+   * @param {string} channelId
+   * @param {string} userId
+   * @param {number} at
+   */
+  async removeMember(channelId, userId, at) {
+    throw new Error('Method not implemented');
+  }
+
+  /**
+   * @abstract
+   * @param {string} channelId
+   * @param {{name?: string, avatarUrl?: string}} updates
+   * @returns {Promise<Channel|null>}
+   */
   async updateChannel(channelId, updates) {
     throw new Error('Method not implemented');
   }
 
   /**
    * @abstract
-   * Update Member role
+   * Hard delete, owner only (DECISIONS row 9 — no ownership transfer in 3.0).
    * @param {string} channelId
-   * @param {string} role
    */
-  // eslint-disable-next-line no-unused-vars
-   async updateMemberRole(channelId, role) {
-     throw new Error('Not implemented Exception')
-   }
+  async deleteChannel(channelId) {
+    throw new Error('Method not implemented');
+  }
+
+  /**
+   * @abstract
+   * The target's `usernameKeyHash`, for the AUTH_CONTRACT 2.5 key gate.
+   * @param {string} userId
+   * @returns {Promise<string|null>} null when the user has no key (or no row)
+   */
+  async usernameKeyHash(userId) {
+    throw new Error('Method not implemented');
+  }
 
   /**
    * @abstract
@@ -115,4 +145,4 @@
 
 module.exports = {
   IChannelDB
-}
+};
