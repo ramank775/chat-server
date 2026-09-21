@@ -120,3 +120,4 @@ dist
 
 kafka
 *.local.*
+.claude/
