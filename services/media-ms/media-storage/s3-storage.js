@@ -36,10 +36,11 @@ class S3Storage extends IMediaStorage {
    */
   async getSignedUrl(payload) {
     const key = `${this.#options.baseDir}/${payload.category}/${payload.fileId}`
+    // No Expires here, it is the S3 object expiry header (a Date) and the aws
+    // sdk v3 rejects a number; the url lifetime is expiresIn below.
     const params = {
       Bucket: this.#options.bucketName,
-      Key: key,
-      Expires: this.#options.expireTime
+      Key: key
     };
     let command
     // Sign content-type and content-length so an upload url cannot be replayed
