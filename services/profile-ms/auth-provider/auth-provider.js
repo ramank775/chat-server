@@ -37,8 +37,10 @@ class IAuthProvider {
   }
 
   /**
-   * Start an OTP challenge, sending the code over SMS
-   * @param {{phone: string, deviceId: string}} _args
+   * Start an OTP challenge, sending the code over SMS. `userId` binds the
+   * challenge to an authenticated account (the phone rebind of
+   * AUTH_CONTRACT 9.2); a plain login leaves it out.
+   * @param {{phone: string, deviceId: string, userId?: string}} _args
    * @returns {Promise<OtpChallenge>}
    */
   // eslint-disable-next-line no-unused-vars
@@ -59,7 +61,7 @@ class IAuthProvider {
   /**
    * Verify an OTP code. One shot: a verified session can never be verified again.
    * @param {{sessionId: string, code: string, deviceId: string}} _args
-   * @returns {Promise<{phone: string, deviceId: string}>}
+   * @returns {Promise<{phone: string, deviceId: string, userId: string|null}>}
    * @throws {AuthError}
    */
   // eslint-disable-next-line no-unused-vars
@@ -108,6 +110,16 @@ class IAuthProvider {
    */
   // eslint-disable-next-line no-unused-vars
   async revoke(_accesskey) {
+    throw new Error('Method not implemented');
+  }
+
+  /**
+   * Revoke every session of a user (account delete, AUTH_CONTRACT 8.2).
+   * @param {string} _userId
+   * @returns {Promise<void>}
+   */
+  // eslint-disable-next-line no-unused-vars
+  async revokeAll(_userId) {
     throw new Error('Method not implemented');
   }
 

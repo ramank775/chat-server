@@ -47,6 +47,16 @@ class MongoProfileDB extends IProfileDB {
     return this.#collection.findOne({ usernameLower, deletedAt: null }, PROJECTION);
   }
 
+  async getUsernameHolder(usernameLower) {
+    return this.#collection.findOne({ usernameLower }, PROJECTION);
+  }
+
+  async getByPhoneHashes(phoneHashes) {
+    return this.#collection
+      .find({ phoneHash: { $in: phoneHashes }, deletedAt: null }, PROJECTION)
+      .toArray();
+  }
+
   /**
    * Update an active user
    * @param {string} userId
@@ -62,8 +72,10 @@ class MongoProfileDB extends IProfileDB {
       );
     } catch (error) {
       if (error.code === 11000) {
-        const taken = new Error('username already taken');
-        taken.code = 'USERNAME_TAKEN';
+        // which unique index rejected us: `phone` on a rebind, `usernameLower` on a rename
+        const field = Object.keys(error.keyPattern || {})[0];
+        const taken = new Error(`${field} already taken`);
+        taken.code = field === 'phone' ? 'PHONE_TAKEN' : 'USERNAME_TAKEN';
         throw taken;
       }
       throw error;

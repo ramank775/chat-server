@@ -35,6 +35,10 @@ async function startProfileMs(dbName) {
     `--redis-endpoint=${REDIS_ENDPOINT}`,
     '--event-store=memory',
     '--new-login-topic=new-login',
+    '--new-message-topic=new-message',
+    // no service is listening: `stubChannels` / `revokes` replace both clients
+    '--channel-ms-endpoint=http://channel-ms.invalid',
+    '--gateway-endpoint=http://gateway.invalid',
     // every injected request shares one remote address, so the per IP OTP budget
     // would be a cross test file limit. Per phone budgets stay at their defaults.
     '--otp-rate-ip-hour=100000'
@@ -53,10 +57,33 @@ async function startProfileMs(dbName) {
   // service writes. Pattern scoped, never a flushdb: a dev stack may share redis.
   const redis = context.memCache._redis;
   if (redis) {
-    const keys = await redis.keys('otp:rate:*');
-    keys.push(...(await redis.keys('profile:rate:*')));
+    const found = await Promise.all(
+      ['otp:rate:*', 'profile:rate:*', 'lookup:rate:*', 'uname:rate:*'].map((prefix) =>
+        redis.keys(prefix)
+      )
+    );
+    const keys = found.flat();
     if (keys.length) await redis.del(keys);
   }
+
+  // Nothing answers the channel-ms / gateway endpoints in a test, so the two
+  // http clients are replaced here: `channels` is what channel-ms would list
+  // for whoever asks, `revokes` records the gateway's internal revoke calls.
+  let channels = [];
+  const revokes = [];
+  service.channelClient.get = async (_path, request) => {
+    const kind = request.params.type;
+    const me = request.headers['x-user'];
+    return channels.filter(
+      (channel) =>
+        (channel.type || 'group') === kind &&
+        channel.members.some((member) => (member.user_id ?? member.username) === me)
+    );
+  };
+  service.gatewayClient.post = async (_path, payload) => {
+    revokes.push(payload);
+    return { status: true };
+  };
 
   return {
     server: service,
@@ -64,6 +91,14 @@ async function startProfileMs(dbName) {
     /** @type {import('../../services/profile-ms/auth-provider/sms-sender/mock-sms-sender')} */
     sms: context.smsSender,
     eventStore: context.eventStore,
+    revokes,
+    /**
+     * Stand in for channel-ms's channel list.
+     * @param {{channelId: string, type?: string, members: {user_id: string}[]}[]} rows
+     */
+    stubChannels(rows) {
+      channels = rows;
+    },
     /**
      * @param {import('@hapi/hapi').ServerInjectOptions} request
      * @returns {Promise<import('@hapi/hapi').ServerInjectResponse>}
