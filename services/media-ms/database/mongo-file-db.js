@@ -2,6 +2,9 @@ const { ObjectId } = require('mongodb');
 const { IMediaMetadataDB } = require('./media-metadata-db');
 const { addMongodbOptions, initMongoClient } = require('../../../libs/mongo-utils');
 
+/** A fileId is the hex of an ObjectId; anything else is simply an unknown file. */
+const FILE_ID = /^[0-9a-fA-F]{24}$/;
+
 
 class MongoFileStore extends IMediaMetadataDB {
 
@@ -41,6 +44,7 @@ class MongoFileStore extends IMediaMetadataDB {
    * @param {string} fileId 
    */
   async getRecord(fileId) {
+    if (!FILE_ID.test(fileId)) return null;
     const file = await this.#collection.findOne({
       _id: ObjectId.createFromHexString(fileId)
     })
@@ -51,6 +55,7 @@ class MongoFileStore extends IMediaMetadataDB {
    * Update File status
    */
   async updateFileStatus(fileId, status) {
+    if (!FILE_ID.test(fileId)) return;
     await this.#collection.updateOne(
       { _id: ObjectId.createFromHexString(fileId) },
       { $set: { status: !!status } }

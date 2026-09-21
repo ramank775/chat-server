@@ -110,16 +110,18 @@ class MessageDeliveryWorker extends ServiceBase {
    */
   async onMessage(event) {
     if (!event.hasRecipients()) {
-      const members = await this.channelClient.members(event.channelId);
-      // §10.3 step 4 — the sender gets no fanout for its own op. Cross-device
-      // fanout is v3.1, so the whole sending user is excluded.
-      const recipients = [...members].filter((userId) => userId !== event.senderUserId);
-      if (!recipients.length) {
-        this.log.info(`No fanout recipients for channel ${event.channelId}`);
-        return;
-      }
-      event.setRecipients(recipients);
+      event.setRecipients([...(await this.channelClient.members(event.channelId))]);
     }
+    // §10.3 step 4 — the sender gets no fanout for its own op, whether the
+    // recipient set came from channel-ms or was spelled out by the publisher
+    // (§10.2 lists the actor). Cross-device fanout is v3.1, so the whole
+    // sending user is excluded.
+    const recipients = event.recipients.filter((userId) => userId !== event.senderUserId);
+    if (!recipients.length) {
+      this.log.info(`No fanout recipients for channel ${event.channelId}`);
+      return;
+    }
+    event.setRecipients(recipients);
     await this.deliveryManager.dispatch(event);
   }
 

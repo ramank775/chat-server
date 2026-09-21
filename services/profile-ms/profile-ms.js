@@ -65,6 +65,11 @@ function parseOptions(argv) {
     '--new-message-topic <new-message-topic>',
     'Topic the REST-write fanout envelopes are published to (SYNC_PROTOCOL 10.2)'
   );
+  cmd.option(
+    '--expose-dev-otp',
+    'DEV ONLY: serve GET /auth/dev/otp?phone= with the last code the mock sms sender produced',
+    false
+  );
   cmd.option('--channel-ms-endpoint <channel-ms-endpoint>', 'Base url for channel service');
   cmd.option('--gateway-endpoint <gateway-endpoint>', 'Base url for connection gateway');
   cmd.option('--otp-rate-phone-hour <count>', 'OTP sends per phone per hour', (c) => Number(c), 5);
@@ -134,6 +139,21 @@ function extractAccesskey(req) {
     if (entry) return entry.slice('accesskey.'.length) || null;
   }
   return null;
+}
+
+/**
+ * The caller's address for the AUTH_CONTRACT 10.1 per-IP budgets. Every request
+ * arrives from nginx, so `remoteAddress` is the proxy and the budget would be
+ * global; the last `x-forwarded-for` hop is the peer nginx actually saw.
+ * @param {import('@hapi/hapi').Request} req
+ */
+function clientIp(req) {
+  const forwarded = req.headers['x-forwarded-for'];
+  if (forwarded) {
+    const hops = forwarded.split(',').map((hop) => hop.trim()).filter(Boolean);
+    if (hops.length) return hops[hops.length - 1];
+  }
+  return req.info.remoteAddress;
 }
 
 /**
@@ -276,6 +296,23 @@ class ProfileMs extends HttpServiceBase {
       this.guard(this.sessionRevoke),
       { validate: { payload: Joi.object({ refreshToken: Joi.string() }).default({}) } }
     );
+
+    // ponytail: the OTP code is only ever stored as a scrypt hash, so a local
+    // end to end run has no way back to it. This reads the mock sender's
+    // in-memory log and nothing else. Never on without --expose-dev-otp.
+    if (this.options.exposeDevOtp && this.context.smsSender.lastCode) {
+      this.addRoute(
+        '/auth/dev/otp',
+        'GET',
+        (req, res) => {
+          const code = this.context.smsSender.lastCode(req.query.phone);
+          if (!code) return res.response(errorEnvelope('NOT_FOUND', 'no code for phone')).code(404);
+          return { code };
+        },
+        { validate: { query: Joi.object({ phone: Joi.string().required() }) } }
+      );
+      this.log.warn('--expose-dev-otp is on: GET /auth/dev/otp leaks OTP codes');
+    }
 
     this.addRoute('/users/me', 'GET', this.guard(this.getMe), { pre: [this.authPre(false)] });
 
@@ -436,7 +473,7 @@ class ProfileMs extends HttpServiceBase {
         .response(errorEnvelope('INVALID_PHONE_FORMAT', 'phone must be in E.164 format'))
         .code(400);
     }
-    await this.otpRateLimits(phone, req.info.remoteAddress);
+    await this.otpRateLimits(phone, clientIp(req));
 
     const challenge = await this.sendOtp(() => this.authProvider.startOtp({ phone, deviceId }), res);
     if (challenge.isBoom || !challenge.sessionId) return challenge;
@@ -494,7 +531,12 @@ class ProfileMs extends HttpServiceBase {
     if (!accesskey) {
       throw new AuthError(401, 'MISSING_ACCESSKEY', 'Authorization bearer accesskey is required');
     }
+    // 4.6 side effect 4: this device's socket goes with the credentials
+    const session = await this.authProvider.verifyAccessKey(accesskey).catch(() => null);
     await this.authProvider.revoke(accesskey);
+    if (session) {
+      await this.revokeGatewaySessions(session.user_id, 'revoked', session.deviceId);
+    }
     return { status: true };
   }
 
@@ -711,10 +753,15 @@ class ProfileMs extends HttpServiceBase {
    * effort: the credentials are already gone from the database either way.
    * @param {string} userId
    * @param {'expired'|'revoked'|'rebind'} reason
+   * @param {string} [deviceId] limit the close to one device
    */
-  async revokeGatewaySessions(userId, reason) {
+  async revokeGatewaySessions(userId, reason, deviceId = undefined) {
     try {
-      await this.gatewayClient.post('/_internal/sessions/revoke', { user_id: userId, reason });
+      await this.gatewayClient.post('/_internal/sessions/revoke', {
+        user_id: userId,
+        reason,
+        ...(deviceId ? { deviceId } : {})
+      });
     } catch (error) {
       this.log.error(`Gateway session revoke (${reason}) failed for ${userId}: ${error.message}`);
     }
@@ -746,7 +793,7 @@ class ProfileMs extends HttpServiceBase {
       'user'
     );
     await this.rateLimit(
-      `uname:rate:ip:${req.info.remoteAddress}:d`,
+      `uname:rate:ip:${clientIp(req)}:d`,
       this.options.usernameLookupIpDay,
       86400,
       'ip'
@@ -785,7 +832,7 @@ class ProfileMs extends HttpServiceBase {
       phoneHashes.length
     );
     await this.rateLimit(
-      `lookup:rate:ip:${req.info.remoteAddress}:d`,
+      `lookup:rate:ip:${clientIp(req)}:d`,
       this.options.contactLookupIpDay,
       86400,
       'ip',
@@ -845,7 +892,7 @@ class ProfileMs extends HttpServiceBase {
         .response(errorEnvelope('PHONE_TAKEN', 'newPhone is bound to another account'))
         .code(409);
     }
-    await this.otpRateLimits(newPhone, req.info.remoteAddress);
+    await this.otpRateLimits(newPhone, clientIp(req));
     const challenge = await this.sendOtp(
       () =>
         this.authProvider.startOtp({
