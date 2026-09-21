@@ -35,10 +35,20 @@ jobs:
           MONGO_INITDB_ROOT_PASSWORD: password
         ports:
           - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ ping: 1 }).ok' || exit 1"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
       redis:
         image: redis:7.2
         ports:
           - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     env:
       MONGO_URL: "mongodb://root:password@localhost:27017/?authSource=admin"
       REDIS_ENDPOINT: "localhost:6379"
@@ -49,6 +59,13 @@ jobs:
           node-version: 22
           cache: "npm"
       - run: npm ci
+      - name: Wait for Mongo auth to accept connections
+        run: |
+          for i in $(seq 1 30); do
+            node -e "const {MongoClient}=require('mongodb');new MongoClient(process.env.MONGO_URL,{serverSelectionTimeoutMS:2000}).connect().then(c=>c.close()).then(()=>process.exit(0)).catch(()=>process.exit(1))" && exit 0
+            sleep 2
+          done
+          echo "Mongo never became reachable" && exit 1
       - run: npm test
 
   docker:
