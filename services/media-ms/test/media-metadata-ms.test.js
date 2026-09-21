@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { MediaMetadataMS } = require('../media-metadata-ms');
 const s3 = require('../media-storage/s3-storage');
+const { getContentTypeByExt } = require('../../../libs/content-type-utils');
 
 const OWNER = 'a1b2c3d4e';
 const OTHER = 'f00ba4321';
@@ -72,7 +73,7 @@ test('upload presign returns a url scoped to the caller and the declared size', 
 
   const res = await service.hapiServer.inject({
     method: 'GET',
-    url: '/upload/presigned_url?ext=.png&category=avatar&size=2048',
+    url: '/upload/presigned_url?ext=jpg&category=avatar&size=2048',
     headers: authHeaders(OWNER)
   });
 
@@ -82,7 +83,7 @@ test('upload presign returns a url scoped to the caller and the declared size', 
     fileId: FILE_ID
   });
   assert.strictEqual(db.created[0].owner, OWNER);
-  assert.strictEqual(storage.signed[0].contentType, 'image/png');
+  assert.strictEqual(storage.signed[0].contentType, 'image/jpeg');
   assert.strictEqual(storage.signed[0].contentLength, 2048);
 });
 
@@ -118,7 +119,9 @@ test('download presign returns a url for the caller own asset', async () => {
   assert.strictEqual(JSON.parse(res.payload).url, `https://s3.test/download/${FILE_ID}`);
 });
 
-test('download presign refuses another user fileId', async () => {
+test('download presign works for any authenticated holder of the fileId', async () => {
+  // The unguessable fileId is the capability, it only reaches users entitled
+  // to the message or profile carrying it.
   const storage = stubStorage();
   const service = await buildService(
     stubDb({ owner: OWNER, category: 'avatar', contentType: 'image/jpeg' }),
@@ -131,8 +134,50 @@ test('download presign refuses another user fileId', async () => {
     headers: authHeaders(OTHER)
   });
 
+  assert.strictEqual(res.statusCode, 200);
+  assert.strictEqual(JSON.parse(res.payload).url, `https://s3.test/download/${FILE_ID}`);
+});
+
+test('download presign 404s an unknown fileId', async () => {
+  const storage = stubStorage();
+  const service = await buildService(stubDb(null), storage);
+
+  const res = await service.hapiServer.inject({
+    method: 'GET',
+    url: `/download/${FILE_ID}/presigned_url`,
+    headers: authHeaders(OWNER)
+  });
+
   assert.strictEqual(res.statusCode, 404);
   assert.deepStrictEqual(storage.signed, []);
+});
+
+test('file status update stays scoped to the owner', async () => {
+  const service = await buildService(
+    stubDb({ owner: OWNER, category: 'avatar', contentType: 'image/jpeg' }),
+    stubStorage()
+  );
+
+  const res = await service.hapiServer.inject({
+    method: 'PUT',
+    url: `/${FILE_ID}/status`,
+    headers: authHeaders(OTHER),
+    payload: { status: true }
+  });
+
+  assert.strictEqual(res.statusCode, 404);
+});
+
+test('content type lookup resolves every extension a record names', async () => {
+  // ".jpeg, .jpg" is one mapping record naming two extensions, and callers
+  // pass the extension with or without the leading dot.
+  assert.strictEqual(getContentTypeByExt('jpg'), 'image/jpeg');
+  assert.strictEqual(getContentTypeByExt('.jpg'), 'image/jpeg');
+  assert.strictEqual(getContentTypeByExt('.jpeg'), 'image/jpeg');
+  assert.strictEqual(getContentTypeByExt('PNG'), 'image/png');
+  // a record dedicated to one extension beats an earlier multi extension one
+  assert.strictEqual(getContentTypeByExt('xml'), 'application/xml');
+  assert.strictEqual(getContentTypeByExt('nosuchext'), 'application/octet-stream');
 });
 
 test('s3 upload url is bucket scoped and signs content type and length', async () => {

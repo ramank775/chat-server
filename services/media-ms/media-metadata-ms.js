@@ -109,12 +109,16 @@ class MediaMetadataMS extends HttpServiceBase {
     return h.response().code(200);
   }
 
+  /**
+   * The unguessable fileId is the capability: it only ever reaches a user
+   * through a message or profile they are entitled to. So any authenticated
+   * caller holding one may download it. Upload and status stay owner scoped.
+   */
   async getDownloadURL(req, h) {
     const { fileId } = req.params;
-    const user = extractInfoFromRequest(req, 'x-user');
 
     const file = await this.db.getRecord(fileId);
-    if (file == null || file.owner !== user) {
+    if (file == null) {
       return h.response({ error: 'file not found' }).code(404);
     }
     const payload = {
