@@ -31,8 +31,10 @@ async function startProfileMs(dbName) {
     '--auth-db=mongo',
     '--auth-provider=self-hosted-otp',
     '--sms-sender=mock',
-    '--cache-type=redis',
-    `--redis-endpoint=${REDIS_ENDPOINT}`,
+    // ponytail: in-process cache so parallel test files never share (or
+    // flush) each other's rate counters; the Redis paths are exercised by
+    // the conformance suite against the live stack.
+    '--cache-type=local',
     '--event-store=memory',
     '--new-login-topic=new-login',
     '--new-message-topic=new-message',
