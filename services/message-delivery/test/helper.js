@@ -9,6 +9,8 @@ const OFFLINE_TOPIC = 'offline-message';
 class FakeRedis {
   _kv = new Map();
 
+  _sets = new Map();
+
   published = [];
 
   async mget(keys) { return keys.map((key) => this._kv.get(key) ?? null); }
@@ -18,6 +20,16 @@ class FakeRedis {
   async set(key, value) { this._kv.set(key, String(value)); }
 
   async del(key) { this._kv.delete(key); }
+
+  async sadd(key, value) {
+    if (!this._sets.has(key)) this._sets.set(key, new Set());
+    this._sets.get(key).add(value);
+  }
+
+  async smembers(key) { return [...(this._sets.get(key) || [])]; }
+
+  /* eslint-disable-next-line class-methods-use-this, no-empty-function */
+  async expire() { }
 
   async publish(channel, payload) { this.published.push({ channel, payload }); }
 }
@@ -30,6 +42,7 @@ function envelopeEvent({
   opId = 'op-1',
   channelId = 'channel-1',
   senderUserId = '00000000a',
+  senderDevice = 'device-1',
   deliverySequence = 1,
   ephemeral = false,
   payload = Buffer.from('chat'),
@@ -46,7 +59,8 @@ function envelopeEvent({
       serverTimestampMs: 1700000000000,
       deliverySequence
     },
-    recipients
+    recipients,
+    senderDevice
   );
 }
 
@@ -74,15 +88,22 @@ function startWorker({ members = new Map(), maxFrames } = {}) {
   };
   const worker = new MessageDeliveryWorker(context);
   worker.init();
+  const manager = context.deliveryManager;
   return {
     worker,
     redis,
     emitted,
     queue: context.undeliveredQueue,
-    /** Park `userId` on a live gateway so delivery-manager routes to it. */
-    async online(userId, gateway = 'gateway-1') {
-      await redis.set(userId, gateway);
+    /** Park a device on a live gateway so delivery-manager routes to it. */
+    async online(userId, deviceId = 'device-1', gateway = 'gateway-1') {
+      await manager.userJoin(userId, deviceId);
+      await redis.set(`route:${userId}:${deviceId}`, gateway);
       await redis.set(`gateway:${gateway}:health`, 1);
+    },
+    /** A device the registry knows but whose socket is closed. */
+    async offline(userId, deviceId = 'device-1') {
+      await manager.userJoin(userId, deviceId);
+      await manager.userLeft(userId, deviceId);
     },
     wakeEvents() { return emitted.filter((e) => e.topic === OFFLINE_TOPIC); }
   };

@@ -298,10 +298,11 @@ test('over the rate limit the ack is transient rate_limited with a retry hint', 
   });
 });
 
-test('a fanout envelope is pushed to every socket of an online user', async () => {
+test('a fanout envelope is pushed to the recipient device, not to the user', async () => {
   await withGateway(async ({ uri, gateway }) => {
-    const bob = connect(uri, BOB);
-    await bob.opened;
+    const bob = connect(uri, BOB, 'device-1');
+    const bobLaptop = connect(uri, BOB, 'device-2');
+    await Promise.all([bob.opened, bobLaptop.opened]);
 
     const stamped = {
       opId: mintOpId(ALICE),
@@ -312,15 +313,21 @@ test('a fanout envelope is pushed to every socket of an online user', async () =
       serverTimestampMs: Date.now(),
       deliverySequence: 7
     };
-    const offline = gateway.messageHandler(EnvelopeEvent.of(stamped, [BOB, 'c0ffee123']));
+    // delivery keys per `(user_id, device_id)`: only device-1 is addressed
+    const offline = gateway.messageHandler(
+      EnvelopeEvent.of(stamped, [`${BOB}:device-1`, 'c0ffee123:device-1'])
+    );
 
     const frame = await bob.next();
     assert.strictEqual(frame.type, WS_TYPE.WS_PUSH);
     assert.strictEqual(frame.push.senderUserId, ALICE);
     assert.strictEqual(frame.push.deliverySequence, 7);
-    // Everyone we could not reach comes back for the undelivered queue.
-    assert.deepStrictEqual(offline, ['c0ffee123']);
+    // Every subject we could not reach comes back for the undelivered queue.
+    assert.deepStrictEqual(offline, ['c0ffee123:device-1']);
+    // bob's other device was not a recipient, so it saw nothing
+    await assert.rejects(() => bobLaptop.next(300));
     bob.close();
+    bobLaptop.close();
   });
 });
 
@@ -430,7 +437,9 @@ test('a second socket for the same device replaces the first with close 1000', a
       serverTimestampMs: Date.now(),
       deliverySequence: 1
     };
-    assert.deepStrictEqual(gateway.messageHandler(EnvelopeEvent.of(stamped, [ALICE])), []);
+    assert.deepStrictEqual(
+      gateway.messageHandler(EnvelopeEvent.of(stamped, [`${ALICE}:device-1`])), []
+    );
     assert.strictEqual((await second.next()).type, WS_TYPE.WS_PUSH);
     second.close();
   });

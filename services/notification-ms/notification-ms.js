@@ -64,7 +64,7 @@ function parseOptions(argv) {
 
 class NotificationMS extends HttpServiceBase {
   /**
-   * ponytail: in process debounce, one entry per recently woken user_id.
+   * ponytail: in process debounce, one entry per recently woken subject.
    * Ceiling: each replica debounces on its own, so N replicas can send N wakes
    * per window. Kafka/nats key partitioning keeps a user on one replica in
    * practice. Upgrade path: libs/cache (redis) if that stops holding.
@@ -162,15 +162,18 @@ class NotificationMS extends HttpServiceBase {
   }
 
   /**
-   * Wake every device of an offline recipient
+   * Wake the one offline device a queued frame is waiting for. The key is the
+   * `user_id:device_id` subject message-delivery queued under, so the wake,
+   * the queue and the topic share one key (TRIM_4_12_CONTRACT §7).
    * @param {import('../../libs/v3-envelope').EnvelopeEvent} message
-   * @param {string} user recipient user_id
+   * @param {string} subject recipient `user_id:device_id`
    */
-  async pushNotification(message, user) {
-    if (!user || (message && message.ephemeral)) return;
+  async pushNotification(message, subject) {
+    if (!subject || (message && message.ephemeral)) return;
+    const [user, device] = subject.split(':');
 
     const now = Date.now();
-    const lastWakeAt = this.#lastWakeAt.get(user);
+    const lastWakeAt = this.#lastWakeAt.get(subject);
     if (lastWakeAt && now - lastWakeAt < WAKE_DEBOUNCE_MS) {
       this.statsClient.increment({
         stat: 'notificaton.delivery.debounced_count',
@@ -183,10 +186,11 @@ class NotificationMS extends HttpServiceBase {
         if (now - at >= WAKE_DEBOUNCE_MS) this.#lastWakeAt.delete(key);
       });
     }
-    this.#lastWakeAt.set(user, now);
+    this.#lastWakeAt.set(subject, now);
 
-    const topics = await this.notifDB.getTopics(user);
-    if (!topics || !topics.length) return;
+    const topics = (await this.notifDB.getTopics(user))
+      .filter((topic) => topic.deviceId === device);
+    if (!topics.length) return;
 
     await Promise.all(topics.map((topic) => this.pns.push(topic.topicUrl)
       .then(() => {

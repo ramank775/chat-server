@@ -5,6 +5,8 @@ const ntfy = require('../pns/ntfy-pn-service');
 
 const NTFY_BASE_URL = 'https://ntfy.vartalap.test';
 const USER = 'a1b2c3d4e';
+/** Wakes are keyed per `(user_id, device_id)` — TRIM_4_12_CONTRACT §7. */
+const SUBJECT = `${USER}:device-1`;
 const TOPIC_URL = `${NTFY_BASE_URL}/u/abcdefgh12345678`;
 
 // ponytail: hand rolled stubs, the repo has no test framework and these are
@@ -74,7 +76,7 @@ test('ntfy wake posts to the registered topic without message content', async ()
   const axiosStub = stubAxios();
   const service = await buildService(db, axiosStub);
 
-  await service.pushNotification({ type: 'text', text: 'a secret message' }, USER);
+  await service.pushNotification({ type: 'text', text: 'a secret message' }, SUBJECT);
 
   assert.strictEqual(axiosStub.posts.length, 1);
   const [post] = axiosStub.posts;
@@ -84,17 +86,17 @@ test('ntfy wake posts to the registered topic without message content', async ()
   assert.ok(!JSON.stringify(post).includes('a secret message'));
 });
 
-test('ntfy wake is debounced per user_id', async () => {
+test('ntfy wake is debounced per (user_id, device_id)', async () => {
   const db = stubDb();
   db.topics = [{ deviceId: 'device-1', topicUrl: TOPIC_URL }];
   const axiosStub = stubAxios();
   const service = await buildService(db, axiosStub);
 
-  await service.pushNotification({ type: 'text' }, USER);
-  await service.pushNotification({ type: 'text' }, USER);
+  await service.pushNotification({ type: 'text' }, SUBJECT);
+  await service.pushNotification({ type: 'text' }, SUBJECT);
   assert.strictEqual(axiosStub.posts.length, 1, 'second wake within 5s is dropped');
 
-  await service.pushNotification({ type: 'text' }, 'f00ba4321');
+  await service.pushNotification({ type: 'text' }, 'f00ba4321:device-1');
   assert.strictEqual(axiosStub.posts.length, 2, 'another recipient is not debounced');
 });
 
@@ -104,7 +106,7 @@ test('ntfy never publishes to a topic outside the configured base url', async ()
   const axiosStub = stubAxios();
   const service = await buildService(db, axiosStub);
 
-  await service.pushNotification({ type: 'text' }, USER);
+  await service.pushNotification({ type: 'text' }, SUBJECT);
 
   assert.strictEqual(axiosStub.posts.length, 0);
 });

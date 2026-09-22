@@ -101,6 +101,10 @@ function parseOptions(argv) {
   return cmd.parse(argv).opts();
 }
 
+/**
+ * TRIM_4_12_CONTRACT §7 — the session subject. The same string delivery uses
+ * as a recipient, so a push frame lands on exactly one socket.
+ */
 function sessionKey(userId, deviceId) {
   return `${userId}:${deviceId}`;
 }
@@ -125,9 +129,9 @@ class Gateway extends HttpServiceBase {
       await eventStore.emit(topic, eventArgs, key);
     };
 
-    /** (user_id:deviceId) -> socket. v3.0 is one active socket per pair. */
+    /** subject (user_id:deviceId) -> socket. One active socket per subject. */
     this.sessions = new Map();
-    /** user_id -> Set<socket>, so a push reaches every device of a user. */
+    /** user_id -> Set<socket>: presence and revocation are per user, not per device. */
     this.userSessions = new Map();
 
     this.memCache = context.memCache;
@@ -219,7 +223,7 @@ class Gateway extends HttpServiceBase {
       value: '+1',
       tags: { service: 'gateway', gateway: this.options.gatewayName, user: userId }
     });
-    await this.deliveryManager.userJoin(userId);
+    await this.deliveryManager.userJoin(userId, deviceId);
     await this.publishEvent(
       EVENT_TYPE.CONNECTION_STATE,
       ConnectionStateEvent.connect(userId, this.options.gatewayName),
@@ -228,15 +232,16 @@ class Gateway extends HttpServiceBase {
   }
 
   async onDisconnect(ws) {
-    const { userId } = ws;
+    const { userId, deviceId } = ws;
     if (!this._unregister(ws)) return;
     this.statsClient.gauge({
       stat: 'user.connected.count',
       value: -1,
       tags: { service: 'gateway', gateway: this.options.gatewayName, user: userId }
     });
+    // the route is per device; the connection-state event is per user
+    await this.deliveryManager.userLeft(userId, deviceId);
     if (this.userSessions.has(userId)) return; // another device is still online
-    await this.deliveryManager.userLeft(userId);
     await this.publishEvent(
       EVENT_TYPE.CONNECTION_STATE,
       ConnectionStateEvent.disconnect(userId, this.options.gatewayName),
@@ -390,7 +395,7 @@ class Gateway extends HttpServiceBase {
         ...envelope,
         senderUserId: userId,
         serverTimestampMs: Date.now()
-      }, recipients);
+      }, recipients, ws.deviceId);
       return null;
     }
 
@@ -407,7 +412,7 @@ class Gateway extends HttpServiceBase {
         senderUserId: userId,
         serverTimestampMs,
         deliverySequence
-      }, recipients);
+      }, recipients, ws.deviceId);
     } catch (e) {
       this.log.error('Failed to publish envelope', { err: e, user: userId, opId });
       // Give the seq slot back so the client's retry of the same op is not
@@ -434,11 +439,12 @@ class Gateway extends HttpServiceBase {
    * @param {string[]} recipients spelled out for a DM (no channel row to
    *   read); empty for a group, which message-delivery resolves from
    *   channel-ms.
+   * @param {string} senderDevice the one device fanout skips (§8)
    */
-  async publishEnvelope(envelope, recipients = []) {
+  async publishEnvelope(envelope, recipients = [], senderDevice = '') {
     await this.publishEvent(
       EVENT_TYPE.NEW_MESSAGE_EVENT,
-      EnvelopeEvent.of(envelope, recipients),
+      EnvelopeEvent.of(envelope, recipients, senderDevice),
       envelope.channelId
     );
   }
@@ -477,43 +483,39 @@ class Gateway extends HttpServiceBase {
 
   /**
    * Called by delivery-manager with a server-stamped fanout envelope.
-   * Returns the recipients we could not reach so delivery-manager routes
-   * them on (and ultimately to message-delivery's undelivered queue).
+   * Returns the subjects we could not reach so delivery-manager routes them
+   * on (and ultimately to message-delivery's undelivered queue).
    * Synchronous by contract — delivery-manager does not await this.
    * @param {EnvelopeEvent} event
    */
   messageHandler(event) {
     const frame = event.toPushFrame();
-    return event.recipients.filter((userId) => !this.pushToUser(userId, frame, event));
+    return event.recipients.filter((subject) => !this.pushToSubject(subject, frame, event));
   }
 
   /**
-   * §10.3 step 2 — deliver a WS_PUSH frame to every open socket of a user.
-   * False means "offline": nothing was reachable.
-   * @param {string} userId
+   * §10.3 step 2 — deliver a WS_PUSH frame to one `user_id:device_id`
+   * subject. False means "offline": that device was not reachable here.
+   * @param {string} subject
    * @param {Buffer} frame serialized WsEnvelope{type: WS_PUSH}
    */
-  pushToUser(userId, frame, event) {
-    const sockets = this.userSessions.get(userId);
-    if (!sockets || !sockets.size) {
+  pushToSubject(subject, frame, event) {
+    const user = subject.split(':')[0];
+    if (!this.send(this.sessions.get(subject), frame)) {
       this.statsClient.increment({
         stat: 'message.delivery.error_count',
-        tags: { channel: 'websocket', gateway: this.options.gatewayName, user: userId, code: 404 }
+        tags: { channel: 'websocket', gateway: this.options.gatewayName, user, code: 404 }
       });
       return false;
     }
-    let delivered = false;
-    sockets.forEach((ws) => {
-      if (this.send(ws, frame)) delivered = true;
-    });
-    if (delivered && event) {
+    if (event) {
       this.statsClient.timing({
         stat: 'message.delivery.latency',
         value: Date.now() - (event.envelope.serverTimestampMs || Date.now()),
-        tags: { gateway: this.options.gatewayName, channel: 'websocket', user: userId }
+        tags: { gateway: this.options.gatewayName, channel: 'websocket', user }
       });
     }
-    return delivered;
+    return true;
   }
 
   send(ws, frame) {

@@ -104,19 +104,26 @@ class MessageDeliveryWorker extends ServiceBase {
 
   /**
    * SYNC_PROTOCOL.md §10.3 step 1 — resolve the recipient set and fan out.
-   * Server-authored events (REST-write bridge, §10.2) arrive with their
-   * recipients already spelled out; those are taken as given.
+   * Members come from channel-ms unless the publisher spelled them out: a
+   * server-authored event (REST-write bridge, §10.2) or a DM, whose members
+   * are derived from the channel id and have no row (trim 4).
    * @param {EnvelopeEvent} event
    */
   async onMessage(event) {
-    if (!event.hasRecipients()) {
-      event.setRecipients([...(await this.channelClient.members(event.channelId))]);
-    }
-    // §10.3 step 4 — the sender gets no fanout for its own op, whether the
-    // recipient set came from channel-ms or was spelled out by the publisher
-    // (§10.2 lists the actor). Cross-device fanout is v3.1, so the whole
-    // sending user is excluded.
-    const recipients = event.recipients.filter((userId) => userId !== event.senderUserId);
+    const members = event.hasRecipients()
+      ? event.recipients
+      : [...(await this.channelClient.members(event.channelId))];
+
+    // TRIM_4_12_CONTRACT §7-§8 — delivery is per `(user_id, device_id)`, and
+    // every device except the sending one gets the envelope, the sender's own
+    // other devices included.
+    // ponytail: a server-authored event carries no sending device, so the
+    // actor's whole user is skipped, as it was before the trim. Ceiling: at
+    // max_devices > 1 the actor's other devices would miss channel events
+    // until channel-ms threads its `x-device` into the fanout.
+    const sending = event.senderSubject;
+    const recipients = (await this.deliveryManager.subjects(members)).filter((subject) =>
+      (sending ? subject !== sending : !subject.startsWith(`${event.senderUserId}:`)));
     if (!recipients.length) {
       this.log.info(`No fanout recipients for channel ${event.channelId}`);
       return;
@@ -126,21 +133,22 @@ class MessageDeliveryWorker extends ServiceBase {
   }
 
   /**
-   * SYNC_PROTOCOL.md §10.3 step 3 — every recipient delivery-manager could
-   * not reach gets the push frame queued, then an offline-message event so
-   * notification-ms fires the ntfy wake (§12.1; it owns the debounce).
+   * SYNC_PROTOCOL.md §10.3 step 3 — every subject delivery-manager could not
+   * reach gets the push frame queued, then an offline-message event so
+   * notification-ms fires the ntfy wake (§12.1; it owns the debounce). Both
+   * are keyed per `(user_id, device_id)`.
    * @param {EnvelopeEvent} event
    */
   async handleOfflineMessage(event) {
     // Ephemeral envelopes (typing, presence) are worthless once missed.
     if (event.ephemeral) return;
     const frame = event.toPushFrame();
-    await Promise.all(event.recipients.map(async (userId) => {
-      await this.undeliveredQueue.enqueue(userId, frame);
-      await this.eventStore.emit(this.events[EVENT_TYPE.OFFLINE_EVENT], event, userId);
+    await Promise.all(event.recipients.map(async (subject) => {
+      await this.undeliveredQueue.enqueue(subject, frame);
+      await this.eventStore.emit(this.events[EVENT_TYPE.OFFLINE_EVENT], event, subject);
       this.statsClient.increment({
         stat: 'message.undelivered.count',
-        tags: { user: userId }
+        tags: { user: subject.split(':')[0] }
       });
     }));
   }

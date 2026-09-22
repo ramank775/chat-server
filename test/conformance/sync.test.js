@@ -1,7 +1,13 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const crypto = require('crypto');
-const { ACK_OUTCOME, REASON, WS_TYPE, decodeWsEnvelope } = require('../../libs/v3-envelope');
+const {
+  ACK_OUTCOME,
+  REASON,
+  WS_TYPE,
+  decodeWsEnvelope,
+  dmChannelId
+} = require('../../libs/v3-envelope');
 const {
   BASE,
   api,
@@ -182,17 +188,17 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
     assert.equal(malformed.body.error.code, 'validation_failed');
   });
 
-  // -- 5. DM create over REST, with dedup and id collision ------------------
+  // -- 5. channel create over REST, with dedup and id collision -------------
 
-  it('creates a DM, replays the stored 201 and 409s a taken channel id', async () => {
-    dmId = crypto.randomUUID();
-    const opId = aliceOp();
+  it('creates a group, replays the stored 201 and 409s a taken channel id', async () => {
+    const channelId = crypto.randomUUID();
     const payload = {
-      op_id: opId,
-      resource_seq: nextSeq(alice.user_id, dmId),
+      op_id: aliceOp(),
+      resource_seq: nextSeq(alice.user_id, channelId),
       client_timestamp_ms: Date.now(),
-      channel_id: dmId,
-      kind: 'one_to_one',
+      channel_id: channelId,
+      kind: 'group',
+      name: 'dedup',
       members: [alice.user_id, bob.user_id]
     };
     const created = await api('POST', '/v3.0/channels', {
@@ -200,8 +206,8 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
       body: payload
     });
     assert.equal(created.status, 201);
-    assert.equal(created.body.channel_id, dmId);
-    assert.equal(created.body.kind, 'one_to_one');
+    assert.equal(created.body.channel_id, channelId);
+    assert.equal(created.body.kind, 'group');
     assert.deepEqual([...created.body.members].sort(), [alice.user_id, bob.user_id].sort());
 
     // §7.1 — the same op_id replays the stored outcome verbatim
@@ -214,8 +220,8 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
       token: alice.accesskey,
       body: {
         op_id: aliceOp(),
-        resource_seq: nextSeq(alice.user_id, dmId),
-        channel_id: dmId,
+        resource_seq: nextSeq(alice.user_id, channelId),
+        channel_id: channelId,
         kind: 'group',
         name: 'collides',
         members: [alice.user_id]
@@ -223,6 +229,29 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
     });
     assert.equal(collision.status, 409);
     assert.equal(collision.body.error.code, 'resource_id_taken');
+  });
+
+  it('refuses to create a DM: the id is derived, never a row (trim 4)', async () => {
+    dmId = dmChannelId(alice.user_id, bob.user_id);
+    assert.match(dmId, /^d[0-9a-f]{31}$/);
+    assert.equal(dmId, dmChannelId(bob.user_id, alice.user_id), 'both sides derive one id');
+
+    const created = await api('POST', '/v3.0/channels', {
+      token: alice.accesskey,
+      body: {
+        op_id: aliceOp(),
+        resource_seq: 1,
+        channel_id: crypto.randomUUID(),
+        kind: 'one_to_one',
+        members: [alice.user_id, bob.user_id]
+      }
+    });
+    assert.equal(created.status, 400);
+
+    // and no DM row can be listed, because none exists
+    const list = await api('GET', '/v3.0/channels', { token: alice.accesskey });
+    assert.equal(list.status, 200);
+    assert.ok(list.body.every((channel) => channel.kind === 'group'));
   });
 
   it('rejects an op_id minted for another user with prefix_mismatch', async () => {
@@ -255,6 +284,7 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
     const sent = [1, 2, 3].map((n) => ({
       opId: bobOp(),
       channelId: dmId,
+      peer: alice.user_id,
       resourceSeq: nextSeq(bob.user_id, dmId),
       clientTimestampMs: Date.now(),
       payload: Buffer.from(`hello ${n}`)
@@ -297,6 +327,7 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
       {
         opId: bobOp(),
         channelId: dmId,
+        peer: alice.user_id,
         resourceSeq: 5, // 4 was never sent
         clientTimestampMs: Date.now(),
         payload: Buffer.from('gap')
@@ -312,6 +343,7 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
       {
         opId: aliceOp(), // minted for alice, sent on bob's socket
         channelId: dmId,
+        peer: alice.user_id,
         resourceSeq: 4,
         clientTimestampMs: Date.now(),
         payload: Buffer.from('not mine')
@@ -326,6 +358,7 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
     const envelopes = Array.from({ length: 21 }, (_, index) => ({
       opId: bobOp(),
       channelId: dmId,
+      peer: alice.user_id,
       resourceSeq: 100 + index,
       clientTimestampMs: Date.now(),
       payload: Buffer.from('too many')
@@ -337,6 +370,66 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
       assert.equal(ack.outcome, ACK_OUTCOME.PERMANENT);
       assert.equal(ack.reason, REASON.VALIDATION_FAILED);
     });
+  });
+
+  it('rejects a DM envelope with no peer as validation_failed', async () => {
+    bobWs.send([
+      {
+        opId: bobOp(),
+        channelId: dmId,
+        resourceSeq: nextSeq(bob.user_id, dmId),
+        clientTimestampMs: Date.now(),
+        payload: Buffer.from('no peer')
+      }
+    ]);
+    const [ack] = (await bobWs.ack()).acks.acks;
+    assert.equal(ack.outcome, ACK_OUTCOME.PERMANENT);
+    assert.equal(ack.reason, REASON.VALIDATION_FAILED);
+  });
+
+  it('forbids a peer that does not derive to the channel_id', async () => {
+    bobWs.send([
+      {
+        opId: bobOp(),
+        channelId: dmId,
+        peer: bob.user_id, // dm_chan(bob, bob) is a different id
+        resourceSeq: nextSeq(bob.user_id, dmId),
+        clientTimestampMs: Date.now(),
+        payload: Buffer.from('wrong peer')
+      }
+    ]);
+    const [ack] = (await bobWs.ack()).acks.acks;
+    assert.equal(ack.outcome, ACK_OUTCOME.PERMANENT);
+    assert.equal(ack.reason, REASON.FORBIDDEN);
+  });
+
+  it('forbids a third party sending on somebody else\'s derived DM id', async () => {
+    const mallory = await signupWithUsername('device-m');
+    const malloryWs = connect(mallory.accesskey);
+    await malloryWs.opened;
+    const malloryOp = opIds(mallory.user_id);
+
+    // no peer mallory can name derives to alice+bob's id, so the channel
+    // cannot be squatted, entered or written to
+    malloryWs.send([
+      {
+        opId: malloryOp(),
+        channelId: dmId,
+        peer: alice.user_id,
+        resourceSeq: 1,
+        clientTimestampMs: Date.now(),
+        payload: Buffer.from('let me in')
+      }
+    ]);
+    const [ack] = (await malloryWs.ack()).acks.acks;
+    assert.equal(ack.outcome, ACK_OUTCOME.PERMANENT);
+    assert.equal(ack.reason, REASON.FORBIDDEN);
+
+    // and alice sees nothing from it
+    await assert.rejects(() =>
+      aliceWs.waitFor((frame) => frame.type === WS_TYPE.WS_PUSH
+        && frame.push.senderUserId === mallory.user_id, 500));
+    await malloryWs.close();
   });
 
   it('forbids an envelope on a channel the sender is not in', async () => {
@@ -360,6 +453,7 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
     const envelope = {
       opId: aliceOp(),
       channelId: dmId,
+      peer: bob.user_id,
       resourceSeq: nextSeq(alice.user_id, dmId),
       clientTimestampMs: Date.now(),
       payload: Buffer.from('for bob')
@@ -373,6 +467,7 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
     assert.equal(push.push.opId, envelope.opId);
     assert.equal(push.push.channelId, dmId);
     assert.equal(push.push.senderUserId, alice.user_id);
+    assert.equal(push.push.peer, bob.user_id, 'the peer field is echoed on fanout');
     assert.equal(Buffer.from(push.push.payload).toString(), 'for bob');
     assert.equal(Number(push.push.deliverySequence), Number(ack.deliverySequence));
 
@@ -393,6 +488,7 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
     const envelope = {
       opId: aliceOp(),
       channelId: dmId,
+      peer: bob.user_id,
       resourceSeq: nextSeq(alice.user_id, dmId),
       clientTimestampMs: Date.now(),
       payload: Buffer.from('while you were out')
@@ -406,7 +502,7 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
       assert.equal(response.status, 200);
       const frames = response.body.frames.map((entry) =>
         decodeWsEnvelope(Buffer.from(entry, 'base64')));
-      // the queue also holds the ChannelCreated bob was offline for (§10.2)
+      // the queue may also hold server events bob was offline for (§10.2)
       return frames.some((frame) => frame.push.opId === envelope.opId) ? frames : null;
     });
     const mine = drained.filter((frame) => frame.push.opId === envelope.opId);

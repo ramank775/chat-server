@@ -5,8 +5,11 @@ const { decodeWsEnvelope } = require('../v3-envelope');
 const MAX_FRAMES = 10000;
 const TTL_SEC = 30 * 24 * 60 * 60;
 
-/** One list per user; the drain deletes it. */
-const queueKey = (userId) => `sync:pending:${userId}`;
+/**
+ * One list per `user_id:device_id` subject (TRIM_4_12_CONTRACT §7); the drain
+ * deletes it.
+ */
+const queueKey = (subject) => `sync:pending:${subject}`;
 
 /**
  * SYNC_PROTOCOL.md §10.4 / §10.6 — frames go out in `delivery_sequence`
@@ -56,42 +59,42 @@ class UndeliveredQueue {
   }
 
   /**
-   * Append one push frame for `userId`, dropping the oldest past the cap and
-   * rolling the TTL forward.
-   * @param {string} userId
+   * Append one push frame for a `user_id:device_id` subject, dropping the
+   * oldest past the cap and rolling the TTL forward.
+   * @param {string} subject
    * @param {Buffer} frame serialized WsEnvelope{type: WS_PUSH}
    */
-  async enqueue(userId, frame) {
+  async enqueue(subject, frame) {
     if (!this._redis) {
-      const frames = this._local.get(userId) || [];
+      const frames = this._local.get(subject) || [];
       frames.push(frame);
-      this._local.set(userId, frames.slice(-this._maxFrames));
+      this._local.set(subject, frames.slice(-this._maxFrames));
       return;
     }
     await this._redis
       .multi()
-      .rpush(queueKey(userId), frame)
-      .ltrim(queueKey(userId), -this._maxFrames, -1)
-      .expire(queueKey(userId), this._ttlSec)
+      .rpush(queueKey(subject), frame)
+      .ltrim(queueKey(subject), -this._maxFrames, -1)
+      .expire(queueKey(subject), this._ttlSec)
       .exec();
   }
 
   /**
-   * Hand back everything queued for `userId` and clear it — at-most-once by
-   * design (§10.6 drain semantics).
-   * @param {string} userId
+   * Hand back everything queued for a `user_id:device_id` subject and clear
+   * it — at-most-once by design (§10.6 drain semantics).
+   * @param {string} subject
    * @returns {Promise<Buffer[]>}
    */
-  async drain(userId) {
+  async drain(subject) {
     if (!this._redis) {
-      const frames = this._local.get(userId) || [];
-      this._local.delete(userId);
+      const frames = this._local.get(subject) || [];
+      this._local.delete(subject);
       return orderPerChannel(frames);
     }
     const replies = await this._redis
       .multi()
-      .lrangeBuffer(queueKey(userId), 0, -1)
-      .del(queueKey(userId))
+      .lrangeBuffer(queueKey(subject), 0, -1)
+      .del(queueKey(subject))
       .exec();
     const [error, frames] = replies[0];
     if (error) throw error;

@@ -52,15 +52,19 @@ class MessageMs extends HttpServiceBase {
 
   /**
    * `GET /v3.0/sync/pending` — hand back every queued push frame for the
-   * caller and clear the queue in the same request (at-most-once by design).
+   * calling device and clear the queue in the same request (at-most-once by
+   * design). The queue is keyed per `(user_id, device_id)`, so another
+   * device of the same user keeps its own (TRIM_4_12_CONTRACT §7).
    */
   async pendingSync(req, res) {
     const user = extractInfoFromRequest(req, 'x-user');
-    const frames = await this.undeliveredQueue.drain(user);
+    // the gateway's default for a session that carried no device id
+    const device = extractInfoFromRequest(req, 'x-device', 'default');
+    const frames = await this.undeliveredQueue.drain(`${user}:${device}`);
     this.statsClient.increment({
       stat: 'sync.pending.frame_count',
       value: frames.length,
-      tags: { user }
+      tags: { user, device }
     });
     return res.response({ frames: frames.map((frame) => frame.toString('base64')) }).code(200);
   }

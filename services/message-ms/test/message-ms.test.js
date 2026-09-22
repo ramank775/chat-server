@@ -8,6 +8,9 @@ const { MessageMs } = require('../message-ms');
 
 const ALICE = '00000000b';
 const BOB = '00000000c';
+/** The queue is keyed per `(user_id, device_id)` — TRIM_4_12_CONTRACT §7. */
+const DEVICE = 'device-1';
+const subject = (userId) => `${userId}:${DEVICE}`;
 
 /** Exactly the bytes message-delivery queues. */
 function frameFor(channelId, deliverySequence) {
@@ -51,13 +54,13 @@ describe('GET /sync/pending (SYNC_PROTOCOL §10.6)', () => {
   const pull = (userId) => service.server.inject({
     method: 'GET',
     url: '/pending',
-    headers: { 'x-user': userId, 'x-device': 'device-1' }
+    headers: { 'x-user': userId, 'x-device': DEVICE }
   });
 
   test('drains the queue and returns base64 frames the client can decode', async () => {
     const queued = [frameFor('channel-1', 1), frameFor('channel-1', 2)];
-    await queue.enqueue(ALICE, queued[0]);
-    await queue.enqueue(ALICE, queued[1]);
+    await queue.enqueue(subject(ALICE), queued[0]);
+    await queue.enqueue(subject(ALICE), queued[1]);
 
     const response = await pull(ALICE);
     assert.strictEqual(response.statusCode, 200);
@@ -75,7 +78,7 @@ describe('GET /sync/pending (SYNC_PROTOCOL §10.6)', () => {
   });
 
   test('a second call returns an empty list', async () => {
-    await queue.enqueue(BOB, frameFor('channel-9', 1));
+    await queue.enqueue(subject(BOB), frameFor('channel-9', 1));
 
     assert.strictEqual(JSON.parse((await pull(BOB)).payload).frames.length, 1);
     assert.deepStrictEqual(JSON.parse((await pull(BOB)).payload), { frames: [] });
@@ -89,7 +92,7 @@ describe('GET /sync/pending (SYNC_PROTOCOL §10.6)', () => {
 
   test('frames come back in delivery_sequence order per channel', async () => {
     await [3, 1, 2].reduce(
-      (previous, sequence) => previous.then(() => queue.enqueue(ALICE, frameFor('channel-1', sequence))),
+      (previous, sequence) => previous.then(() => queue.enqueue(subject(ALICE), frameFor('channel-1', sequence))),
       Promise.resolve()
     );
 
@@ -98,6 +101,13 @@ describe('GET /sync/pending (SYNC_PROTOCOL §10.6)', () => {
       (frame) => Number(decodeWsEnvelope(Buffer.from(frame, 'base64')).push.deliverySequence)
     );
     assert.deepStrictEqual(sequences, [1, 2, 3]);
+  });
+
+  test('another device of the same user keeps its own queue', async () => {
+    await queue.enqueue(`${ALICE}:device-2`, frameFor('channel-2', 1));
+
+    assert.deepStrictEqual(JSON.parse((await pull(ALICE)).payload), { frames: [] });
+    assert.strictEqual((await queue.drain(`${ALICE}:device-2`)).length, 1);
   });
 
   test('a request without an identity header is rejected', async () => {

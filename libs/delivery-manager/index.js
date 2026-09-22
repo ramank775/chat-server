@@ -3,15 +3,30 @@ const { Redis } = require('ioredis');
 const { MessageEvent } = require('../event-args');
 
 /**
+ * TRIM_4_12_CONTRACT §7 — delivery is keyed per `(user_id, device_id)`. The
+ * two halves of that key space:
+ *   `route:<user_id>:<device_id>` -> the gateway holding that socket, deleted
+ *      when the socket closes;
+ *   `devices:<user_id>` -> the set of device_ids that have ever connected, so
+ *      fanout can expand a member into subjects. Kept for the accesskey's
+ *      lifetime, because an offline device still has a queue.
+ */
+const routeKey = (subject) => `route:${subject}`;
+const deviceSetKey = (userId) => `devices:${userId}`;
+const DEVICE_TTL_SEC = 30 * 24 * 60 * 60;
+
+/**
  * Stands in for redis when the whole stack is one process (`--single-gateway`):
- * the user -> gateway routing table and nothing else. Every recipient resolves
- * to this process' own gateway, so `_send` hands them to `messageHandler`
- * directly and nothing is ever published.
+ * the (user, device) -> gateway routing table and nothing else. Every recipient
+ * resolves to this process' own gateway, so `_send` hands them to
+ * `messageHandler` directly and nothing is ever published.
  * ponytail: one gateway by definition. Drop the flag and give it a redis
  * endpoint the moment a second gateway exists.
  */
 class LocalRegistry {
   #kv = new Map();
+
+  #sets = new Map();
 
   async set(key, value) { this.#kv.set(key, String(value)); }
 
@@ -20,6 +35,16 @@ class LocalRegistry {
   async del(key) { this.#kv.delete(key); }
 
   async mget(keys) { return keys.map((key) => this.#kv.get(key) ?? null); }
+
+  async sadd(key, value) {
+    if (!this.#sets.has(key)) this.#sets.set(key, new Set());
+    this.#sets.get(key).add(value);
+  }
+
+  async smembers(key) { return [...(this.#sets.get(key) || [])]; }
+
+  /* eslint-disable-next-line class-methods-use-this, no-empty-function */
+  async expire() { }
 
   /* eslint-disable-next-line class-methods-use-this, no-empty-function */
   async publish() { }
@@ -104,12 +129,39 @@ class DeliveryManager {
     setInterval(this._handleAlivePing.bind(this), 700);
   }
 
-  async userJoin(user) {
-    await this._redis.set(`${user}`, this.serverId);
+  /**
+   * Bind one device's socket to this gateway, and remember the device so a
+   * later fanout can queue for it while it is offline.
+   * @param {string} userId
+   * @param {string} deviceId
+   */
+  async userJoin(userId, deviceId) {
+    await this._redis.sadd(deviceSetKey(userId), deviceId);
+    await this._redis.expire(deviceSetKey(userId), DEVICE_TTL_SEC);
+    await this._redis.set(routeKey(`${userId}:${deviceId}`), this.serverId);
   }
 
-  async userLeft(user) {
-    await this._redis.del(`${user}`);
+  /** Unbind one device's socket. The device itself stays known. */
+  async userLeft(userId, deviceId) {
+    await this._redis.del(routeKey(`${userId}:${deviceId}`));
+  }
+
+  /**
+   * Expand member user_ids into `user_id:device_id` delivery subjects.
+   * ponytail: a device the registry has never seen has no subject, so nothing
+   * is queued for it — the device directory is built from connections, not
+   * from the session rows profile-ms holds. Ceiling: a message sent between a
+   * login and that device's first socket is dropped instead of queued. Seed
+   * the set at session issue if that window ever matters.
+   * @param {string[]} userIds
+   * @returns {Promise<string[]>}
+   */
+  async subjects(userIds) {
+    const devices = await Promise.all(
+      userIds.map((userId) => this._redis.smembers(deviceSetKey(userId)))
+    );
+    return userIds.flatMap((userId, index) =>
+      devices[index].map((deviceId) => `${userId}:${deviceId}`));
   }
 
   async _send(message, recipients, retry = 0, ignoreSelf = false) {
@@ -119,7 +171,7 @@ class DeliveryManager {
       this._handleOfflineMessage(msg)
       return;
     }
-    const servers = await this._redis.mget(recipients)
+    const servers = await this._redis.mget(recipients.map(routeKey))
     const recipientGroups = servers.reduce((acc, value, idx) => {
       value = value || 'offline';
       if (!acc.has(value)) {

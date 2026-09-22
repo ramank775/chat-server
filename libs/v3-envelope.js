@@ -13,10 +13,12 @@ const { IEventArg } = require('./event-store');
 /**
  * Framing for the internal bus only — never on the client wire, so it lives
  * here rather than in proto/ (which holds the two schemas copied verbatim
- * from the spec). One stamped Envelope plus the users it fans out to: what
- * the gateway publishes to the new-message topic and what delivery-manager
- * carries over its Redis pubsub between gateways. The `payload` bytes stay
- * binary, which is why this is protobuf and not JSON.
+ * from the spec). One stamped Envelope, the users (or, past fanout, the
+ * `user_id:device_id` subjects) it goes to, and the device that sent it —
+ * the one device fanout skips (TRIM_4_12_CONTRACT §8). What the gateway
+ * publishes to the new-message topic and what delivery-manager carries over
+ * its Redis pubsub between gateways. The `payload` bytes stay binary, which
+ * is why this is protobuf and not JSON.
  */
 const INTERNAL_PROTO = `
   syntax = "proto3";
@@ -24,6 +26,7 @@ const INTERNAL_PROTO = `
   message PushEvent {
     repeated string recipients = 1;
     Envelope envelope = 2;
+    string sender_device = 3;
   }`;
 
 /** @type {protobufjs.Root} */
@@ -182,22 +185,30 @@ class EnvelopeEvent extends IEventArg {
   /** @type {string[]} */
   _recipients = [];
 
-  static of(envelope, recipients = []) {
+  /** @type {string} the sending device, '' for a server-authored event */
+  _senderDevice = '';
+
+  static of(envelope, recipients = [], senderDevice = '') {
     const event = new EnvelopeEvent();
     event._envelope = envelope;
     event._recipients = recipients;
+    event._senderDevice = senderDevice || '';
     return event;
   }
 
   static fromBinary(payload) {
     const definition = type('PushEvent');
     const json = definition.toObject(definition.decode(payload), DECODE_OPTIONS);
-    return EnvelopeEvent.of(json.envelope, json.recipients || []);
+    return EnvelopeEvent.of(json.envelope, json.recipients || [], json.senderDevice);
   }
 
   toBinary() {
     const definition = type('PushEvent');
-    const message = { recipients: this._recipients, envelope: this._envelope };
+    const message = {
+      recipients: this._recipients,
+      envelope: this._envelope,
+      senderDevice: this._senderDevice
+    };
     return Buffer.from(definition.encode(definition.create(message)).finish());
   }
 
@@ -206,7 +217,7 @@ class EnvelopeEvent extends IEventArg {
   }
 
   clone() {
-    return EnvelopeEvent.of(this._envelope, this._recipients);
+    return EnvelopeEvent.of(this._envelope, this._recipients, this._senderDevice);
   }
 
   setRecipients(recipients) {
@@ -231,6 +242,14 @@ class EnvelopeEvent extends IEventArg {
 
   get senderUserId() {
     return this._envelope.senderUserId;
+  }
+
+  /**
+   * The one subject fanout skips: the socket this envelope came in on. Empty
+   * for a server-authored event, where the actor's whole user is skipped.
+   */
+  get senderSubject() {
+    return this._senderDevice ? `${this._envelope.senderUserId}:${this._senderDevice}` : '';
   }
 
   get deliverySequence() {
