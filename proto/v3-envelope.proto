@@ -97,17 +97,29 @@ message Envelope {
   // optimization only kicks in once both sides understand the flag.
   bool ephemeral = 6;
 
-  // The other participant of a direct message, as a 9-lowercase-hex
-  // `user_id`. Required iff `channel_id` is a derived DM id
-  // (`"d" + sha256_hex(min(a,b) + 0x00 + max(a,b))[0:31]`), absent
-  // otherwise. A DM has no channel row: the server recomputes the id from
-  // the authenticated sender and this field instead of reading membership.
-  //   - missing or malformed  -> Ack{reason: "validation_failed"}
-  //   - does not derive to `channel_id` -> Ack{reason: "forbidden"}
-  //   - otherwise recipients are {peer} plus the sender's other devices.
-  // A third party cannot send on someone else's DM id, because they cannot
-  // produce a `peer` that derives to it from their own user_id.
-  // Echoed unchanged on fanout, so the recipient sees who the pair is.
+  // Trim 4 (design/protocol/TRIM_4_12_CONTRACT.md §2) — the OTHER
+  // participant's user_id (9 lowercase hex chars) on a derived DM
+  // channel. Required iff `channel_id` matches ^d[0-9a-f]{31}$,
+  // absent otherwise. (The full shape, not the `d` prefix: a group id
+  // is a dashed UUID, so the two id spaces are provably disjoint.)
+  //
+  // A DM channel id is `"d" + sha256_hex(min(a,b) || 0x00 || max(a,b))
+  // [0:31]`, so the server does not look up a channel row or a member
+  // list for it — there is none, and there never was. It recomputes
+  // the derivation from the authenticated session's user_id and this
+  // field: a missing or malformed `peer` is `validation_failed`, a
+  // `peer` that does not derive to `channel_id` is `forbidden`. A
+  // third party cannot send on, create or reserve someone else's DM
+  // id because they cannot produce a `peer` that derives to it from
+  // their own user_id.
+  //
+  // Recipients are {peer, sender} expanded to devices, minus the
+  // sending device (trim 12), so the sender's own other devices get
+  // their message. At max_devices = 1 that is the same thing as
+  // {peer}.
+  //
+  // Echoed unchanged on fanout; the recipient already knows the pair
+  // from `sender_user_id` and does not need to read it.
   string peer = 7;
 
   // ---------------------------------------------------------------------------
