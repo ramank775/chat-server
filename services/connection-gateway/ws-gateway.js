@@ -21,7 +21,10 @@ const {
   ackFrame,
   reauthFrame,
   errorFrame,
-  opIdUserBits
+  opIdUserBits,
+  dmChannelId,
+  isDmChannelId,
+  isUserId
 } = require('../../libs/v3-envelope');
 
 const asMain = require.main === module;
@@ -343,20 +346,35 @@ class Gateway extends HttpServiceBase {
     }
 
     // §6a.3 step 3 — membership. Before sequencing so a non-member never
-    // advances the channel's counter.
-    let isMember;
-    try {
-      isMember = await this.channelClient.isMember(envelope.channelId, userId);
-    } catch (e) {
-      this.log.error('channel-ms membership lookup failed', { err: e, user: userId });
-      return {
-        opId,
-        outcome: ACK_OUTCOME.TRANSIENT,
-        reason: REASON.DOWNSTREAM_TIMEOUT,
-        retryAfterMs: 1000
-      };
+    // advances the channel's counter. A DM id is derived from the pair
+    // (TRIM_4_12_CONTRACT §3), so it has no row to look up: recompute it
+    // from the authenticated sender and `peer` instead.
+    let recipients = [];
+    if (isDmChannelId(envelope.channelId)) {
+      if (!isUserId(envelope.peer)) {
+        return this.rejectPermanent(dedupKey, opId, REASON.VALIDATION_FAILED);
+      }
+      if (dmChannelId(userId, envelope.peer) !== envelope.channelId) {
+        return this.rejectPermanent(dedupKey, opId, REASON.FORBIDDEN);
+      }
+      // Both sides, so the sender's own other devices get it too (§8); the
+      // sending device is what fanout excludes.
+      recipients = [envelope.peer, userId];
+    } else {
+      let isMember;
+      try {
+        isMember = await this.channelClient.isMember(envelope.channelId, userId);
+      } catch (e) {
+        this.log.error('channel-ms membership lookup failed', { err: e, user: userId });
+        return {
+          opId,
+          outcome: ACK_OUTCOME.TRANSIENT,
+          reason: REASON.DOWNSTREAM_TIMEOUT,
+          retryAfterMs: 1000
+        };
+      }
+      if (!isMember) return this.rejectPermanent(dedupKey, opId, REASON.FORBIDDEN);
     }
-    if (!isMember) return this.rejectPermanent(dedupKey, opId, REASON.FORBIDDEN);
 
     // §10.2 / §19 decision 15 — a 0x53 payload is a server-authored event.
     // Clients may not mint one. This is the ONLY byte of `payload` we look
@@ -372,7 +390,7 @@ class Gateway extends HttpServiceBase {
         ...envelope,
         senderUserId: userId,
         serverTimestampMs: Date.now()
-      });
+      }, recipients);
       return null;
     }
 
@@ -389,7 +407,7 @@ class Gateway extends HttpServiceBase {
         senderUserId: userId,
         serverTimestampMs,
         deliverySequence
-      });
+      }, recipients);
     } catch (e) {
       this.log.error('Failed to publish envelope', { err: e, user: userId, opId });
       // Give the seq slot back so the client's retry of the same op is not
@@ -411,10 +429,16 @@ class Gateway extends HttpServiceBase {
     return ack;
   }
 
-  async publishEnvelope(envelope) {
+  /**
+   * @param {object} envelope server-stamped
+   * @param {string[]} recipients spelled out for a DM (no channel row to
+   *   read); empty for a group, which message-delivery resolves from
+   *   channel-ms.
+   */
+  async publishEnvelope(envelope, recipients = []) {
     await this.publishEvent(
       EVENT_TYPE.NEW_MESSAGE_EVENT,
-      EnvelopeEvent.of(envelope),
+      EnvelopeEvent.of(envelope, recipients),
       envelope.channelId
     );
   }

@@ -1,4 +1,5 @@
 const path = require('path');
+const crypto = require('crypto');
 const protobufjs = require('protobufjs');
 const { IEventArg } = require('./event-store');
 
@@ -71,6 +72,41 @@ const REASON = {
 
 /** SYNC_PROTOCOL.md §10.2 / §19 decision 15 — server-authored payload marker. */
 const SERVER_EVENT_MARKER = 0x53;
+
+/** A 9-lowercase-hex user_id, the only shape `peer` may take (trim 4). */
+const USER_ID = /^[0-9a-f]{9}$/;
+
+/**
+ * A derived DM channel id: `d` + 31 hex chars, no dashes. Group ids are
+ * UUIDs, so the dash at index 8 keeps the two spaces disjoint even when a
+ * UUID happens to start with `d`.
+ */
+const DM_CHANNEL_ID = /^d[0-9a-f]{31}$/;
+
+/**
+ * TRIM_4_12_CONTRACT §1 — the DM channel id both clients and the server
+ * derive from the pair, identically and offline:
+ *   dm_chan(a, b) = "d" + sha256_hex(min(a,b) + "\x00" + max(a,b))[0:31]
+ * `a`/`b` are 9-lowercase-hex user_ids compared bytewise; the result is
+ * exactly 32 chars. A DM has no server-side row: this function is the whole
+ * membership rule.
+ * @param {string} a
+ * @param {string} b
+ */
+function dmChannelId(a, b) {
+  const [low, high] = a < b ? [a, b] : [b, a];
+  const digest = crypto.createHash('sha256').update(`${low}\x00${high}`).digest('hex');
+  return `d${digest.slice(0, 31)}`;
+}
+
+/** Is this channel id a derived DM id (and so never a channel-ms row)? */
+function isDmChannelId(channelId) {
+  return DM_CHANNEL_ID.test(channelId || '');
+}
+
+function isUserId(userId) {
+  return USER_ID.test(userId || '');
+}
 
 const DECODE_OPTIONS = {
   longs: Number,
@@ -224,5 +260,8 @@ module.exports = {
   pushFrame,
   reauthFrame,
   errorFrame,
-  opIdUserBits
+  opIdUserBits,
+  dmChannelId,
+  isDmChannelId,
+  isUserId
 };

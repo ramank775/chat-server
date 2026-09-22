@@ -53,8 +53,9 @@ message Envelope {
   // Required on client→server. Echoed unchanged on fanout.
   string op_id = 1;
 
-  // The channel this envelope targets. Server validates the sender is
-  // a member of this channel. Used as the `resource_id` for per-channel
+  // The channel this envelope targets. Server validates the sender is a
+  // member: a channel-ms row lookup for a group, the `peer` derivation
+  // below for a DM. Used as the `resource_id` for per-channel
   // sequencing and dedup keying. Required.
   string channel_id = 2;
 
@@ -95,6 +96,19 @@ message Envelope {
   // because the receiver-side dispatcher dedups by op_id) but the
   // optimization only kicks in once both sides understand the flag.
   bool ephemeral = 6;
+
+  // The other participant of a direct message, as a 9-lowercase-hex
+  // `user_id`. Required iff `channel_id` is a derived DM id
+  // (`"d" + sha256_hex(min(a,b) + 0x00 + max(a,b))[0:31]`), absent
+  // otherwise. A DM has no channel row: the server recomputes the id from
+  // the authenticated sender and this field instead of reading membership.
+  //   - missing or malformed  -> Ack{reason: "validation_failed"}
+  //   - does not derive to `channel_id` -> Ack{reason: "forbidden"}
+  //   - otherwise recipients are {peer} plus the sender's other devices.
+  // A third party cannot send on someone else's DM id, because they cannot
+  // produce a `peer` that derives to it from their own user_id.
+  // Echoed unchanged on fanout, so the recipient sees who the pair is.
+  string peer = 7;
 
   // ---------------------------------------------------------------------------
   // Server-stamped fields. Absent on client→server. Populated by the

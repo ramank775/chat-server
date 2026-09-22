@@ -8,7 +8,7 @@ const CARL = 'c2d3e4f5a';
 const DAVE = 'd3e4f5a6b';
 
 const CHANNEL = '01efabcd-7000-8000-8abc-000000000001';
-const DM = '01efabcd-7000-8000-8abc-000000000002';
+const SEQ_SPACE = '01efabcd-7000-8000-8abc-000000000002';
 
 /** @type {Awaited<ReturnType<typeof startChannelMs>>} */
 let harness;
@@ -196,118 +196,43 @@ test('a second channel id collision is resource_id_taken', async () => {
   assert.strictEqual(body(response).error.code, 'resource_id_taken');
 });
 
-// ---- one_to_one -----------------------------------------------------------
+// ---- trim 4: groups are the only channel with a row -----------------------
 
-test('creating a DM that already exists returns the existing channel with 200', async () => {
-  const first = await harness.inject({
-    method: 'POST',
-    url: '/',
-    headers: headers(ALICE),
-    payload: op(ALICE, 1, { channel_id: DM, kind: 'one_to_one', members: [ALICE, BOB] })
-  });
-  assert.strictEqual(first.statusCode, 201);
-
-  const again = await harness.inject({
-    method: 'POST',
-    url: '/',
-    headers: headers(BOB),
-    payload: op(BOB, 1, {
-      channel_id: '01efabcd-7000-8000-8abc-0000000000c1',
-      kind: 'one_to_one',
-      members: [BOB, ALICE]
-    })
-  });
-  assert.strictEqual(again.statusCode, 200);
-  assert.strictEqual(body(again).channel_id, DM);
-});
-
-test('a username-initiated DM against a keyed user needs the key', async () => {
-  const keyed = 'e4f5a6b7c';
-  await harness.seedUser(keyed, '4321');
-
-  const withoutKey = await harness.inject({
-    method: 'POST',
-    url: '/',
-    headers: headers(ALICE),
-    payload: op(ALICE, 1, {
-      channel_id: '01efabcd-7000-8000-8abc-0000000000d1',
-      kind: 'one_to_one',
-      members: [ALICE, keyed],
-      initiatedVia: 'username'
-    })
-  });
-  assert.strictEqual(withoutKey.statusCode, 403);
-  assert.strictEqual(body(withoutKey).error.code, 'USERNAME_KEY_REQUIRED');
-
-  const wrongKey = await harness.inject({
-    method: 'POST',
-    url: '/',
-    headers: headers(ALICE),
-    payload: op(ALICE, 1, {
-      channel_id: '01efabcd-7000-8000-8abc-0000000000d2',
-      kind: 'one_to_one',
-      members: [ALICE, keyed],
-      initiatedVia: 'username',
-      usernameKey: '0000'
-    })
-  });
-  assert.strictEqual(wrongKey.statusCode, 403);
-
-  const rightKey = await harness.inject({
-    method: 'POST',
-    url: '/',
-    headers: headers(ALICE),
-    payload: op(ALICE, 1, {
-      channel_id: '01efabcd-7000-8000-8abc-0000000000d3',
-      kind: 'one_to_one',
-      members: [ALICE, keyed],
-      initiatedVia: 'username',
-      usernameKey: '4321'
-    })
-  });
-  assert.strictEqual(rightKey.statusCode, 201);
-});
-
-test('a phone-initiated DM bypasses the key entirely', async () => {
-  const keyed = 'f5a6b7c8d';
-  await harness.seedUser(keyed, '1111');
+test('a one_to_one create is rejected — DM ids are derived, never created', async () => {
   const response = await harness.inject({
     method: 'POST',
     url: '/',
-    headers: headers(CARL),
-    payload: op(CARL, 1, {
-      channel_id: '01efabcd-7000-8000-8abc-0000000000e1',
+    headers: headers(ALICE),
+    payload: op(ALICE, 1, {
+      channel_id: '01efabcd-7000-8000-8abc-0000000000f1',
       kind: 'one_to_one',
-      members: [CARL, keyed],
-      initiatedVia: 'phone'
+      members: [ALICE, BOB]
     })
   });
-  assert.strictEqual(response.statusCode, 201);
+  assert.strictEqual(response.statusCode, 400);
 });
 
-test('one_to_one membership is fixed', async () => {
-  const response = await harness.inject({
-    method: 'POST',
-    url: `/${DM}/members`,
-    headers: headers(ALICE),
-    payload: op(ALICE, 2, { members: [CARL] })
-  });
-  assert.strictEqual(response.statusCode, 403);
+test('GET / lists groups only', async () => {
+  const response = await harness.inject({ method: 'GET', url: '/', headers: headers(ALICE) });
+  assert.strictEqual(response.statusCode, 200);
+  const kinds = new Set(body(response).map((channel) => channel.kind));
+  assert.deepStrictEqual([...kinds], ['group']);
 });
 
 test('REST and WS share one sequence space per (user, resource)', async () => {
   // The gateway writes `seq:<user>:<resource>`; a REST op on the same
   // resource has to see that value.
   const { memCache } = harness.server;
-  await memCache.set(`seq:${ALICE}:${DM}`, 40);
+  await createGroup(SEQ_SPACE, ALICE, [ALICE, BOB]);
+  await memCache.set(`seq:${ALICE}:${SEQ_SPACE}`, 40);
   const response = await harness.inject({
     method: 'PATCH',
-    url: `/${DM}`,
+    url: `/${SEQ_SPACE}`,
     headers: headers(ALICE),
-    payload: op(ALICE, 41, { name: 'ignored for a dm' })
+    payload: op(ALICE, 41, { name: 'renamed' })
   });
   assert.strictEqual(response.statusCode, 200);
-  assert.strictEqual(Number(await memCache.get(`seq:${ALICE}:${DM}`)), 41);
+  assert.strictEqual(Number(await memCache.get(`seq:${ALICE}:${SEQ_SPACE}`)), 41);
 });
 
 // ---- roles, owner leave and succession (DECISIONS rows 9 / 80) ------------

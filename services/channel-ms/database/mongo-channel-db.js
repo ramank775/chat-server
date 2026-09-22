@@ -9,7 +9,6 @@ const PROJECTION = {
     name: 1,
     avatarUrl: 1,
     owner: 1,
-    initiatedVia: 1,
     members: 1,
     createdAt: 1
   }
@@ -29,16 +28,6 @@ class MongoChannelDB extends IChannelDB {
   #collection;
 
   /**
-   * ponytail: channel-ms and profile-ms are deployed against the same
-   * `--mongo-url` (deployment/docker-compose.yml), so the username-key gate
-   * reads profile-ms' `users` collection directly rather than adding an HTTP
-   * client + endpoint + option for one hash lookup. Split the databases and
-   * this becomes a call to profile-ms.
-   * @type { import('mongodb').Collection }
-   */
-  #users;
-
-  /**
    * @param {*} context
    */
   constructor(context) {
@@ -46,9 +35,9 @@ class MongoChannelDB extends IChannelDB {
     this.#client = initMongoClient(context);
   }
 
-  async getMemberChannels(memberId, kind = null) {
-    const query = { members: { $elemMatch: { user_id: memberId, removedAt: null } } };
-    if (kind) query.kind = kind;
+  async getMemberChannels(memberId) {
+    // `kind: 'group'` is what leaves any pre-trim-4 DM row unread.
+    const query = { kind: 'group', members: { $elemMatch: { user_id: memberId, removedAt: null } } };
     const channels = await this.#collection.find(query, PROJECTION).toArray();
     return channels.map(active);
   }
@@ -71,18 +60,6 @@ class MongoChannelDB extends IChannelDB {
     const query = { channelId };
     if (memberId) query.members = { $elemMatch: { user_id: memberId, removedAt: null } };
     return active(await this.#collection.findOne(query, PROJECTION));
-  }
-
-  async findOneToOne(userIds) {
-    const channel = await this.#collection.findOne(
-      {
-        kind: 'one_to_one',
-        // exactly this pair, both still active
-        $and: userIds.map((id) => ({ members: { $elemMatch: { user_id: id, removedAt: null } } }))
-      },
-      PROJECTION
-    );
-    return active(channel);
   }
 
   async addMembers(channelId, members) {
@@ -123,19 +100,10 @@ class MongoChannelDB extends IChannelDB {
     await this.#collection.deleteOne({ channelId });
   }
 
-  async usernameKeyHash(userId) {
-    const user = await this.#users.findOne(
-      { user_id: userId, deletedAt: null },
-      { projection: { _id: 0, usernameKeyHash: 1 } }
-    );
-    return user ? user.usernameKeyHash || null : null;
-  }
-
   async init() {
     await this.#client.connect();
     const db = this.#client.db();
     this.#collection = db.collection('channels');
-    this.#users = db.collection('users');
     // client-supplied ids: the unique index is what turns a collision into 409.
     await this.#collection.createIndex({ channelId: 1 }, { unique: true });
     await this.#collection.createIndex({ 'members.user_id': 1 });

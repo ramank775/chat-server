@@ -6,13 +6,17 @@ const {
   WS_TYPE,
   EnvelopeEvent,
   encodeWsEnvelope,
-  opIdUserBits
+  opIdUserBits,
+  dmChannelId
 } = require('../../../libs/v3-envelope');
 const { ACCESSKEY, mintOpId, opFrame, startGateway, connect } = require('./helper');
 
 const ALICE = 'a3f2e8c5d';
 const BOB = 'b1c2d3e4f';
 const CHANNEL = '01efabcd-7000-8000-8abc-000000000001';
+const CARL = 'c2d3e4f5a';
+/** No row anywhere: a DM id is derived from the pair (TRIM_4_12_CONTRACT §1). */
+const DM = dmChannelId(ALICE, BOB);
 
 const payload = (byte = 0x08) => Buffer.from([byte, 0x01, 0x02]);
 
@@ -164,6 +168,71 @@ test('a non-member gets forbidden', async () => {
     const client = connect(uri, ALICE);
     await client.opened;
     client.send(opFrame([envelope(ALICE, 1, { channelId: 'someone-elses-channel' })]));
+
+    const [ack] = (await client.next()).acks.acks;
+    assert.strictEqual(ack.outcome, ACK_OUTCOME.PERMANENT);
+    assert.strictEqual(ack.reason, REASON.FORBIDDEN);
+    assert.strictEqual(publishedEnvelopes().length, 0);
+    client.close();
+  });
+});
+
+// ---- derived DM channels (TRIM_4_12_CONTRACT §3) --------------------------
+
+test('a DM envelope needs no channel row and fans out to the peer', async () => {
+  await withGateway(async ({ uri, publishedEnvelopes }) => {
+    const client = connect(uri, ALICE);
+    await client.opened;
+    client.send(opFrame([envelope(ALICE, 1, { channelId: DM, peer: BOB })]));
+
+    const [ack] = (await client.next()).acks.acks;
+    assert.strictEqual(ack.outcome, ACK_OUTCOME.SUCCESS);
+
+    const [published] = publishedEnvelopes();
+    assert.strictEqual(published.args.envelope.channelId, DM);
+    assert.strictEqual(published.args.envelope.peer, BOB);
+    // spelled out by the gateway: message-delivery must not look for a row.
+    // The sender is in the list so their other devices get it (§8).
+    assert.deepStrictEqual(published.args.recipients, [BOB, ALICE]);
+    client.close();
+  });
+});
+
+test('a DM envelope without a peer is validation_failed', async () => {
+  await withGateway(async ({ uri, publishedEnvelopes }) => {
+    const client = connect(uri, ALICE);
+    await client.opened;
+    client.send(opFrame([envelope(ALICE, 1, { channelId: DM })]));
+
+    const [ack] = (await client.next()).acks.acks;
+    assert.strictEqual(ack.outcome, ACK_OUTCOME.PERMANENT);
+    assert.strictEqual(ack.reason, REASON.VALIDATION_FAILED);
+    assert.strictEqual(publishedEnvelopes().length, 0);
+    client.close();
+  });
+});
+
+test('a peer that does not derive to the channel_id is forbidden', async () => {
+  await withGateway(async ({ uri, publishedEnvelopes }) => {
+    const client = connect(uri, ALICE);
+    await client.opened;
+    client.send(opFrame([envelope(ALICE, 1, { channelId: DM, peer: CARL })]));
+
+    const [ack] = (await client.next()).acks.acks;
+    assert.strictEqual(ack.outcome, ACK_OUTCOME.PERMANENT);
+    assert.strictEqual(ack.reason, REASON.FORBIDDEN);
+    assert.strictEqual(publishedEnvelopes().length, 0);
+    client.close();
+  });
+});
+
+test('a third party cannot send on somebody else\'s DM id', async () => {
+  await withGateway(async ({ uri, publishedEnvelopes }) => {
+    const client = connect(uri, CARL);
+    await client.opened;
+    // every peer carl can name derives to a different id, so squatting
+    // alice+bob's channel is unrepresentable
+    client.send(opFrame([envelope(CARL, 1, { channelId: DM, peer: BOB })]));
 
     const [ack] = (await client.next()).acks.acks;
     assert.strictEqual(ack.outcome, ACK_OUTCOME.PERMANENT);

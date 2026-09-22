@@ -11,11 +11,10 @@
 /**
  * @typedef {object} Channel
  * @property {string} channelId client-generated UUIDv7 (SYNC_PROTOCOL 11.3)
- * @property {'one_to_one'|'group'} kind
+ * @property {'group'} kind — trim 4: a DM id is derived, never a row
  * @property {string|null} name
  * @property {string|null} avatarUrl
  * @property {string} owner creator's user_id
- * @property {'phone'|'username'|null} initiatedVia one_to_one only (AUTH_CONTRACT 2.5)
  * @property {Member[]} members active members only on every read
  * @property {number} createdAt
  */
@@ -38,10 +37,9 @@ class IChannelDB {
    * @abstract
    * Every channel `memberId` is currently a member of
    * @param {string} memberId
-   * @param {string|null} kind
    * @returns {Promise<Channel[]>}
    */
-  async getMemberChannels(memberId, kind = null) {
+  async getMemberChannels(memberId) {
     throw new Error('Method not implemented');
   }
 
@@ -63,16 +61,6 @@ class IChannelDB {
    * @returns {Promise<Channel|null>}
    */
   async getChannelInfo(channelId, memberId = null) {
-    throw new Error('Method not implemented');
-  }
-
-  /**
-   * @abstract
-   * The existing one_to_one channel between exactly these two users, if any.
-   * @param {[string, string]} userIds
-   * @returns {Promise<Channel|null>}
-   */
-  async findOneToOne(userIds) {
     throw new Error('Method not implemented');
   }
 
@@ -124,16 +112,6 @@ class IChannelDB {
    * @param {string} channelId
    */
   async deleteChannel(channelId) {
-    throw new Error('Method not implemented');
-  }
-
-  /**
-   * @abstract
-   * The target's `usernameKeyHash`, for the AUTH_CONTRACT 2.5 key gate.
-   * @param {string} userId
-   * @returns {Promise<string|null>} null when the user has no key (or no row)
-   */
-  async usernameKeyHash(userId) {
     throw new Error('Method not implemented');
   }
 

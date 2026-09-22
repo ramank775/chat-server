@@ -5,7 +5,7 @@ const {
   resolveEnvVariables
 } = require('../../libs/service-base');
 const { addHttpOptions, initHttpResource, HttpServiceBase } = require('../../libs/http-service-base');
-const { extractInfoFromRequest, schemas, verifySecret, errorEnvelope } = require('../../helper');
+const { extractInfoFromRequest, schemas, errorEnvelope } = require('../../helper');
 const eventStore = require('../../libs/event-store');
 const MemCache = require('../../libs/cache');
 const { opIdUserBits } = require('../../libs/v3-envelope');
@@ -129,13 +129,12 @@ class ChannelMs extends HttpServiceBase {
         payload: Joi.object({
           ...OP_FIELDS,
           channel_id: Joi.string().uuid().required(),
-          kind: Joi.string().valid('one_to_one', 'group').required(),
+          // trim 4: groups are the only channel with a row. A DM id is
+          // derived from the pair and never created (TRIM_4_12_CONTRACT §4).
+          kind: Joi.string().valid('group').required(),
           name: Joi.string().allow(null, ''),
           avatar_url: Joi.string().allow(null, ''),
-          members: Joi.array().items(USER_ID).min(1).max(MAX_MEMBERS).required(),
-          // AUTH_CONTRACT §2.5 — one_to_one only, gates the username key.
-          initiatedVia: Joi.string().valid('phone', 'username'),
-          usernameKey: Joi.string().pattern(/^\d{4}$/)
+          members: Joi.array().items(USER_ID).min(1).max(MAX_MEMBERS).required()
         })
       }
     });
@@ -267,9 +266,7 @@ class ChannelMs extends HttpServiceBase {
       kind,
       name,
       avatar_url: avatarUrl,
-      members,
-      initiatedVia,
-      usernameKey
+      members
     } = req.payload;
 
     const replay = await this.replayed(res, user, opId);
@@ -280,22 +277,6 @@ class ChannelMs extends HttpServiceBase {
       return this.reject(res, user, opId, 403, 'forbidden', 'creator must be in members');
     }
 
-    if (kind === 'one_to_one') {
-      if (roster.length !== 2) {
-        return this.reject(
-          res, user, opId, 400, 'validation_failed', 'one_to_one needs exactly 2 members'
-        );
-      }
-      const peer = roster.find((id) => id !== user);
-      const gate = await this.usernameKeyGate(peer, initiatedVia, usernameKey);
-      if (gate) {
-        return this.reject(res, user, opId, 403, gate, 'target requires a matching username key');
-      }
-      // §11.3 — a DM that already exists is the same DM, not a collision.
-      const existing = await this.db.findOneToOne(roster);
-      if (existing) return this.accept(res, user, opId, 200, channelView(existing));
-    }
-
     if (!(await this.inOrder(user, channelId, seq))) {
       return this.reject(res, user, opId, 400, 'out_of_order', 'resource_seq skipped');
     }
@@ -303,10 +284,9 @@ class ChannelMs extends HttpServiceBase {
     const channel = {
       channelId,
       kind,
-      name: kind === 'one_to_one' ? null : name || null,
+      name: name || null,
       avatarUrl: avatarUrl || null,
       owner: user,
-      initiatedVia: kind === 'one_to_one' ? initiatedVia || 'phone' : null,
       members: roster.map((id) => memberRow(id, id === user ? 'owner' : 'member')),
       createdAt: Date.now()
     };
@@ -345,9 +325,6 @@ class ChannelMs extends HttpServiceBase {
     const channel = await this.db.getChannelInfo(channelId);
     const denied = this.requireRole(channel, user, ['owner', 'admin']);
     if (denied) return this.reject(res, user, opId, denied.status, denied.code, denied.message);
-    if (channel.kind === 'one_to_one') {
-      return this.reject(res, user, opId, 403, 'forbidden', 'one_to_one membership is fixed');
-    }
 
     const existing = memberIds(channel);
     const added = members.filter((id) => !existing.includes(id));
@@ -499,9 +476,10 @@ class ChannelMs extends HttpServiceBase {
 
   // ---- reads -------------------------------------------------------------
 
+  /** trim 4: groups are the only channel with a row, so that is the whole list. */
   async getChannels(req) {
     const user = extractInfoFromRequest(req);
-    const channels = await this.db.getMemberChannels(user, req.query.kind || null);
+    const channels = await this.db.getMemberChannels(user);
     return channels.map(channelView);
   }
 
@@ -530,21 +508,6 @@ class ChannelMs extends HttpServiceBase {
     if (!role) return { status: 403, code: 'forbidden', message: 'not a member of this channel' };
     if (!roles.includes(role)) {
       return { status: 403, code: 'forbidden', message: `requires one of ${roles.join('/')}` };
-    }
-    return null;
-  }
-
-  /**
-   * AUTH_CONTRACT.md §2.5 / §7.6 — a username-initiated DM against a keyed
-   * user must present the matching key. Phone-matched contacts bypass it.
-   * @returns {Promise<string|null>} the error code, or null when allowed
-   */
-  async usernameKeyGate(peer, initiatedVia, usernameKey) {
-    if (initiatedVia !== 'username') return null;
-    const hash = await this.db.usernameKeyHash(peer);
-    if (!hash) return null;
-    if (!usernameKey || !(await verifySecret(usernameKey, hash))) {
-      return 'USERNAME_KEY_REQUIRED';
     }
     return null;
   }

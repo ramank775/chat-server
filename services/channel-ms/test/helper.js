@@ -1,5 +1,4 @@
 const { MongoClient } = require('mongodb');
-const { hashSecret } = require('../../../helper');
 const { SERVER_EVENT_MARKER } = require('../../../libs/v3-envelope');
 const { serverEventPayload } = require('../server-event');
 const { ChannelMs, parseOptions, initResource } = require('../channel-ms');
@@ -102,14 +101,6 @@ async function startChannelMs(dbName) {
       const events = this.published();
       const last = events[events.length - 1];
       return { recipients: last.recipients, envelope: last.envelope, body: decodeServerEvent(last) };
-    },
-    /** Seed a profile-ms `users` row so the username-key gate has something to read. */
-    async seedUser(userId, usernameKey = null) {
-      await db.collection('users').insertOne({
-        user_id: userId,
-        deletedAt: null,
-        usernameKeyHash: usernameKey ? await hashSecret(usernameKey) : null
-      });
     },
     async stop() {
       await db.dropDatabase();

@@ -686,16 +686,15 @@ class ProfileMs extends HttpServiceBase {
    * @param {string} userId
    */
   async coMembers(userId) {
-    const lists = await Promise.all(
-      ['group', 'one_to_one'].map((type) =>
-        // the internal list: this runs on the user's behalf, not on a request
-        // of theirs, so it must not go through the authenticated prefix
-        this.channelClient.get('/_internal/', { headers: { 'x-user': userId }, params: { type } })
-      )
-    );
+    // the internal list: this runs on the user's behalf, not on a request of
+    // theirs, so it must not go through the authenticated prefix. Groups are
+    // the only rows left (trim 4), so one call is the whole set.
+    const channels = await this.channelClient.get('/_internal/', {
+      headers: { 'x-user': userId }
+    });
     const members = new Set();
     let channelId = null;
-    lists.flat().forEach((channel) => {
+    channels.forEach((channel) => {
       channelId = channelId || channel.channelId;
       // ponytail: channel-ms still keys members by `username`; v3 step 3.4 renames it
       (channel.members || []).forEach((member) =>

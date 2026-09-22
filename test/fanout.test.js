@@ -58,8 +58,8 @@ describe('REST-write fanout (SYNC_PROTOCOL 10.2)', () => {
 
     app.stubChannels([
       {
-        channelId: 'dm-1',
-        type: 'one_to_one',
+        channelId: 'group-0',
+        type: 'group',
         members: [{ user_id: editor.user_id }, { user_id: peer.user_id }]
       },
       {
@@ -107,8 +107,8 @@ describe('REST-write fanout (SYNC_PROTOCOL 10.2)', () => {
     const peer = await signupWithUsername(app, { phone: '+919500000006', username: 'peer_two' });
     app.stubChannels([
       {
-        channelId: 'dm-2',
-        type: 'one_to_one',
+        channelId: 'group-4',
+        type: 'group',
         members: [{ user_id: editor.user_id }, { user_id: peer.user_id }]
       }
     ]);
@@ -151,8 +151,8 @@ describe('REST-write fanout (SYNC_PROTOCOL 10.2)', () => {
     const peer = await signupWithUsername(app, { phone: '+919500000008', username: 'peer_three' });
     app.stubChannels([
       {
-        channelId: 'dm-3',
-        type: 'one_to_one',
+        channelId: 'group-5',
+        type: 'group',
         members: [{ user_id: editor.user_id }, { user_id: peer.user_id }]
       }
     ]);

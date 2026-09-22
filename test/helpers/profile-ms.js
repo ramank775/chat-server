@@ -76,14 +76,11 @@ async function startProfileMs(dbName) {
   let channels = [];
   const revokes = [];
   const pushTopicDeletes = [];
+  // trim 4: channel-ms lists groups only, so the stub filters on membership.
   service.channelClient.get = async (_path, request) => {
-    const kind = request.params.type;
     const me = request.headers['x-user'];
-    return channels.filter(
-      (channel) =>
-        (channel.type || 'group') === kind &&
-        channel.members.some((member) => (member.user_id ?? member.username) === me)
-    );
+    return channels.filter((channel) =>
+      channel.members.some((member) => (member.user_id ?? member.username) === me));
   };
   service.gatewayClient.post = async (_path, payload) => {
     revokes.push(payload);
