@@ -65,7 +65,8 @@ const REASON = {
   FORBIDDEN: 'forbidden',
   VALIDATION_FAILED: 'validation_failed',
   RATE_LIMITED: 'rate_limited',
-  STORAGE_UNAVAILABLE: 'storage_unavailable'
+  STORAGE_UNAVAILABLE: 'storage_unavailable',
+  DOWNSTREAM_TIMEOUT: 'downstream_timeout'
 };
 
 /** SYNC_PROTOCOL.md §10.2 / §19 decision 15 — server-authored payload marker. */
