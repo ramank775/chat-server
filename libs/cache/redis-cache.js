@@ -21,9 +21,11 @@ class RedisCache {
     this._redis.defineCommand('v3CasNext', {
       numberOfKeys: 1,
       lua: `
-        local current = tonumber(redis.call('GET', KEYS[1]) or '0')
+        -- SYNC_PROTOCOL §6: a missing key (never seen, or expired after the
+        -- dedup window) takes the incoming seq as the baseline
+        local current = redis.call('GET', KEYS[1])
         local want = tonumber(ARGV[1])
-        if want ~= current + 1 then return 0 end
+        if current and want ~= tonumber(current) + 1 then return 0 end
         redis.call('SET', KEYS[1], want, 'EX', ARGV[2])
         return 1`
     });

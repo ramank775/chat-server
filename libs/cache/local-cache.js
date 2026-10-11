@@ -56,13 +56,16 @@ class LocalCache {
   async dispose() {}
 
   /**
-   * Atomic "next in sequence" compare-and-set: succeeds only when `expected`
-   * is exactly one past the stored value (so the first op on a resource is 1).
-   * A failed compare never advances the counter.
+   * Atomic "next in sequence" compare-and-set: succeeds when `expected` is
+   * exactly one past the stored value, or when nothing is stored (it then
+   * becomes the baseline). A failed compare never advances the counter.
    */
   async casNext(key, expected, _ttlSec) {
-    const current = Number(this._cache[key]) || 0;
-    if (expected !== current + 1) return false;
+    // SYNC_PROTOCOL §6: no stored max (never seen, expired, or lost on a
+    // restart) means the incoming seq becomes the baseline; requiring 1
+    // would lock the user out of the channel for good.
+    const stored = this._cache[key];
+    if (stored !== undefined && expected !== Number(stored) + 1) return false;
     this._cache[key] = expected;
     return true;
   }

@@ -128,6 +128,25 @@ test('a skipped resource_seq is out_of_order and does not consume the slot', asy
   });
 });
 
+test('with no stored seq (restart, or expired after the dedup window) the next op sets the baseline', async () => {
+  await withGateway(async ({ uri }) => {
+    const client = connect(uri, ALICE);
+    await client.opened;
+
+    // A client that last sent seq 6 before the server forgot it.
+    client.send(opFrame([envelope(ALICE, 7)]));
+    assert.strictEqual((await client.next()).acks.acks[0].outcome, ACK_OUTCOME.SUCCESS);
+
+    client.send(opFrame([envelope(ALICE, 8)]));
+    assert.strictEqual((await client.next()).acks.acks[0].outcome, ACK_OUTCOME.SUCCESS);
+
+    // Once there is a baseline, a gap is still out_of_order.
+    client.send(opFrame([envelope(ALICE, 10)]));
+    assert.strictEqual((await client.next()).acks.acks[0].reason, REASON.OUT_OF_ORDER);
+    client.close();
+  });
+});
+
 test('a replayed op_id returns the stored ack and is not re-processed', async () => {
   await withGateway(async ({ uri, publishedEnvelopes }) => {
     const client = connect(uri, ALICE);
