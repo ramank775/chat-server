@@ -46,6 +46,52 @@ components:
               type: string
           required: [code, message]
       required: [error]
+    OpFields:
+      type: object
+      description: >-
+        SYNC_PROTOCOL 11.2: every v3 REST write carries these. The same
+        `op_id` replays the stored status and body (7.1), best effort: the
+        dedup window may be lost on a server restart, so clients dedupe what
+        they receive by `op_id`.
+      properties:
+        op_id:
+          type: string
+          format: uuid
+          description: Client minted UUIDv7 with the caller's user_id in it (3); else `prefix_mismatch`
+        client_timestamp_ms:
+          type: integer
+          description: Advisory only, never used for ordering
+        resource_seq:
+          type: integer
+          deprecated: true
+          description: >-
+            Retired (decision 127). The server keeps no per-resource counter
+            and never answers `out_of_order`; a value an older client still
+            sends is accepted and ignored.
+      required: [op_id]
+    Channel:
+      type: object
+      properties:
+        channel_id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [group]
+        name:
+          type: [string, 'null']
+        avatar_url:
+          type: [string, 'null']
+        members:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserId'
+        created_at:
+          type: integer
+          description: ms since epoch
+    UserId:
+      type: string
+      pattern: '^[0-9a-f]{9}$'
   responses:
     AuthError:
       description: >-
@@ -55,6 +101,29 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorEnvelope'
+    ChannelWriteError:
+      description: >-
+        8.2, lowercase codes: 400 `validation_failed` / `prefix_mismatch`,
+        403 `forbidden` (not a member, or lacks the role), 404 `not_found`,
+        409 `resource_id_taken`, 412 `precondition_failed` (100 member cap).
+        Never `out_of_order` (decision 127).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+  parameters:
+    ChannelId:
+      name: channelId
+      in: path
+      required: true
+      schema:
+        type: string
+    MemberId:
+      name: userId
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/UserId'
 security:
   - apikeyAuth: []
 tags:
@@ -83,7 +152,308 @@ tags:
       Web Push (RFC 8030) endpoint registration, AUTH_CONTRACT 5. Every wake is
       encrypted to the device keys (RFC 8291, aes128gcm), VAPID signed
       (RFC 8292) and carries only `{"t":"wake"}`.
+  - name: v3.0 > Channels
+    description: >-
+      Group channels (SYNC_PROTOCOL 11.3). A DM has no row: its id is derived
+      from the pair. Every write fans a server event (payload `0x53`) out on
+      the sync wire to the affected members.
+  - name: v3.0 > Sync
+    description: >-
+      The REST half of the sync wire (`wss://<host>/wss` carries protobuf
+      `WsEnvelope` frames, proto/v3-envelope.proto). The server keeps no
+      per-channel order: it stamps `server_timestamp_ms` on every envelope
+      and returns it on the `Ack`, and clients order a channel by
+      (`server_timestamp_ms`, `op_id`). `Envelope.resource_seq` (3),
+      `Envelope.delivery_sequence` (22) and `Ack.delivery_sequence` (6) are
+      retired and reserved (decision 127).
 paths:
+  /v3.0/channels:
+    get:
+      tags:
+        - v3.0 > Channels
+      summary: List the caller's groups
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Every group the caller is a member of
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Channel'
+        '401':
+          $ref: '#/components/responses/AuthError'
+    post:
+      tags:
+        - v3.0 > Channels
+      summary: Create a group
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/OpFields'
+                - type: object
+                  properties:
+                    channel_id:
+                      type: string
+                      format: uuid
+                      description: Client minted, never reassigned
+                    kind:
+                      type: string
+                      enum: [group]
+                    name:
+                      type: [string, 'null']
+                    avatar_url:
+                      type: [string, 'null']
+                    members:
+                      type: array
+                      minItems: 1
+                      maxItems: 100
+                      description: Must include the caller, who becomes the owner
+                      items:
+                        $ref: '#/components/schemas/UserId'
+                  required: [channel_id, kind, members]
+      responses:
+        '201':
+          description: Created; `ChannelCreated` fans out to the members
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Channel'
+        '400':
+          $ref: '#/components/responses/ChannelWriteError'
+        '403':
+          $ref: '#/components/responses/ChannelWriteError'
+        '409':
+          $ref: '#/components/responses/ChannelWriteError'
+  /v3.0/channels/{channelId}:
+    parameters:
+      - $ref: '#/components/parameters/ChannelId'
+    get:
+      tags:
+        - v3.0 > Channels
+      summary: Get one group the caller is in
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: The group
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Channel'
+        '404':
+          $ref: '#/components/responses/ChannelWriteError'
+    patch:
+      tags:
+        - v3.0 > Channels
+      summary: Rename or re-avatar a group (owner, admin)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/OpFields'
+                - type: object
+                  properties:
+                    name:
+                      type: string
+                    avatar_url:
+                      type: [string, 'null']
+                  anyOf:
+                    - required: [name]
+                    - required: [avatar_url]
+      responses:
+        '200':
+          description: Edited; `ChannelEdited` fans out
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Channel'
+        '400':
+          $ref: '#/components/responses/ChannelWriteError'
+        '403':
+          $ref: '#/components/responses/ChannelWriteError'
+        '404':
+          $ref: '#/components/responses/ChannelWriteError'
+    delete:
+      tags:
+        - v3.0 > Channels
+      summary: Delete a group (owner) or leave it (anyone else)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpFields'
+      responses:
+        '200':
+          description: Left; `ChannelMemberRemoved` fans out
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  member_count:
+                    type: integer
+        '204':
+          description: Deleted by the owner; `ChannelDeleted` fans out
+        '403':
+          $ref: '#/components/responses/ChannelWriteError'
+        '404':
+          $ref: '#/components/responses/ChannelWriteError'
+  /v3.0/channels/{channelId}/members:
+    parameters:
+      - $ref: '#/components/parameters/ChannelId'
+    post:
+      tags:
+        - v3.0 > Channels
+      summary: Add members (owner, admin)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/OpFields'
+                - type: object
+                  properties:
+                    members:
+                      type: array
+                      minItems: 1
+                      maxItems: 100
+                      items:
+                        $ref: '#/components/schemas/UserId'
+                  required: [members]
+      responses:
+        '200':
+          description: Added; `ChannelMemberAdded` fans out to old and new members
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  member_count:
+                    type: integer
+        '403':
+          $ref: '#/components/responses/ChannelWriteError'
+        '404':
+          $ref: '#/components/responses/ChannelWriteError'
+        '412':
+          $ref: '#/components/responses/ChannelWriteError'
+  /v3.0/channels/{channelId}/members/{userId}:
+    parameters:
+      - $ref: '#/components/parameters/ChannelId'
+      - $ref: '#/components/parameters/MemberId'
+    delete:
+      tags:
+        - v3.0 > Channels
+      summary: Remove a member (owner, admin) or leave (yourself)
+      description: >-
+        A leaving owner hands the group to the longest standing admin, else
+        the longest standing member; the last member out deletes it.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpFields'
+      responses:
+        '200':
+          description: Removed; `ChannelMemberRemoved` fans out
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  member_count:
+                    type: integer
+        '403':
+          $ref: '#/components/responses/ChannelWriteError'
+        '404':
+          $ref: '#/components/responses/ChannelWriteError'
+    patch:
+      tags:
+        - v3.0 > Channels
+      summary: Promote to admin or demote to member (owner, admin)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/OpFields'
+                - type: object
+                  properties:
+                    role:
+                      type: string
+                      enum: [admin, member]
+                  required: [role]
+      responses:
+        '200':
+          description: Changed; re-announced as `ChannelMemberAdded{role}`
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user_id:
+                    $ref: '#/components/schemas/UserId'
+                  role:
+                    type: string
+        '403':
+          $ref: '#/components/responses/ChannelWriteError'
+        '404':
+          $ref: '#/components/responses/ChannelWriteError'
+  /v3.0/sync/pending:
+    get:
+      tags:
+        - v3.0 > Sync
+      summary: Drain what was queued for this device while it was offline
+      description: >-
+        Every `WsEnvelope{type: WS_PUSH}` queued for the calling
+        `(user_id, deviceId)` while it had no socket, in enqueue order, and
+        the queue is cleared in the same request: each frame is handed out
+        at most once, also when two requests race. Up to 10,000 frames per
+        device, each kept 30 days, oldest dropped first; the queue survives
+        server restarts. Clients order what they receive by
+        (`server_timestamp_ms`, `op_id`), not by position.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: The queued frames; empty when there are none
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  frames:
+                    type: array
+                    items:
+                      type: string
+                      contentEncoding: base64
+                      description: A serialized `WsEnvelope` (proto/v3-envelope.proto) with `push` set
+                required: [frames]
+        '401':
+          $ref: '#/components/responses/AuthError'
   /v3.0/push/vapid:
     get:
       tags:
