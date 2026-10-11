@@ -1,5 +1,6 @@
 const { ObjectId } = require('mongodb');
 const { addMongodbOptions, initMongoClient } = require('../mongo-utils');
+const { addPgOptions, initPgPool } = require('../pg-utils');
 
 /** SYNC_PROTOCOL.md §19 decisions 1-2: 30 days, 10,000 frames, drop-oldest. */
 const MAX_FRAMES = 10000;
@@ -17,8 +18,9 @@ const FIFO = { at: 1, _id: 1 };
  *
  * Written by message-delivery, read by message-ms. It is the one piece of
  * server state a restart must not lose (DECISIONS rows 125 and 127), so it
- * lives in mongo in every mode: one `{subject, frame, at}` document per
- * frame, expired by a TTL index on `at`.
+ * lives in the database in every mode. This is the mongo one (the default):
+ * one `{subject, frame, at}` document per frame, expired by a TTL index on
+ * `at`. `--undelivered-queue pg` picks pg-undelivered-queue.js instead.
  */
 class UndeliveredQueue {
   /** @type {import('mongodb').MongoClient} */
@@ -102,13 +104,29 @@ class UndeliveredQueue {
 }
 
 function addOptions(cmd) {
-  return addMongodbOptions(cmd);
+  return addPgOptions(addMongodbOptions(cmd)).option(
+    '--undelivered-queue <undelivered-queue>',
+    'Where the undelivered queue lives (mongo, pg)',
+    'mongo'
+  );
 }
 
-/** On the context's mongo client: one pool per process, monolith included. */
+/** On the context's mongo client or pg pool: one per process, monolith included. */
 async function init(context) {
-  const queue = new UndeliveredQueue({ client: initMongoClient(context) });
-  await queue.createIndexes();
+  const type = context.options.undeliveredQueue;
+  let queue;
+  if (type === 'pg') {
+    // required here, not on top: it reads this module's limits
+    // eslint-disable-next-line global-require
+    const { PgUndeliveredQueue } = require('./pg-undelivered-queue');
+    queue = new PgUndeliveredQueue({ pool: initPgPool(context), log: context.log });
+    await queue.init();
+  } else if (type === 'mongo') {
+    queue = new UndeliveredQueue({ client: initMongoClient(context) });
+    await queue.createIndexes();
+  } else {
+    throw new Error(`${type} is not a registered undelivered queue implementation`);
+  }
   context.undeliveredQueue = queue;
   return context;
 }

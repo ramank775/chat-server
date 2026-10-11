@@ -1,11 +1,7 @@
 const assert = require('node:assert');
 const { test, describe, after } = require('node:test');
 const { MongoClient } = require('mongodb');
-const {
-  UndeliveredQueue,
-  COLLECTION,
-  TTL_SEC
-} = require('../../../libs/delivery-manager/undelivered-queue');
+const { COLLECTION, TTL_SEC } = require('../../../libs/delivery-manager/undelivered-queue');
 const { decodeWsEnvelope, WS_TYPE } = require('../../../libs/v3-envelope');
 const {
   envelopeEvent,
@@ -15,8 +11,10 @@ const {
   DB,
   mongoUrlFor,
   emptyQueue,
+  reopenQueue,
   closeQueues
 } = require('./helper');
+const { TEST_DB } = require('../../../test/helpers/db');
 
 const SENDER = '00000000a';
 const ALICE = '00000000b';
@@ -205,9 +203,7 @@ describe('undelivered queue (SYNC_PROTOCOL §10.6, §19 decisions 1-2)', () => {
     await eachSeries([1, 2], (n) => before.enqueue(ALICE_1, Buffer.from(`frame-${n}`)));
 
     // DECISIONS row 125: the in-process queue lost these on every deploy
-    const restarted = new UndeliveredQueue({
-      client: new MongoClient(mongoUrlFor(DB), { auth: null })
-    });
+    const restarted = reopenQueue(DB);
     try {
       assert.deepStrictEqual((await restarted.drain(ALICE_1)).map(String), ['frame-1', 'frame-2']);
     } finally {
@@ -239,7 +235,9 @@ describe('undelivered queue (SYNC_PROTOCOL §10.6, §19 decisions 1-2)', () => {
     });
   });
 
-  test('the indexes include a TTL of the §19 thirty days on the enqueue time', async () => {
+  test('the indexes include a TTL of the §19 thirty days on the enqueue time', {
+    skip: TEST_DB !== 'mongo' && 'mongo only: pg drops day partitions instead'
+  }, async () => {
     const queue = await emptyQueue(DB);
     await queue.createIndexes();
     await queue.createIndexes(); // idempotent: every boot runs it
