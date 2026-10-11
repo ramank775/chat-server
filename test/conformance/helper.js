@@ -3,6 +3,7 @@ const path = require('path');
 const protobufjs = require('protobufjs');
 const WebSocket = require('ws');
 const { MongoClient } = require('mongodb');
+const { Pool } = require('pg');
 const {
   WS_TYPE,
   SERVER_EVENT_MARKER,
@@ -21,6 +22,9 @@ const BASE = process.env.CONFORMANCE_BASE_URL || null;
 /** deployment/docker-compose.infra.yml maps mongo's 27017 straight to the host. */
 const MONGO_URL = process.env.CONFORMANCE_MONGO_URL
   || 'mongodb://root:password@localhost:27017/chat?authSource=admin';
+
+/** Set it for a stack on the pg backend (DB_BACKEND=pg): the read-back goes there instead. */
+const PG_URL = process.env.CONFORMANCE_PG_URL || null;
 
 /** @type {protobufjs.Type} */
 let serverEventType = null;
@@ -71,13 +75,26 @@ async function devOtp(phone) {
 }
 
 /**
- * Direct read of notification-ms's `push_topics` collection — there is no
- * internal readback route, so this is the only way to prove a deregister
- * actually happened.
+ * Direct read of notification-ms's `push_topics` collection (or table) —
+ * there is no internal readback route, so this is the only way to prove a
+ * deregister actually happened.
  * @param {string} userId
  * @param {string} deviceId
  */
 async function pushTopic(userId, deviceId) {
+  if (PG_URL) {
+    const pool = new Pool({ connectionString: PG_URL, max: 1 });
+    try {
+      const { rows } = await pool.query(
+        `SELECT user_id, device_id AS "deviceId", endpoint, p256dh, auth
+         FROM push_topics WHERE user_id = $1 AND device_id = $2`,
+        [userId, deviceId]
+      );
+      return rows[0] || null;
+    } finally {
+      await pool.end();
+    }
+  }
   const client = new MongoClient(MONGO_URL, { auth: null });
   try {
     await client.connect();
