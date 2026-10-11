@@ -8,7 +8,7 @@ const CARL = 'c2d3e4f5a';
 const DAVE = 'd3e4f5a6b';
 
 const CHANNEL = '01efabcd-7000-8000-8abc-000000000001';
-const SEQ_SPACE = '01efabcd-7000-8000-8abc-000000000002';
+const LEGACY = '01efabcd-7000-8000-8abc-000000000002';
 
 /** @type {Awaited<ReturnType<typeof startChannelMs>>} */
 let harness;
@@ -18,12 +18,12 @@ test.after(async () => { await harness.stop(); });
 
 const body = (response) => JSON.parse(response.payload);
 
-function createGroup(channelId, creator, members, seq = 1) {
+function createGroup(channelId, creator, members) {
   return harness.inject({
     method: 'POST',
     url: '/',
     headers: headers(creator),
-    payload: op(creator, seq, { channel_id: channelId, kind: 'group', name: 'Trip', members })
+    payload: op(creator, 1, { channel_id: channelId, kind: 'group', name: 'Trip', members })
   });
 }
 
@@ -36,7 +36,8 @@ test('creates a group and fans ChannelCreated to every member', async () => {
   assert.deepStrictEqual(recipients.sort(), [ALICE, BOB, CARL].sort());
   assert.strictEqual(envelope.senderUserId, ALICE);
   assert.strictEqual(envelope.payload[0], 0x53);
-  assert.ok(envelope.deliverySequence > 0);
+  assert.ok(envelope.serverTimestampMs > 0);
+  assert.strictEqual(envelope.deliverySequence, undefined, 'no per-channel sequence any more');
   assert.strictEqual(event.type, 'CHANNEL_CREATED');
   assert.strictEqual(event.channelCreated.creator, ALICE);
   assert.deepStrictEqual(event.channelCreated.members.sort(), [ALICE, BOB, CARL].sort());
@@ -62,15 +63,33 @@ test('a replayed op_id returns the stored outcome without re-applying', async ()
   assert.strictEqual(harness.published().length, before, 'replay must not fan out again');
 });
 
-test('a skipped resource_seq is rejected as out_of_order', async () => {
-  const response = await harness.inject({
+test('resource_seq from an older client is accepted and ignored, and may be absent', async () => {
+  // DECISIONS row 127: no per-(user, resource) counter, so any value lands
+  const created = await harness.inject({
     method: 'POST',
-    url: `/${CHANNEL}/members`,
+    url: '/',
     headers: headers(ALICE),
-    payload: op(ALICE, 9, { members: [DAVE] })
+    payload: {
+      ...op(ALICE, 90, { channel_id: LEGACY, kind: 'group', name: 'old', members: [ALICE] }),
+      resource_seq: 9
+    }
   });
-  assert.strictEqual(response.statusCode, 400);
-  assert.strictEqual(body(response).error.code, 'out_of_order');
+  assert.strictEqual(created.statusCode, 201);
+  const renamed = await harness.inject({
+    method: 'PATCH',
+    url: `/${LEGACY}`,
+    headers: headers(ALICE),
+    payload: { ...op(ALICE, 91, { name: 'renamed' }), resource_seq: 3 }
+  });
+  assert.strictEqual(renamed.statusCode, 200);
+  const unsequenced = await harness.inject({
+    method: 'PATCH',
+    url: `/${LEGACY}`,
+    headers: headers(ALICE),
+    payload: op(ALICE, 92, { name: 'again' })
+  });
+  assert.strictEqual(unsequenced.statusCode, 200);
+  assert.strictEqual(body(unsequenced).name, 'again');
 });
 
 test('an op_id minted for another user is prefix_mismatch', async () => {
@@ -219,22 +238,6 @@ test('GET / lists groups only', async () => {
   assert.deepStrictEqual([...kinds], ['group']);
 });
 
-test('REST and WS share one sequence space per (user, resource)', async () => {
-  // The gateway writes `seq:<user>:<resource>`; a REST op on the same
-  // resource has to see that value.
-  const { memCache } = harness.server;
-  await createGroup(SEQ_SPACE, ALICE, [ALICE, BOB]);
-  await memCache.set(`seq:${ALICE}:${SEQ_SPACE}`, 40);
-  const response = await harness.inject({
-    method: 'PATCH',
-    url: `/${SEQ_SPACE}`,
-    headers: headers(ALICE),
-    payload: op(ALICE, 41, { name: 'renamed' })
-  });
-  assert.strictEqual(response.statusCode, 200);
-  assert.strictEqual(Number(await memCache.get(`seq:${ALICE}:${SEQ_SPACE}`)), 41);
-});
-
 // ---- roles, owner leave and succession (DECISIONS rows 9 / 80) ------------
 
 const ROLES = '01efabcd-7000-8000-8abc-000000000100';
@@ -243,11 +246,11 @@ const SENIORITY = '01efabcd-7000-8000-8abc-000000000102';
 const LAST = '01efabcd-7000-8000-8abc-000000000103';
 const STRANGER = 'e5f6a7b8c';
 
-/** `op` with a unique op_id, so same-seq writes on other channels cannot collide. */
+/** `op` with a unique op_id, so writes reusing `n` on other channels cannot collide. */
 let nonce = 0;
-function uop(userId, seq, extra = {}) {
+function uop(userId, n, extra = {}) {
   nonce += 1;
-  return { ...op(userId, seq, extra), op_id: mintOpId(userId, { counter: seq, rand: nonce }) };
+  return { ...op(userId, n, extra), op_id: mintOpId(userId, { counter: n, rand: nonce }) };
 }
 
 const newGroup = (channelId, creator, members) => harness.inject({
@@ -257,18 +260,18 @@ const newGroup = (channelId, creator, members) => harness.inject({
   payload: uop(creator, 1, { channel_id: channelId, kind: 'group', name: 'Roles', members })
 });
 
-const setRole = (channelId, actor, target, role, seq) => harness.inject({
+const setRole = (channelId, actor, target, role, n) => harness.inject({
   method: 'PATCH',
   url: `/${channelId}/members/${target}`,
   headers: headers(actor),
-  payload: uop(actor, seq, { role })
+  payload: uop(actor, n, { role })
 });
 
-const leaveChannel = (channelId, actor, seq) => harness.inject({
+const leaveChannel = (channelId, actor, n) => harness.inject({
   method: 'DELETE',
   url: `/${channelId}/members/${actor}`,
   headers: headers(actor),
-  payload: uop(actor, seq)
+  payload: uop(actor, n)
 });
 
 const roles = async (channelId) => {

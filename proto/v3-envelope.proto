@@ -19,9 +19,11 @@ package vartalap.v3;
 // This file defines what the chat-server sees on the WS sync wire. It is
 // intentionally minimal:
 //
-//   * The server validates `op_id` (dedup), `channel_id` (membership),
-//     `resource_seq` (per-resource ordering), and the authenticated
-//     session.
+//   * The server validates `op_id` (dedup), `channel_id` (membership)
+//     and the authenticated session. It keeps no per-channel order: it
+//     stamps `server_timestamp_ms`, and clients order a channel by
+//     (`server_timestamp_ms`, `op_id`). An op that arrives before the op
+//     it refers to (an edit before its message) is the client's to hold.
 //   * The server NEVER inspects the inner `payload` bytes. Chat-content
 //     semantics — message types, edits, deletions, reactions, forwards,
 //     replies, attachments — are entirely the client's concern.
@@ -42,7 +44,7 @@ package vartalap.v3;
 //
 // A client sends an Envelope to push some payload bytes into a channel.
 // The server validates routing fields, adds the server-stamped fields
-// (sender_user_id, server_timestamp_ms, delivery_sequence) on fanout,
+// (sender_user_id, server_timestamp_ms) on fanout,
 // and delivers the same Envelope to every other channel member.
 //
 // Recipients interpret `payload` according to the client-to-client
@@ -50,23 +52,23 @@ package vartalap.v3;
 //
 message Envelope {
   // Client-generated UUIDv7. The dedup key. Stable across retries.
-  // Required on client→server. Echoed unchanged on fanout.
+  // Required on client→server. Echoed unchanged on fanout. Also the
+  // tie-break when two envelopes share a `server_timestamp_ms`.
   string op_id = 1;
 
   // The channel this envelope targets. Server validates the sender is a
   // member: a channel-ms row lookup for a group, the `peer` derivation
-  // below for a DM. Used as the `resource_id` for per-channel
-  // sequencing and dedup keying. Required.
+  // below for a DM. Routing only; not a sequencing key. Required.
   string channel_id = 2;
 
-  // Per-channel monotonic counter, client-generated. Server validates
-  // strict increment per `(authenticated_user_id, channel_id)`.
-  // Required.
-  uint64 resource_seq = 3;
+  // Retired: the per-(user, channel) counter the server used to validate
+  // (`out_of_order`). Sent by older clients; the server ignores it.
+  reserved 3;
+  reserved "resource_seq";
 
   // Client wall-clock at op-creation, ms since epoch. Advisory only —
-  // server may use for audit logs and debugging; never for ordering
-  // (use resource_seq for that). Optional.
+  // server may use for audit logs and debugging; never for ordering —
+  // clients order by server_timestamp_ms then op_id. Optional.
   uint64 client_timestamp_ms = 4;
 
   // OPAQUE TO SERVER. Client-defined chat-content payload. The server
@@ -133,13 +135,13 @@ message Envelope {
   // display-name resolution rule (contact-book → username → phone).
   string sender_user_id = 20;
 
-  // When the server accepted the envelope, ms since epoch.
+  // When the server accepted the envelope, ms since epoch. The ordering
+  // key: recipients order a channel by (server_timestamp_ms, op_id).
   uint64 server_timestamp_ms = 21;
 
-  // Per-channel monotonic sequence assigned by the server at fanout
-  // time. Used by recipients for inbound ordering across senders.
-  // Distinct from `resource_seq` (which is sender-scoped).
-  uint64 delivery_sequence = 22;
+  // Retired: the per-channel sequence the server used to stamp on fanout.
+  reserved 22;
+  reserved "delivery_sequence";
 }
 
 
@@ -156,7 +158,7 @@ message Ack {
 
   // Server-defined code string. Populated for non-success outcomes.
   // See SYNC_PROTOCOL.md §8 for the enumerated set:
-  //   forbidden, prefix_mismatch, out_of_order, rate_limited,
+  //   forbidden, prefix_mismatch, rate_limited,
   //   validation_failed, server_busy, storage_unavailable,
   //   downstream_timeout, fanout_queue_full.
   // Note: per SYNC_PROTOCOL.md §6a, reasons specific to chat-content
@@ -171,11 +173,13 @@ message Ack {
 
   // Server-stamped on success — same value the recipient sees on the
   // fanout Envelope. Lets the sender's local store record a stable
-  // server timestamp without waiting for the fanout echo.
+  // server timestamp (its ordering key) without waiting for the fanout
+  // echo.
   uint64 server_timestamp_ms = 5;
 
-  // Server-stamped on success — same value as the fanout Envelope.
-  uint64 delivery_sequence = 6;
+  // Retired with Envelope.delivery_sequence.
+  reserved 6;
+  reserved "delivery_sequence";
 }
 
 enum AckOutcome {

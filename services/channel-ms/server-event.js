@@ -38,10 +38,10 @@ const VARIANT = {
  * Build the fanout event for one channel write.
  * @param {keyof VARIANT} type
  * @param {object} body the variant message (camelCase fields)
- * @param {{channelId: string, actor: string, recipients: string[], deliverySequence: number}} ctx
+ * @param {{channelId: string, actor: string, recipients: string[]}} ctx
  * @returns {EnvelopeEvent}
  */
-function channelServerEvent(type, body, { channelId, actor, recipients, deliverySequence }) {
+function channelServerEvent(type, body, { channelId, actor, recipients }) {
   const definition = serverEventPayload();
   const bytes = definition
     .encode(definition.fromObject({ version: 1, type, [VARIANT[type]]: body }))
@@ -49,17 +49,14 @@ function channelServerEvent(type, body, { channelId, actor, recipients, delivery
   const now = Date.now();
   return EnvelopeEvent.of(
     {
-      // Server-authored, so there is no client op_id to echo and no
-      // resource_seq: recipients dedup on this id (§10.5) and nothing else
-      // reads it.
+      // Server-authored, so there is no client op_id to echo: recipients
+      // dedup on this id (§10.5) and nothing else reads it.
       opId: uuidv4(),
       channelId,
-      resourceSeq: 0,
       clientTimestampMs: now,
       payload: Buffer.concat([Buffer.from([SERVER_EVENT_MARKER]), bytes]),
       senderUserId: actor,
-      serverTimestampMs: now,
-      deliverySequence
+      serverTimestampMs: now
     },
     recipients
   );

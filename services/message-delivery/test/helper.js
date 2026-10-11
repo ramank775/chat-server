@@ -43,7 +43,6 @@ function envelopeEvent({
   channelId = 'channel-1',
   senderUserId = '00000000a',
   senderDevice = 'device-1',
-  deliverySequence = 1,
   ephemeral = false,
   payload = Buffer.from('chat'),
   recipients = []
@@ -52,12 +51,10 @@ function envelopeEvent({
     {
       opId,
       channelId,
-      resourceSeq: 1,
       payload,
       ephemeral,
       senderUserId,
-      serverTimestampMs: 1700000000000,
-      deliverySequence
+      serverTimestampMs: 1700000000000
     },
     recipients,
     senderDevice

@@ -9,7 +9,9 @@ const {
   opIdUserBits,
   dmChannelId
 } = require('../../../libs/v3-envelope');
-const { ACCESSKEY, mintOpId, opFrame, startGateway, connect } = require('./helper');
+const {
+  ACCESSKEY, mintOpId, opFrame, legacyWire, startGateway, connect
+} = require('./helper');
 
 const ALICE = 'a3f2e8c5d';
 const BOB = 'b1c2d3e4f';
@@ -20,12 +22,12 @@ const DM = dmChannelId(ALICE, BOB);
 
 const payload = (byte = 0x08) => Buffer.from([byte, 0x01, 0x02]);
 
-function envelope(userId, seq, extra = {}) {
-  const { rand = seq, ...fields } = extra;
+/** `n` only makes the op_id unique. */
+function envelope(userId, n, extra = {}) {
+  const { rand = n, ...fields } = extra;
   return {
-    opId: mintOpId(userId, { counter: seq, rand }),
+    opId: mintOpId(userId, { counter: n, rand }),
     channelId: CHANNEL,
-    resourceSeq: seq,
     clientTimestampMs: Date.now(),
     payload: payload(),
     ...fields
@@ -72,7 +74,9 @@ test('binds the socket to x-user and stamps sender_user_id', async () => {
     const [published] = publishedEnvelopes();
     assert.strictEqual(published.key, CHANNEL);
     assert.strictEqual(published.args.envelope.senderUserId, ALICE);
-    assert.strictEqual(published.args.envelope.deliverySequence, 1);
+    assert.strictEqual(
+      published.args.envelope.serverTimestampMs, frame.acks.acks[0].serverTimestampMs
+    );
     client.close();
   });
 });
@@ -108,41 +112,28 @@ test('op_id minted for another user is prefix_mismatch', async () => {
   });
 });
 
-test('a skipped resource_seq is out_of_order and does not consume the slot', async () => {
-  await withGateway(async ({ uri }) => {
+test('resource_seq from an older client is ignored: gaps, repeats and none all land', async () => {
+  await withGateway(async ({ uri, publishedEnvelopes }) => {
     const client = connect(uri, ALICE);
     await client.opened;
 
-    client.send(opFrame([envelope(ALICE, 1)]));
-    assert.strictEqual((await client.next()).acks.acks[0].outcome, ACK_OUTCOME.SUCCESS);
+    // DECISIONS row 127: the server keeps no per-channel counter, so nothing
+    // an older client puts in field 3 can be out_of_order.
+    const seqs = [7, 3, 3, undefined, 1];
+    // eslint-disable-next-line no-restricted-syntax
+    for (const [n, resourceSeq] of seqs.entries()) {
+      client.send(legacyWire.opFrame([{ ...envelope(ALICE, n + 1), resourceSeq }]));
+      // eslint-disable-next-line no-await-in-loop
+      const [ack] = (await client.next()).acks.acks;
+      assert.strictEqual(ack.outcome, ACK_OUTCOME.SUCCESS, `resource_seq ${resourceSeq}`);
+    }
 
-    client.send(opFrame([envelope(ALICE, 3)]));
-    const skipped = (await client.next()).acks.acks[0];
-    assert.strictEqual(skipped.outcome, ACK_OUTCOME.PERMANENT);
-    assert.strictEqual(skipped.reason, REASON.OUT_OF_ORDER);
-
-    // The rejected op never advanced the counter, so seq 2 still lands.
-    client.send(opFrame([envelope(ALICE, 2)]));
-    assert.strictEqual((await client.next()).acks.acks[0].outcome, ACK_OUTCOME.SUCCESS);
-    client.close();
-  });
-});
-
-test('with no stored seq (restart, or expired after the dedup window) the next op sets the baseline', async () => {
-  await withGateway(async ({ uri }) => {
-    const client = connect(uri, ALICE);
-    await client.opened;
-
-    // A client that last sent seq 6 before the server forgot it.
-    client.send(opFrame([envelope(ALICE, 7)]));
-    assert.strictEqual((await client.next()).acks.acks[0].outcome, ACK_OUTCOME.SUCCESS);
-
-    client.send(opFrame([envelope(ALICE, 8)]));
-    assert.strictEqual((await client.next()).acks.acks[0].outcome, ACK_OUTCOME.SUCCESS);
-
-    // Once there is a baseline, a gap is still out_of_order.
-    client.send(opFrame([envelope(ALICE, 10)]));
-    assert.strictEqual((await client.next()).acks.acks[0].reason, REASON.OUT_OF_ORDER);
+    const published = publishedEnvelopes();
+    assert.strictEqual(published.length, seqs.length);
+    // and it is not passed on to the recipients either
+    published.forEach(({ args }) => {
+      assert.strictEqual(legacyWire.decode(args.toPushFrame()).push.resourceSeq, undefined);
+    });
     client.close();
   });
 });
@@ -275,23 +266,24 @@ test('a 0x53 payload from a client is rejected as validation_failed', async () =
   });
 });
 
-test('delivery_sequence increases per channel and is independent across channels', async () => {
-  await withGateway(async ({ uri, addChannel }) => {
-    const other = '01efabcd-7000-8000-8abc-000000000002';
-    addChannel(other, [ALICE]);
+test('the ack and the fanout carry server_timestamp_ms and no delivery_sequence', async () => {
+  await withGateway(async ({ uri, publishedEnvelopes }) => {
     const client = connect(uri, ALICE);
     await client.opened;
+    const before = Date.now();
 
     client.send(opFrame([envelope(ALICE, 1), envelope(ALICE, 2)]));
-    const { acks } = (await client.next()).acks;
-    assert.deepStrictEqual(acks.map((a) => a.deliverySequence), [1, 2]);
+    const frame = await client.next();
+    const { acks } = legacyWire.decode(frame.raw).acks;
+    const pushes = publishedEnvelopes().map(({ args }) => legacyWire.decode(args.toPushFrame()).push);
 
-    client.send(opFrame([envelope(ALICE, 1, { channelId: other })]));
-    const [otherAck] = (await client.next()).acks.acks;
-    assert.strictEqual(otherAck.deliverySequence, 1);
-
-    client.send(opFrame([envelope(ALICE, 3)]));
-    assert.strictEqual((await client.next()).acks.acks[0].deliverySequence, 3);
+    assert.strictEqual(acks.length, 2);
+    acks.forEach((ack, index) => {
+      assert.ok(ack.serverTimestampMs >= before);
+      assert.strictEqual(pushes[index].serverTimestampMs, ack.serverTimestampMs);
+      assert.strictEqual(ack.deliverySequence, undefined, 'Ack.delivery_sequence (6) is retired');
+      assert.strictEqual(pushes[index].deliverySequence, undefined, 'field 22 is retired');
+    });
     client.close();
   });
 });
@@ -326,11 +318,9 @@ test('a fanout envelope is pushed to the recipient device, not to the user', asy
     const stamped = {
       opId: mintOpId(ALICE),
       channelId: CHANNEL,
-      resourceSeq: 1,
       payload: payload(),
       senderUserId: ALICE,
-      serverTimestampMs: Date.now(),
-      deliverySequence: 7
+      serverTimestampMs: 1700000000123
     };
     // delivery keys per `(user_id, device_id)`: only device-1 is addressed
     const offline = gateway.messageHandler(
@@ -340,7 +330,7 @@ test('a fanout envelope is pushed to the recipient device, not to the user', asy
     const frame = await bob.next();
     assert.strictEqual(frame.type, WS_TYPE.WS_PUSH);
     assert.strictEqual(frame.push.senderUserId, ALICE);
-    assert.strictEqual(frame.push.deliverySequence, 7);
+    assert.strictEqual(frame.push.serverTimestampMs, 1700000000123);
     // Every subject we could not reach comes back for the undelivered queue.
     assert.deepStrictEqual(offline, ['c0ffee123:device-1']);
     // bob's other device was not a recipient, so it saw nothing
@@ -450,11 +440,9 @@ test('a second socket for the same device replaces the first with close 1000', a
     const stamped = {
       opId: mintOpId(ALICE),
       channelId: CHANNEL,
-      resourceSeq: 1,
       payload: payload(),
       senderUserId: BOB,
-      serverTimestampMs: Date.now(),
-      deliverySequence: 1
+      serverTimestampMs: Date.now()
     };
     assert.deepStrictEqual(
       gateway.messageHandler(EnvelopeEvent.of(stamped, [`${ALICE}:device-1`])), []
@@ -482,12 +470,12 @@ test('connect and disconnect publish the connection-state event keyed by user_id
   });
 });
 
-test('an ephemeral envelope is fanned out without an ack or a sequence', async () => {
+test('an ephemeral envelope is fanned out without an ack', async () => {
   await withGateway(async ({ uri, publishedEnvelopes }) => {
     const client = connect(uri, ALICE);
     await client.opened;
 
-    client.send(opFrame([envelope(ALICE, 0, { ephemeral: true, resourceSeq: 0 })]));
+    client.send(opFrame([envelope(ALICE, 0, { ephemeral: true })]));
     // No ack is due, so prove the frame landed by following it with one that is.
     client.send(opFrame([envelope(ALICE, 1)]));
     const frame = await client.next();
@@ -497,31 +485,6 @@ test('an ephemeral envelope is fanned out without an ack or a sequence', async (
     const envelopes = publishedEnvelopes();
     assert.strictEqual(envelopes.length, 2);
     assert.strictEqual(envelopes[0].args.envelope.ephemeral, true);
-    assert.strictEqual(envelopes[0].args.envelope.deliverySequence, 0);
-    client.close();
-  });
-});
-
-test('two concurrent frames claiming the same resource_seq: exactly one wins', async () => {
-  await withGateway(async ({ uri, publishedEnvelopes }) => {
-    const client = connect(uri, ALICE);
-    await client.opened;
-
-    // Two frames in flight at once, both claiming seq 1. The compare-and-set
-    // is what stops both of them from passing.
-    client.send(opFrame([envelope(ALICE, 1, { rand: 11 })]));
-    client.send(opFrame([envelope(ALICE, 1, { rand: 22 })]));
-
-    const first = (await client.next()).acks.acks[0];
-    const second = (await client.next()).acks.acks[0];
-
-    assert.deepStrictEqual(
-      [first.outcome, second.outcome].sort(),
-      [ACK_OUTCOME.SUCCESS, ACK_OUTCOME.PERMANENT].sort()
-    );
-    const loser = first.outcome === ACK_OUTCOME.PERMANENT ? first : second;
-    assert.strictEqual(loser.reason, REASON.OUT_OF_ORDER);
-    assert.strictEqual(publishedEnvelopes().length, 1);
     client.close();
   });
 });

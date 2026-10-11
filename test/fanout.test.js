@@ -39,7 +39,7 @@ describe('REST-write fanout (SYNC_PROTOCOL 10.2)', () => {
       return {
         recipients,
         channelId: envelope.channelId,
-        deliverySequence: envelope.deliverySequence,
+        serverTimestampMs: envelope.serverTimestampMs,
         body: ServerEventPayload.toObject(
           ServerEventPayload.decode(envelope.payload.subarray(1)),
           { defaults: false }
@@ -99,7 +99,7 @@ describe('REST-write fanout (SYNC_PROTOCOL 10.2)', () => {
       false,
       'an untouched field is absent, not empty'
     );
-    assert.ok(events[0].deliverySequence > 0);
+    assert.ok(events[0].serverTimestampMs > 0);
   });
 
   test('a username change fans UsernameChanged alongside the profile event', async () => {

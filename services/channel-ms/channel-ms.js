@@ -21,7 +21,6 @@ const asMain = require.main === module;
  */
 const DEDUP_MAX_ENTRIES = 10000;
 const DEDUP_TTL_SEC = 7 * 24 * 60 * 60;
-const SEQ_TTL_SEC = DEDUP_TTL_SEC;
 
 /** §19 — a group is capped; `precondition_failed` once it is hit. */
 const MAX_MEMBERS = 100;
@@ -31,7 +30,8 @@ const USER_ID = Joi.string().pattern(/^[0-9a-f]{9}$/);
 /** SYNC_PROTOCOL.md §11.2 — every REST write carries these. */
 const OP_FIELDS = {
   op_id: Joi.string().uuid().required(),
-  resource_seq: Joi.number().integer().min(1).required(),
+  // Retired (DECISIONS row 127): accepted from older clients and ignored.
+  resource_seq: Joi.any(),
   client_timestamp_ms: Joi.number().integer()
 };
 
@@ -97,10 +97,9 @@ function channelView(channel) {
  * v3 channel service (SYNC_PROTOCOL.md §11.3 writes, §10.2 fanout).
  *
  * Every write shares the client's outbound queue with WS envelopes, so it runs
- * the same preamble: `op_id` prefix binding (§3), dedup replay with the stored
- * outcome (§7.1) and a per-(user, resource) `resource_seq` compare-and-set
- * (§6). The cache keys are the gateway's, so REST and WS share one sequence
- * space per resource.
+ * the same preamble: `op_id` prefix binding (§3) and dedup replay with the
+ * stored outcome (§7.1). The dedup keys are the gateway's, so REST and WS share
+ * one window per user. No ordering is kept here (DECISIONS row 127).
  */
 class ChannelMs extends HttpServiceBase {
   constructor(context) {
@@ -228,12 +227,11 @@ class ChannelMs extends HttpServiceBase {
     return null;
   }
 
-  /** §6 — `resource_seq` must be exactly last + 1 for (user_id, resource). */
-  async inOrder(user, resourceId, seq) {
-    return this.memCache.casNext(`seq:${user}:${resourceId}`, seq, SEQ_TTL_SEC);
-  }
-
-  /** Remember an outcome so a replay of `op_id` repeats it verbatim (§7.1). */
+  /**
+   * Remember an outcome so a replay of `op_id` repeats it verbatim (§7.1).
+   * Best effort: the window lives in the cache and may be lost on a restart,
+   * which is harmless because clients dedupe inbound envelopes by op_id.
+   */
   async store(user, opId, status, body) {
     await this.memCache.dedupPut(
       `dedup:${user}`,
@@ -261,7 +259,6 @@ class ChannelMs extends HttpServiceBase {
     const user = extractInfoFromRequest(req);
     const {
       op_id: opId,
-      resource_seq: seq,
       channel_id: channelId,
       kind,
       name,
@@ -275,10 +272,6 @@ class ChannelMs extends HttpServiceBase {
     const roster = [...new Set([user, ...members])];
     if (!members.includes(user)) {
       return this.reject(res, user, opId, 403, 'forbidden', 'creator must be in members');
-    }
-
-    if (!(await this.inOrder(user, channelId, seq))) {
-      return this.reject(res, user, opId, 400, 'out_of_order', 'resource_seq skipped');
     }
 
     const channel = {
@@ -317,7 +310,7 @@ class ChannelMs extends HttpServiceBase {
   async addMembers(req, res) {
     const user = extractInfoFromRequest(req);
     const { channelId } = req.params;
-    const { op_id: opId, resource_seq: seq, members } = req.payload;
+    const { op_id: opId, members } = req.payload;
 
     const replay = await this.replayed(res, user, opId);
     if (replay) return replay;
@@ -330,10 +323,6 @@ class ChannelMs extends HttpServiceBase {
     const added = members.filter((id) => !existing.includes(id));
     if (existing.length + added.length > MAX_MEMBERS) {
       return this.reject(res, user, opId, 412, 'precondition_failed', 'group member cap exceeded');
-    }
-
-    if (!(await this.inOrder(user, channelId, seq))) {
-      return this.reject(res, user, opId, 400, 'out_of_order', 'resource_seq skipped');
     }
 
     if (added.length) {
@@ -351,7 +340,7 @@ class ChannelMs extends HttpServiceBase {
   async removeMember(req, res) {
     const user = extractInfoFromRequest(req);
     const { channelId, userId } = req.params;
-    const { op_id: opId, resource_seq: seq } = req.payload;
+    const { op_id: opId } = req.payload;
 
     const replay = await this.replayed(res, user, opId);
     if (replay) return replay;
@@ -366,10 +355,6 @@ class ChannelMs extends HttpServiceBase {
       return this.reject(res, user, opId, 404, 'not_found', 'not a member of this channel');
     }
 
-    if (!(await this.inOrder(user, channelId, seq))) {
-      return this.reject(res, user, opId, 400, 'out_of_order', 'resource_seq skipped');
-    }
-
     await this.leave(channel, user, userId);
     return this.accept(res, user, opId, 200, { member_count: channel.members.length - 1 });
   }
@@ -382,7 +367,7 @@ class ChannelMs extends HttpServiceBase {
   async setMemberRole(req, res) {
     const user = extractInfoFromRequest(req);
     const { channelId, userId } = req.params;
-    const { op_id: opId, resource_seq: seq, role } = req.payload;
+    const { op_id: opId, role } = req.payload;
 
     const replay = await this.replayed(res, user, opId);
     if (replay) return replay;
@@ -401,10 +386,6 @@ class ChannelMs extends HttpServiceBase {
       );
     }
 
-    if (!(await this.inOrder(user, channelId, seq))) {
-      return this.reject(res, user, opId, 400, 'out_of_order', 'resource_seq skipped');
-    }
-
     await this.db.setMemberRole(channelId, userId, role);
     await this.announceRole(channel, user, userId, role, memberIds(channel));
     return this.accept(res, user, opId, 200, { user_id: userId, role });
@@ -413,7 +394,7 @@ class ChannelMs extends HttpServiceBase {
   async editChannel(req, res) {
     const user = extractInfoFromRequest(req);
     const { channelId } = req.params;
-    const { op_id: opId, resource_seq: seq, name, avatar_url: avatarUrl } = req.payload;
+    const { op_id: opId, name, avatar_url: avatarUrl } = req.payload;
 
     const replay = await this.replayed(res, user, opId);
     if (replay) return replay;
@@ -421,10 +402,6 @@ class ChannelMs extends HttpServiceBase {
     const channel = await this.db.getChannelInfo(channelId);
     const denied = this.requireRole(channel, user, ['owner', 'admin']);
     if (denied) return this.reject(res, user, opId, denied.status, denied.code, denied.message);
-
-    if (!(await this.inOrder(user, channelId, seq))) {
-      return this.reject(res, user, opId, 400, 'out_of_order', 'resource_seq skipped');
-    }
 
     const updates = {};
     const event = { channelId, editedAtMs: Date.now() };
@@ -448,7 +425,7 @@ class ChannelMs extends HttpServiceBase {
   async deleteChannel(req, res) {
     const user = extractInfoFromRequest(req);
     const { channelId } = req.params;
-    const { op_id: opId, resource_seq: seq } = req.payload;
+    const { op_id: opId } = req.payload;
 
     const replay = await this.replayed(res, user, opId);
     if (replay) return replay;
@@ -456,10 +433,6 @@ class ChannelMs extends HttpServiceBase {
     const channel = await this.db.getChannelInfo(channelId);
     const denied = this.requireRole(channel, user, ['owner', 'admin', 'member']);
     if (denied) return this.reject(res, user, opId, denied.status, denied.code, denied.message);
-
-    if (!(await this.inOrder(user, channelId, seq))) {
-      return this.reject(res, user, opId, 400, 'out_of_order', 'resource_seq skipped');
-    }
 
     if (roleOf(channel, user) !== 'owner') {
       await this.leave(channel, user, user);
@@ -565,13 +538,7 @@ class ChannelMs extends HttpServiceBase {
   async fanout(type, channel, actor, recipients, body) {
     const { newMessageTopic } = this.options;
     const channelId = channel.channelId || body.channelId;
-    const deliverySequence = await this.memCache.incr(`dseq:${channelId}`);
-    const event = channelServerEvent(type, body, {
-      channelId,
-      actor,
-      recipients,
-      deliverySequence
-    });
+    const event = channelServerEvent(type, body, { channelId, actor, recipients });
     await this.eventStore.emit(newMessageTopic, event, channelId);
   }
 

@@ -718,12 +718,10 @@ class ProfileMs extends HttpServiceBase {
     const envelope = {
       opId: uuidv4(),
       channelId,
-      resourceSeq: 0,
       clientTimestampMs: nowMs,
       payload: encodeServerEvent(body),
       senderUserId: '', // server authored
-      serverTimestampMs: nowMs,
-      deliverySequence: await this.memCache.incr(`dseq:${channelId}`)
+      serverTimestampMs: nowMs
     };
     await this.eventStore.emit(
       this.newMessageTopic,

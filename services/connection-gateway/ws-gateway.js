@@ -38,7 +38,6 @@ const EVENT_TYPE = {
 const MAX_BATCH = 20;                       // §19 decision 7
 const DEDUP_MAX_ENTRIES = 10000;            // §19 decision 3
 const DEDUP_TTL_SEC = 7 * 24 * 60 * 60;     // §19 decision 3
-const SEQ_TTL_SEC = DEDUP_TTL_SEC;          // §16: seq tracking aligns with dedup
 const RATE_LIMIT = {                        // §14.1 / §19 decision 4
   user: { capacity: 100, refillPerSec: 30 },
   ip: { capacity: 100, refillPerSec: 100 }
@@ -159,7 +158,7 @@ class Gateway extends HttpServiceBase {
     this.deliveryManager.messageHandler = this.messageHandler.bind(this);
     // The undelivered queue is message-delivery's (V3_RELEASE_PLAN §3.3). It
     // owns `offlineMessageHandler` and is expected to expose
-    //   queueForUser(user_id, wsEnvelopeBytes, deliverySequence)
+    //   queueForUser(user_id, wsEnvelopeBytes)
     // over the recipients it gets back from us. Nothing to do here — and when
     // we share one manager with it (monolith), leave its handler alone.
     if (!this.deliveryManager.offlineMessageHandler) {
@@ -310,8 +309,7 @@ class Gateway extends HttpServiceBase {
 
     const acks = [];
     for (let i = 0; i < envelopes.length; i += 1) {
-      // Serial on purpose: envelopes in one frame may target one resource,
-      // and the resource_seq compare-and-set has to see them in order.
+      // Serial on purpose: acks and fanout keep the frame's envelope order.
       // eslint-disable-next-line no-await-in-loop
       const ack = await this.processEnvelope(ws, envelopes[i]);
       if (ack) acks.push(ack);
@@ -329,9 +327,9 @@ class Gateway extends HttpServiceBase {
     const { opId } = envelope;
     const dedupKey = `dedup:${userId}`;
 
-    // §14 rate limits. Checked first so a flood cannot burn resource_seq
-    // slots or downstream calls, and never recorded in the dedup window —
-    // a transient outcome has to stay retryable.
+    // §14 rate limits. Checked first so a flood cannot burn downstream calls,
+    // and never recorded in the dedup window — a transient outcome has to
+    // stay retryable.
     const retryAfterMs = await this.checkRate(ws);
     if (retryAfterMs) {
       return { opId, outcome: ACK_OUTCOME.TRANSIENT, reason: REASON.RATE_LIMITED, retryAfterMs };
@@ -345,13 +343,14 @@ class Gateway extends HttpServiceBase {
     }
 
     // §7.1 — a replayed op_id returns the stored outcome, never re-processed.
+    // Best effort: the window lives in the cache and may be lost on a restart,
+    // which is harmless because clients dedupe inbound envelopes by op_id.
     if (!envelope.ephemeral) {
       const stored = await this.memCache.dedupGet(dedupKey, opId);
       if (stored) return JSON.parse(stored);
     }
 
-    // §6a.3 step 3 — membership. Before sequencing so a non-member never
-    // advances the channel's counter. A DM id is derived from the pair
+    // §6a.3 step 3 — membership. A DM id is derived from the pair
     // (TRIM_4_12_CONTRACT §3), so it has no row to look up: recompute it
     // from the authenticated sender and `peer` instead.
     let recipients = [];
@@ -388,8 +387,8 @@ class Gateway extends HttpServiceBase {
       return this.rejectPermanent(dedupKey, opId, REASON.VALIDATION_FAILED);
     }
 
-    // Ephemeral (typing): no dedup, no sequencing, no delivery_sequence, no
-    // ack, and message-delivery drops it rather than queueing it offline.
+    // Ephemeral (typing): no dedup, no ack, and message-delivery drops it
+    // rather than queueing it offline.
     if (envelope.ephemeral) {
       await this.publishEnvelope({
         ...envelope,
@@ -399,26 +398,18 @@ class Gateway extends HttpServiceBase {
       return null;
     }
 
-    // §6 — resource_seq must be exactly last + 1 for (user_id, channel_id).
-    const seqKey = `seq:${userId}:${envelope.channelId}`;
-    const inOrder = await this.memCache.casNext(seqKey, envelope.resourceSeq, SEQ_TTL_SEC);
-    if (!inOrder) return this.rejectPermanent(dedupKey, opId, REASON.OUT_OF_ORDER);
-
+    // The server keeps no per-channel order: it stamps server_timestamp_ms
+    // and clients order a channel by (server_timestamp_ms, op_id). An edit
+    // that arrives before its message is the client's to hold (DECISIONS row 127).
     const serverTimestampMs = Date.now();
-    const deliverySequence = await this.memCache.incr(`dseq:${envelope.channelId}`);
     try {
       await this.publishEnvelope({
         ...envelope,
         senderUserId: userId,
-        serverTimestampMs,
-        deliverySequence
+        serverTimestampMs
       }, recipients, ws.deviceId);
     } catch (e) {
       this.log.error('Failed to publish envelope', { err: e, user: userId, opId });
-      // Give the seq slot back so the client's retry of the same op is not
-      // met with out_of_order. Safe because §6 lets the client keep only one
-      // op per resource in flight.
-      await this.memCache.set(seqKey, envelope.resourceSeq - 1);
       return {
         opId,
         outcome: ACK_OUTCOME.TRANSIENT,
@@ -427,7 +418,7 @@ class Gateway extends HttpServiceBase {
       };
     }
 
-    const ack = { opId, outcome: ACK_OUTCOME.SUCCESS, serverTimestampMs, deliverySequence };
+    const ack = { opId, outcome: ACK_OUTCOME.SUCCESS, serverTimestampMs };
     await this.memCache.dedupPut(
       dedupKey, opId, JSON.stringify(ack), DEDUP_MAX_ENTRIES, DEDUP_TTL_SEC
     );

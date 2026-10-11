@@ -1,5 +1,4 @@
 const { Redis } = require('ioredis');
-const { decodeWsEnvelope } = require('../v3-envelope');
 
 /** SYNC_PROTOCOL.md §19 decisions 1-2: 30 days, 10,000 frames, drop-oldest. */
 const MAX_FRAMES = 10000;
@@ -10,32 +9,6 @@ const TTL_SEC = 30 * 24 * 60 * 60;
  * deletes it.
  */
 const queueKey = (subject) => `sync:pending:${subject}`;
-
-/**
- * SYNC_PROTOCOL.md §10.4 / §10.6 — frames go out in `delivery_sequence`
- * order per channel. `delivery_sequence` is minted per channel
- * (`dseq:<channel_id>` in the gateway), so channels cannot be compared;
- * each channel keeps the position of its first queued frame instead.
- * @param {Buffer[]} frames
- */
-function orderPerChannel(frames) {
-  const channelOrder = new Map();
-  const keyed = frames.map((frame, arrival) => {
-    let channelId = '';
-    let sequence = 0;
-    try {
-      const { push } = decodeWsEnvelope(frame);
-      channelId = push.channelId || '';
-      sequence = Number(push.deliverySequence) || 0;
-    } catch (e) {
-      // Undecodable frame: leave it where it arrived rather than drop it.
-    }
-    if (!channelOrder.has(channelId)) channelOrder.set(channelId, channelOrder.size);
-    return { frame, group: channelOrder.get(channelId), sequence, arrival };
-  });
-  keyed.sort((a, b) => a.group - b.group || a.sequence - b.sequence || a.arrival - b.arrival);
-  return keyed.map((entry) => entry.frame);
-}
 
 /**
  * The undelivered queue of SYNC_PROTOCOL.md §10.6: `toPushFrame()` bytes
@@ -80,8 +53,9 @@ class UndeliveredQueue {
   }
 
   /**
-   * Hand back everything queued for a `user_id:device_id` subject and clear
-   * it — at-most-once by design (§10.6 drain semantics).
+   * Hand back everything queued for a `user_id:device_id` subject, in
+   * enqueue order, and clear it — at-most-once by design (§10.6 drain
+   * semantics). Clients order by (server_timestamp_ms, op_id) themselves.
    * @param {string} subject
    * @returns {Promise<Buffer[]>}
    */
@@ -89,7 +63,7 @@ class UndeliveredQueue {
     if (!this._redis) {
       const frames = this._local.get(subject) || [];
       this._local.delete(subject);
-      return orderPerChannel(frames);
+      return frames;
     }
     const replies = await this._redis
       .multi()
@@ -98,7 +72,7 @@ class UndeliveredQueue {
       .exec();
     const [error, frames] = replies[0];
     if (error) throw error;
-    return orderPerChannel(frames || []);
+    return frames || [];
   }
 
   async dispose() {

@@ -13,15 +13,13 @@ const DEVICE = 'device-1';
 const subject = (userId) => `${userId}:${DEVICE}`;
 
 /** Exactly the bytes message-delivery queues. */
-function frameFor(channelId, deliverySequence) {
+function frameFor(channelId, n) {
   return pushFrame({
-    opId: `op-${channelId}-${deliverySequence}`,
+    opId: `op-${channelId}-${n}`,
     channelId,
-    resourceSeq: 1,
     payload: Buffer.from('chat'),
     senderUserId: '00000000a',
-    serverTimestampMs: 1700000000000,
-    deliverySequence
+    serverTimestampMs: 1700000000000 + n
   });
 }
 
@@ -70,10 +68,7 @@ describe('GET /sync/pending (SYNC_PROTOCOL §10.6)', () => {
     // The client does exactly this: base64 -> WsEnvelope -> .push.
     const envelopes = frames.map((frame) => decodeWsEnvelope(Buffer.from(frame, 'base64')));
     assert.deepStrictEqual(envelopes.map((e) => e.type), [WS_TYPE.WS_PUSH, WS_TYPE.WS_PUSH]);
-    assert.deepStrictEqual(
-      envelopes.map((e) => Number(e.push.deliverySequence)),
-      [1, 2]
-    );
+    assert.deepStrictEqual(envelopes.map((e) => e.push.opId), ['op-channel-1-1', 'op-channel-1-2']);
     assert.ok(Buffer.from(frames[0], 'base64').equals(queued[0]));
   });
 
@@ -90,17 +85,15 @@ describe('GET /sync/pending (SYNC_PROTOCOL §10.6)', () => {
     assert.deepStrictEqual(JSON.parse(response.payload), { frames: [] });
   });
 
-  test('frames come back in delivery_sequence order per channel', async () => {
+  test('frames come back in enqueue order; the client sorts by server_timestamp_ms', async () => {
     await [3, 1, 2].reduce(
-      (previous, sequence) => previous.then(() => queue.enqueue(subject(ALICE), frameFor('channel-1', sequence))),
+      (previous, n) => previous.then(() => queue.enqueue(subject(ALICE), frameFor('channel-1', n))),
       Promise.resolve()
     );
 
     const { frames } = JSON.parse((await pull(ALICE)).payload);
-    const sequences = frames.map(
-      (frame) => Number(decodeWsEnvelope(Buffer.from(frame, 'base64')).push.deliverySequence)
-    );
-    assert.deepStrictEqual(sequences, [1, 2, 3]);
+    const opIds = frames.map((frame) => decodeWsEnvelope(Buffer.from(frame, 'base64')).push.opId);
+    assert.deepStrictEqual(opIds, ['op-channel-1-3', 'op-channel-1-1', 'op-channel-1-2']);
   });
 
   test('another device of the same user keeps its own queue', async () => {

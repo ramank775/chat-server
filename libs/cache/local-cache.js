@@ -55,21 +55,6 @@ class LocalCache {
   // eslint-disable-next-line class-methods-use-this, no-empty-function
   async dispose() {}
 
-  /**
-   * Atomic "next in sequence" compare-and-set: succeeds when `expected` is
-   * exactly one past the stored value, or when nothing is stored (it then
-   * becomes the baseline). A failed compare never advances the counter.
-   */
-  async casNext(key, expected, _ttlSec) {
-    // SYNC_PROTOCOL §6: no stored max (never seen, expired, or lost on a
-    // restart) means the incoming seq becomes the baseline; requiring 1
-    // would lock the user out of the channel for good.
-    const stored = this._cache[key];
-    if (stored !== undefined && expected !== Number(stored) + 1) return false;
-    this._cache[key] = expected;
-    return true;
-  }
-
   async dedupGet(key, field) {
     const entry = this._dedup.get(key);
     if (!entry || entry.expiry <= Date.now()) return null;

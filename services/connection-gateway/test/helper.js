@@ -1,4 +1,5 @@
 const WebSocket = require('ws');
+const protobufjs = require('protobufjs');
 const { initDefaultResources } = require('../../../libs/service-base');
 const { initHttpResource } = require('../../../libs/http-service-base');
 const { LocalCache } = require('../../../libs/cache/local-cache');
@@ -39,6 +40,44 @@ function mintOpId(userIdHex, { ms = Date.now(), counter = 0, deviceSlot = 0, ran
 function opFrame(envelopes) {
   return encodeWsEnvelope({ type: WS_TYPE.WS_OP, ops: { envelopes } });
 }
+
+/**
+ * The wire before DECISIONS row 127, with the retired fields still numbered:
+ * Envelope.resource_seq = 3, Envelope.delivery_sequence = 22 and
+ * Ack.delivery_sequence = 6. Encodes what an older client sends, and reads
+ * back whatever the server put on the wire, retired fields included.
+ */
+const LEGACY_WS = protobufjs.parse(`
+  syntax = "proto3";
+  package legacy;
+  message Envelope {
+    string op_id = 1; string channel_id = 2; uint64 resource_seq = 3;
+    uint64 client_timestamp_ms = 4; bytes payload = 5; bool ephemeral = 6;
+    string peer = 7; string sender_user_id = 20; uint64 server_timestamp_ms = 21;
+    uint64 delivery_sequence = 22;
+  }
+  message Ack {
+    string op_id = 1; int32 outcome = 2; string reason = 3; uint64 retry_after_ms = 4;
+    uint64 server_timestamp_ms = 5; uint64 delivery_sequence = 6;
+  }
+  message EnvelopeBatch { repeated Envelope envelopes = 1; }
+  message AckBatch { repeated Ack acks = 1; }
+  message WsEnvelope {
+    int32 type = 1; EnvelopeBatch ops = 10; AckBatch acks = 11; Envelope push = 12;
+  }
+`).root.lookupType('legacy.WsEnvelope');
+
+const legacyWire = {
+  /** A WS_OP frame as an older client encodes it, `resourceSeq` and all. */
+  opFrame(envelopes) {
+    const message = LEGACY_WS.fromObject({ type: WS_TYPE.WS_OP, ops: { envelopes } });
+    return Buffer.from(LEGACY_WS.encode(message).finish());
+  },
+  /** Decode server bytes; a field that was not on the wire is absent, not 0. */
+  decode(bytes) {
+    return LEGACY_WS.toObject(LEGACY_WS.decode(bytes), { longs: Number, defaults: false });
+  }
+};
 
 /** Start the real Gateway on an ephemeral port with a local cache and stubs. */
 async function startGateway(overrides = {}) {
@@ -103,7 +142,9 @@ function connect(uri, userId, deviceId = 'device-1', accesskey = ACCESSKEY) {
     else queue.push(item);
   };
   socket.on('message', (data, isBinary) => {
-    push(isBinary ? decodeWsEnvelope(data) : data.toString());
+    if (!isBinary) return push(data.toString());
+    // the bytes ride along, unenumerated, for `legacyWire.decode`
+    return push(Object.defineProperty(decodeWsEnvelope(data), 'raw', { value: data }));
   });
   const closed = new Promise((resolve) => {
     socket.on('close', (code, reason) => resolve({ code, reason: reason.toString() }));
@@ -129,4 +170,4 @@ function connect(uri, userId, deviceId = 'device-1', accesskey = ACCESSKEY) {
   };
 }
 
-module.exports = { ACCESSKEY, mintOpId, opFrame, startGateway, connect };
+module.exports = { ACCESSKEY, mintOpId, opFrame, legacyWire, startGateway, connect };

@@ -16,20 +16,6 @@ class RedisCache {
   }
 
   _defineCommands() {
-    // Strictly-next compare-and-set (SYNC_PROTOCOL.md §6): only advances
-    // when the incoming value is exactly stored + 1.
-    this._redis.defineCommand('v3CasNext', {
-      numberOfKeys: 1,
-      lua: `
-        -- SYNC_PROTOCOL §6: a missing key (never seen, or expired after the
-        -- dedup window) takes the incoming seq as the baseline
-        local current = redis.call('GET', KEYS[1])
-        local want = tonumber(ARGV[1])
-        if current and want ~= tonumber(current) + 1 then return 0 end
-        redis.call('SET', KEYS[1], want, 'EX', ARGV[2])
-        return 1`
-    });
-
     // Dedup window (§7.1): hash of op_id -> outcome plus a FIFO list that
     // caps it. ponytail: the 7-day TTL is rolled on the whole key rather
     // than per entry; per-entry expiry needs a ZSET sweep, add it if the
@@ -109,11 +95,6 @@ class RedisCache {
 
   async dispose() {
     await this._redis.quit();
-  }
-
-  async casNext(key, expected, ttlSec) {
-    const ok = await this._redis.v3CasNext(key, expected, ttlSec);
-    return ok === 1;
   }
 
   async dedupGet(key, field) {

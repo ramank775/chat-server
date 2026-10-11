@@ -66,7 +66,7 @@ async function startChannelMs(dbName) {
     '--log-level=error',
     `--mongo-url=${mongoUrlFor(dbName)}`,
     '--channel-db=mongo',
-    // LocalCache, not redis: seq/dedup counters must not leak between test
+    // LocalCache, not redis: dedup windows must not leak between test
     // files (or into a dev stack) the way a shared redis would.
     '--cache-type=local',
     '--event-store=memory',
@@ -110,11 +110,10 @@ async function startChannelMs(dbName) {
   };
 }
 
-/** A REST write body with the §11.2 op fields filled in. */
-function op(userId, seq, extra = {}) {
+/** A REST write body with the §11.2 op fields filled in; `n` makes the op_id. */
+function op(userId, n, extra = {}) {
   return {
-    op_id: mintOpId(userId, { counter: seq, rand: seq + 1 }),
-    resource_seq: seq,
+    op_id: mintOpId(userId, { counter: n, rand: n + 1 }),
     client_timestamp_ms: Date.now(),
     ...extra
   };

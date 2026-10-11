@@ -121,35 +121,20 @@ describe('message-delivery fanout (SYNC_PROTOCOL §10.3)', () => {
 });
 
 describe('undelivered queue (SYNC_PROTOCOL §10.6, §19 decisions 1-2)', () => {
-  test('drains in delivery_sequence order within a channel', async () => {
-    const harness = startWorker({ members: new Map([['channel-1', [SENDER, ALICE]]]) });
-    await harness.offline(ALICE);
-
-    await eachSeries([3, 1, 2], (deliverySequence) => harness.worker.onMessage(
-      envelopeEvent({ opId: `op-${deliverySequence}`, deliverySequence })
-    ));
-
-    const frames = await harness.queue.drain(ALICE_1);
-    const sequences = frames.map((frame) => Number(decodeWsEnvelope(frame).push.deliverySequence));
-    assert.deepStrictEqual(sequences, [1, 2, 3]);
-  });
-
-  test('keeps each channel internally ordered when two channels interleave', async () => {
+  test('drains in enqueue order, channels interleaved as they arrived', async () => {
     const members = new Map([['channel-1', [SENDER, ALICE]], ['channel-2', [SENDER, ALICE]]]);
     const harness = startWorker({ members });
     await harness.offline(ALICE);
 
-    const order = [['channel-1', 2], ['channel-2', 9], ['channel-1', 1], ['channel-2', 4]];
-    await eachSeries(order, ([channelId, deliverySequence]) => harness.worker.onMessage(
-      envelopeEvent({ opId: `op-${channelId}-${deliverySequence}`, channelId, deliverySequence })
+    const order = [['channel-1', 'op-3'], ['channel-2', 'op-1'], ['channel-1', 'op-2']];
+    await eachSeries(order, ([channelId, opId]) => harness.worker.onMessage(
+      envelopeEvent({ opId, channelId })
     ));
 
     const drained = (await harness.queue.drain(ALICE_1))
       .map((frame) => decodeWsEnvelope(frame).push)
-      .map((push) => [push.channelId, Number(push.deliverySequence)]);
-    const seqFor = (channelId) => drained.filter(([id]) => id === channelId).map(([, seq]) => seq);
-    assert.deepStrictEqual(seqFor('channel-1'), [1, 2]);
-    assert.deepStrictEqual(seqFor('channel-2'), [4, 9]);
+      .map((push) => [push.channelId, push.opId]);
+    assert.deepStrictEqual(drained, order);
   });
 
   test('every queued frame is a decodable WS_PUSH envelope', async () => {

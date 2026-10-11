@@ -65,7 +65,6 @@ const ACK_OUTCOME = {
 /** SYNC_PROTOCOL.md §8.2 — the reasons this server can actually evaluate. */
 const REASON = {
   PREFIX_MISMATCH: 'prefix_mismatch',
-  OUT_OF_ORDER: 'out_of_order',
   FORBIDDEN: 'forbidden',
   VALIDATION_FAILED: 'validation_failed',
   RATE_LIMITED: 'rate_limited',
@@ -250,10 +249,6 @@ class EnvelopeEvent extends IEventArg {
    */
   get senderSubject() {
     return this._senderDevice ? `${this._envelope.senderUserId}:${this._senderDevice}` : '';
-  }
-
-  get deliverySequence() {
-    return this._envelope.deliverySequence;
   }
 
   /** Ephemeral envelopes are never queued for offline users (proto §ephemeral). */
