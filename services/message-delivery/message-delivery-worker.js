@@ -135,7 +135,7 @@ class MessageDeliveryWorker extends ServiceBase {
   /**
    * SYNC_PROTOCOL.md §10.3 step 3 — every subject delivery-manager could not
    * reach gets the push frame queued, then an offline-message event so
-   * notification-ms fires the ntfy wake (§12.1; it owns the debounce). Both
+   * notification-ms fires the Web Push wake (§12.1; it owns the debounce). Both
    * are keyed per `(user_id, device_id)`.
    * @param {EnvelopeEvent} event
    */

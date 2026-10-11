@@ -15,9 +15,9 @@ class INotificationDB {
 
   /**
    * @abstract
-   * Register or replace the ntfy topic of a (user_id, deviceId) pair
+   * Register or replace the push endpoint of a (user_id, deviceId) pair
    * @param {string} userId
-   * @param {{deviceId: string, topicUrl: string}} options
+   * @param {{deviceId: string, endpoint: string, p256dh: string, auth: string}} options
    */
   // eslint-disable-next-line no-unused-vars
   async upsertTopic(userId, options) {
@@ -26,10 +26,11 @@ class INotificationDB {
 
   /**
    * @abstract
-   * Deregister the ntfy topic of a (user_id, deviceId) pair. No `deviceId`
-   * removes every topic registered for the user (AUTH_CONTRACT 8.2).
+   * Deregister the push endpoint of a (user_id, deviceId) pair. No `deviceId`
+   * removes every endpoint registered for the user (AUTH_CONTRACT 8.2). With
+   * `endpoint`, only while that endpoint is still the registered one.
    * @param {string} userId
-   * @param {{deviceId?: string}} options
+   * @param {{deviceId?: string, endpoint?: string}} options
    */
   // eslint-disable-next-line no-unused-vars
   async removeTopic(userId, options) {
@@ -38,9 +39,9 @@ class INotificationDB {
 
   /**
    * @abstract
-   * Get every registered ntfy topic of a user
+   * Get every registered push endpoint of a user
    * @param {string} userId
-   * @returns {Promise<{deviceId: string, topicUrl: string}[]>}
+   * @returns {Promise<{deviceId: string, endpoint: string, p256dh: string, auth: string}[]>}
    */
   // eslint-disable-next-line no-unused-vars
   async getTopics(userId) {

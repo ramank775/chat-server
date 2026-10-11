@@ -8,7 +8,7 @@ const { HttpServiceBase, addHttpOptions, initHttpResource } = require('../../lib
 const eventStore = require('../../libs/event-store');
 const { addDatabaseOptions, initializeDatabase } = require('./database');
 const { addPNSOptions, initializePNS } = require('./pns');
-const { isAllowedTopicUrl } = require('./pns/ntfy-pn-service');
+const { isAcceptableEndpoint, isValidPushKeys } = require('./pns/webpush-pn-service');
 const { EnvelopeEvent } = require('../../libs/v3-envelope');
 const { extractInfoFromRequest, schemas, errorEnvelope } = require('../../helper');
 
@@ -92,13 +92,27 @@ class NotificationMS extends HttpServiceBase {
     this.eventStore.on = async (event, message, key) => {
       switch (event) {
         case events[EVENT_TYPE.PUSH_NOTIFICATION]:
-          await this.pushNotification(message, key);
+          // ponytail: not awaited, so a push service backing off (retries,
+          // Retry-After) never stalls the offline-message consumer. Ceiling:
+          // in flight pushes are unbounded under a burst, the debounce caps
+          // them at one per recipient per 5 s.
+          this.pushNotification(message, key).catch((err) => {
+            this.log.error(`Error while sending push notification ${err}`, err);
+          });
           break;
         default:
           throw new Error("Unknown event type");
       }
     };
 
+
+    // AUTH_CONTRACT 5.0
+    this.addRoute(
+      '/vapid',
+      'GET',
+      async () => ({ vapidPublicKey: this.options.vapidPublicKey }),
+      { validate: { headers: schemas.authHeaders } }
+    );
 
     this.addRoute(
       '/topic',
@@ -108,7 +122,10 @@ class NotificationMS extends HttpServiceBase {
         validate: {
           headers: schemas.authHeaders,
           payload: Joi.object({
-            topicUrl: Joi.string().uri({ scheme: ['https'] }).allow(null, '').required()
+            endpoint: Joi.string().allow(null, '').required(),
+            // shape checked in the handler: a bad key is INVALID_PUSH_KEYS
+            p256dh: Joi.any(),
+            auth: Joi.any()
           })
         }
       }
@@ -139,8 +156,8 @@ class NotificationMS extends HttpServiceBase {
   }
 
   /**
-   * Register, replace or deregister the ntfy topic of the calling device.
-   * AUTH_CONTRACT §5.1
+   * Register, replace or deregister the Web Push endpoint of the calling
+   * device. AUTH_CONTRACT §5.1
    */
   async registerTopic(req, h) {
     const userId = extractInfoFromRequest(req, 'x-user');
@@ -148,23 +165,29 @@ class NotificationMS extends HttpServiceBase {
     if (!userId) {
       return h.response(errorEnvelope('UNAUTHORIZED', 'x-user header is required')).code(401);
     }
-    const { topicUrl } = req.payload;
-    if (!topicUrl) {
+    const { endpoint, p256dh, auth } = req.payload;
+    if (!endpoint) {
       await this.notifDB.removeTopic(userId, { deviceId });
       return { status: true };
     }
-    if (!isAllowedTopicUrl(topicUrl, this.options.ntfyBaseUrl)) {
-      // AUTH_CONTRACT 5.1
-      return h.response(errorEnvelope('INVALID_TOPIC_URL', 'topicUrl must be https on the configured ntfy host')).code(400);
+    if (!(await isAcceptableEndpoint(endpoint, this.options.pushAllowPrivateEndpoints))) {
+      return h
+        .response(errorEnvelope('INVALID_PUSH_ENDPOINT', 'endpoint must be an https url on a public host'))
+        .code(400);
     }
-    await this.notifDB.upsertTopic(userId, { deviceId, topicUrl });
+    if (!isValidPushKeys(p256dh, auth)) {
+      return h
+        .response(errorEnvelope('INVALID_PUSH_KEYS', 'p256dh must be a 65 byte P-256 point and auth 16 bytes, base64url'))
+        .code(400);
+    }
+    await this.notifDB.upsertTopic(userId, { deviceId, endpoint, p256dh, auth });
     return { status: true };
   }
 
   /**
    * Wake the one offline device a queued frame is waiting for. The key is the
    * `user_id:device_id` subject message-delivery queued under, so the wake,
-   * the queue and the topic share one key (TRIM_4_12_CONTRACT §7).
+   * the queue and the endpoint share one key (TRIM_4_12_CONTRACT §7).
    * @param {import('../../libs/v3-envelope').EnvelopeEvent} message
    * @param {string} subject recipient `user_id:device_id`
    */
@@ -188,14 +211,21 @@ class NotificationMS extends HttpServiceBase {
     }
     this.#lastWakeAt.set(subject, now);
 
+    // ponytail: rows from the ntfy era carry only `topicUrl`, they stay
+    // dormant until the device registers a Web Push endpoint
     const topics = (await this.notifDB.getTopics(user))
-      .filter((topic) => topic.deviceId === device);
+      .filter((topic) => topic.deviceId === device && topic.endpoint);
     if (!topics.length) return;
 
-    await Promise.all(topics.map((topic) => this.pns.push(topic.topicUrl)
-      .then(() => {
+    await Promise.all(topics.map((topic) => this.pns.push(topic)
+      .then(async (status) => {
+        // AUTH_CONTRACT 5.2 case 4: the push service says the endpoint is gone
+        if (status === 404 || status === 410) {
+          await this.notifDB.removeTopic(user, { deviceId: device, endpoint: topic.endpoint });
+        }
+        const delivered = status >= 200 && status < 300;
         this.statsClient.increment({
-          stat: 'notificaton.delivery.count',
+          stat: delivered ? 'notificaton.delivery.count' : 'notificaton.delivery.error_count',
           tags: {
             user,
           }

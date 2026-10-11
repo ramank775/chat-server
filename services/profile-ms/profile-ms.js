@@ -517,7 +517,7 @@ class ProfileMs extends HttpServiceBase {
     await this.authProvider.revoke(accesskey);
     if (session) {
       await this.revokeGatewaySessions(session.user_id, 'revoked', session.deviceId);
-      // 4.6 side effect 3: deregister this device's ntfy topic
+      // 4.6 side effect 3: deregister this device's push endpoint
       await this.revokePushTopics(session.user_id, session.deviceId);
     }
     return { status: true };
@@ -869,7 +869,7 @@ class ProfileMs extends HttpServiceBase {
     await this.profileDB.updateUser(user.user_id, { deletedAt: new Date() });
     await this.authProvider.revokeAll(user.user_id);
     await this.revokeGatewaySessions(user.user_id, 'revoked');
-    // 8.2 step 4: every device's ntfy topic goes with the account
+    // 8.2 step 4: every device's push endpoint goes with the account
     await this.revokePushTopics(user.user_id);
     return { status: true };
   }

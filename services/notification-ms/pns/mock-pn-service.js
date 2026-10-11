@@ -14,11 +14,12 @@ class MockPushNotificationService extends IPushNotificationService {
   }
 
   /**
-   *  Publish a wake notification on the recipient topic
-   * @param {string} topicUrl
+   *  Log the wake instead of publishing it
+   * @param {{endpoint: string}} subscription
    */
-  async push(topicUrl) {
-    this.#logger.info('new push notification', topicUrl);
+  async push({ endpoint }) {
+    this.#logger.info(`new push notification for ${new URL(endpoint).origin}`);
+    return 201;
   }
 }
 

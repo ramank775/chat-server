@@ -1,9 +1,9 @@
 const { IPushNotificationService } = require('./pn-service');
-const ntfy = require('./ntfy-pn-service');
+const webpush = require('./webpush-pn-service');
 const mock = require('./mock-pn-service');
 
 const PN_IMPL = [
-  ntfy,
+  webpush,
   mock
 ]
 
@@ -13,7 +13,7 @@ const PN_IMPL = [
  * @returns {import('commander').Command}
  */
 function addOptions(cmd) {
-  cmd = cmd.option('--pn-service <pn-service>', 'Which push notification service to use (ntfy, mock)', 'ntfy');
+  cmd = cmd.option('--pn-service <pn-service>', 'Which push notification service to use (webpush, mock)', 'webpush');
   PN_IMPL.forEach(impl => {
     cmd = impl.addOptions(cmd)
   })
