@@ -101,6 +101,12 @@ class MongoAuthDB extends IAuthDB {
     );
   }
 
+  async sessionDevices() {
+    return this.#sessions
+      .find({ revokedAt: null }, { projection: { _id: 0, user_id: 1, deviceId: 1 } })
+      .toArray();
+  }
+
   async init() {
     await this.#client.connect();
     const db = this.#client.db();

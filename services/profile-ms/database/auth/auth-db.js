@@ -170,6 +170,15 @@ class IAuthDB {
 
   /**
    * @abstract
+   * Every device with an unrevoked session.
+   * @returns {Promise<{user_id: string, deviceId: string}[]>}
+   */
+  async sessionDevices() {
+    throw new Error('Method not implemented');
+  }
+
+  /**
+   * @abstract
    * Initialize the database instance
    */
   async init() {

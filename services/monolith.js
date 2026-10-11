@@ -246,6 +246,14 @@ async function initResources(options) {
     { producer: true }
   );
   const profile = new profileMs.ProfileMs({ ...profileContext, ...mount(API) });
+  // The in-process registry forgets every device on a restart, and fanout
+  // queues only for devices it knows: without this, a message to a device
+  // that has not reconnected since the deploy is dropped, not queued.
+  // ponytail: one scan of the live sessions per boot; look devices up per
+  // fanout instead if that scan ever gets slow.
+  const devices = await profileContext.authDB.sessionDevices();
+  await Promise.all(devices.map(({ user_id: userId, deviceId }) =>
+    shared.deliveryManager.knownDevice(userId, deviceId)));
 
   const channelContext = await serviceContext(shared, [channelDb.initializeDatabase], {
     producer: true

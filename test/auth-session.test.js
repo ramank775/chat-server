@@ -55,9 +55,14 @@ describe('auth/session and the /auth subrequest', () => {
         payload: { refreshToken: session.refreshToken }
       });
 
+    // the monolith seeds its device registry from these on boot
+    const devices = () => app.server.context.authDB.sessionDevices();
+    assert.ok((await devices()).some((d) => d.user_id === session.user_id && d.deviceId === 'd1'));
+
     const first = await revoke();
     assert.equal(first.statusCode, 200);
     assert.deepEqual(JSON.parse(first.payload), { status: true });
+    assert.ok(!(await devices()).some((d) => d.user_id === session.user_id));
 
     const second = await revoke();
     assert.equal(second.statusCode, 200, 'revoking twice is a no-op');

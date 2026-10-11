@@ -131,9 +131,14 @@ class DeliveryManager {
    * @param {string} deviceId
    */
   async userJoin(userId, deviceId) {
+    await this.knownDevice(userId, deviceId);
+    await this._redis.set(routeKey(`${userId}:${deviceId}`), this.serverId);
+  }
+
+  /** Remember a device, so fanout queues for it while it is offline. */
+  async knownDevice(userId, deviceId) {
     await this._redis.sadd(deviceSetKey(userId), deviceId);
     await this._redis.expire(deviceSetKey(userId), DEVICE_TTL_SEC);
-    await this._redis.set(routeKey(`${userId}:${deviceId}`), this.serverId);
   }
 
   /** Unbind one device's socket. The device itself stays known. */
