@@ -1,30 +1,45 @@
 const { MongoClient } = require('mongodb');
 const { DeliveryManager } = require('../../../libs/delivery-manager');
 const { UndeliveredQueue, COLLECTION } = require('../../../libs/delivery-manager/undelivered-queue');
+const { PgUndeliveredQueue } = require('../../../libs/delivery-manager/pg-undelivered-queue');
 const { EnvelopeEvent } = require('../../../libs/v3-envelope');
 const { MessageDeliveryWorker } = require('../message-delivery-worker');
+const { initPgPool } = require('../../../libs/pg-utils');
+const {
+  TEST_DB,
+  mongoUrlFor,
+  pgUrlFor,
+  freshPgDatabase,
+  dropPgDatabase
+} = require('../../../test/helpers/db');
 
 const OFFLINE_TOPIC = 'offline-message';
 
-const MONGO_URL = process.env.MONGO_URL || 'mongodb://root:password@localhost:27017/?authSource=admin';
-
-/** A database per test file: files run side by side and share the mongo. */
-function mongoUrlFor(dbName) {
-  const url = new URL(MONGO_URL);
-  url.pathname = `/${dbName}`;
-  return url.toString();
-}
-
-/** One client per database for the whole file; `closeQueues` in an `after` drops them. */
+/**
+ * One mongo client or pg pool per database for the whole file (a database per
+ * test file: files run side by side); `closeQueues` in an `after` drops them.
+ */
 const clients = new Map();
 
 /**
- * An empty undelivered queue on the real mongo from
+ * An empty undelivered queue on the real mongo or postgres (`TEST_DB`) from
  * `deployment/docker-compose.infra.yml`.
  * @param {string} dbName unique per test file
  * @param {{maxFrames?: number}} [options]
  */
 async function emptyQueue(dbName, options = {}) {
+  if (TEST_DB === 'pg') {
+    if (!clients.has(dbName)) {
+      await freshPgDatabase(dbName);
+      // `initPgPool`'s pool ends once however often it is ended, like the service's
+      clients.set(dbName, initPgPool({ options: { pgUrl: pgUrlFor(dbName) } }));
+    }
+    const pool = clients.get(dbName);
+    const queue = new PgUndeliveredQueue({ pool, ...options });
+    await queue.init();
+    await pool.query('TRUNCATE undelivered, undelivered_cursor');
+    return queue;
+  }
   if (!clients.has(dbName)) {
     clients.set(dbName, new MongoClient(mongoUrlFor(dbName), { auth: null }));
   }
@@ -33,8 +48,20 @@ async function emptyQueue(dbName, options = {}) {
   return new UndeliveredQueue({ client, ...options });
 }
 
+/** The queue in `dbName` on a connection of its own, as after a restart. */
+function reopenQueue(dbName) {
+  return TEST_DB === 'pg'
+    ? new PgUndeliveredQueue({ pool: initPgPool({ options: { pgUrl: pgUrlFor(dbName) } }) })
+    : new UndeliveredQueue({ client: new MongoClient(mongoUrlFor(dbName), { auth: null }) });
+}
+
 async function closeQueues() {
-  await Promise.all([...clients.values()].map(async (client) => {
+  await Promise.all([...clients].map(async ([dbName, client]) => {
+    if (TEST_DB === 'pg') {
+      await client.end();
+      await dropPgDatabase(dbName);
+      return;
+    }
     await client.db().dropDatabase();
     await client.close();
   }));
@@ -101,7 +128,7 @@ const DB = 'message-delivery-test';
 
 /**
  * Wire up the real worker over a fake redis, a stub event store, a stub
- * channel-ms and an empty mongo queue. `members` maps channel_id -> user_ids.
+ * channel-ms and an empty queue. `members` maps channel_id -> user_ids.
  */
 async function startWorker({ members = new Map(), maxFrames } = {}) {
   const redis = new FakeRedis();
@@ -163,5 +190,6 @@ module.exports = {
   DB,
   mongoUrlFor,
   emptyQueue,
+  reopenQueue,
   closeQueues
 };

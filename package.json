@@ -9,7 +9,7 @@
   "scripts": {
     "lint": "eslint .",
     "test": "node --test \"test/**/*.test.js\" \"services/**/test/*.test.js\"",
-    "test:infra": "docker compose --env-file deployment/.env.tmpl -f deployment/docker-compose.infra.yml up -d mongo redis",
+    "test:infra": "docker compose --env-file deployment/.env.tmpl -f deployment/docker-compose.infra.yml up -d mongo redis postgres",
     "lint:fix": "eslint --fix .",
     "prepare": "husky install",
     "test:conformance:monolith": "CONFORMANCE_BASE_URL=${CONFORMANCE_BASE_URL:-http://localhost:8086} CONFORMANCE_MONGO_URL=${CONFORMANCE_MONGO_URL:-mongodb://root:password@localhost:27018/chat?authSource=admin} npm run test:conformance",
@@ -34,6 +34,7 @@
     "moment": "^2.30.1",
     "mongodb": "^6.7.0",
     "nats": "^2.26.0",
+    "pg": "^8.23.0",
     "protobufjs": "^7.2.5",
     "short-uuid": "^4.2.2",
     "web-push": "3.6.7",

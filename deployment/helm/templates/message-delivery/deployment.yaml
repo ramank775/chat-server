@@ -2,6 +2,7 @@
 {{- $serviceName := "message-delivery" -}}
 {{- $cacheType := .Values.deliveryMs.cacheType | default "local" -}}
 {{- $dbType := .Values.deliveryMs.dbType | default "mongo" -}}
+{{- $undeliveredQueue := .Values.deliveryMs.undeliveredQueue | default "mongo" -}}
 {{- $replica := .Values.deliveryMs.replica | default 1 -}}
 apiVersion: apps/v1
 kind: Deployment
@@ -56,5 +57,9 @@ spec:
             {{- if eq "mongo" $dbType -}}
             {{ include "mongo.opton" | nindent 12 }}
             {{- end -}}
+            - --undelivered-queue={{ $undeliveredQueue }}
+            {{- if eq "pg" $undeliveredQueue }}
+            - --pg-url={{ .Values.pg.url }}
+            {{- end }}
             {{ include "eventStore.option" (dict "consumerGroup" "message-delivery") | nindent 12 }}
 {{- end -}}

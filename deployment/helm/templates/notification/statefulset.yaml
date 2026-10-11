@@ -56,6 +56,9 @@ spec:
             {{- if eq "mongo" $dbType -}}
             {{ include "mongo.option" . | nindent 12  }}
             {{- end -}}
+            {{- if eq "pg" $dbType }}
+            - --pg-url={{ .Values.pg.url }}
+            {{- end }}
             {{ include "eventBroker.options" (dict "consumerGroup" "notification" ) | nindent 12 }}
           env:
             - name: VAPID_PRIVATE_KEY

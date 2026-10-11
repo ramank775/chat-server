@@ -58,4 +58,7 @@ spec:
             {{- if eq "mongo"  $metadataDBType -}}
             {{ include "mongo.opton" | nindent 12 }}
             {{- end -}}
+            {{- if eq "pg" $metadataDBType }}
+            - --pg-url={{ .Values.pg.url }}
+            {{- end }}
 {{- end -}}

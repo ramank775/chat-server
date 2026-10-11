@@ -56,5 +56,8 @@ spec:
             {{- if eq "mongo" $authDBType || if eq "mongo" $profileDBType -}}
             {{ include "mongo.opton" | nindent 12 }}
             {{- end -}}
+            {{- if or (eq "pg" $authDBType) (eq "pg" $profileDBType) }}
+            - --pg-url={{ .Values.pg.url }}
+            {{- end }}
             {{ include "eventStore.option" (dict "consumerGroup" "profile") | nindent 12 }}
 {{- end -}}

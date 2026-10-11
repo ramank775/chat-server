@@ -1,34 +1,65 @@
 const { MongoClient } = require('mongodb');
+const { Pool } = require('pg');
 const { ProfileMs, parseOptions, initResource } = require('../../services/profile-ms/profile-ms');
+const pgProfileDb = require('../../services/profile-ms/database/profile/pg-profile-db');
+const pgAuthDb = require('../../services/profile-ms/database/auth/pg-auth-db');
+const {
+  TEST_DB,
+  MONGO_URL,
+  mongoUrlFor,
+  pgUrlFor,
+  freshPgDatabase,
+  dropPgDatabase,
+  dbFlags,
+  pgDb
+} = require('./db');
 
-const MONGO_URL = process.env.MONGO_URL || 'mongodb://root:password@localhost:27017/?authSource=admin';
 const REDIS_ENDPOINT = process.env.REDIS_ENDPOINT || 'localhost:6379';
 
 /**
- * Point a mongo connection string at a per test file database
+ * The tests' own handle on the stores (`db.collection(...)`), on this run's
+ * backend, and how to clean it up.
  * @param {string} dbName
  */
-function mongoUrlFor(dbName) {
-  const url = new URL(MONGO_URL);
-  url.pathname = `/${dbName}`;
-  return url.toString();
+async function openStore(dbName) {
+  if (TEST_DB === 'pg') {
+    const pool = new Pool({ connectionString: pgUrlFor(dbName) });
+    const db = pgDb(pool, {
+      users: pgProfileDb.FIELDS,
+      sessions: pgAuthDb.SESSION_FIELDS,
+      otp_sessions: pgAuthDb.OTP_FIELDS
+    });
+    return { db, close: () => pool.end(), drop: () => dropPgDatabase(dbName) };
+  }
+  const client = new MongoClient(mongoUrlFor(dbName), { auth: null });
+  await client.connect();
+  const db = client.db();
+  await db.dropDatabase();
+  return {
+    db,
+    close: async () => {
+      await db.dropDatabase();
+      await client.close();
+    },
+    drop: async () => { }
+  };
 }
 
 /**
- * Boot profile-ms in process against the real mongo/redis from
- * `deployment/docker-compose.infra.yml`, with the mock SMS sender and the
- * in-memory event store. No socket is opened: drive it with `inject`.
+ * Boot profile-ms in process against the real mongo or postgres (`TEST_DB`)
+ * and redis from `deployment/docker-compose.infra.yml`, with the mock SMS
+ * sender and the in-memory event store. No socket is opened: drive it with
+ * `inject`.
  * @param {string} dbName database name, unique per test file
  */
 async function startProfileMs(dbName) {
+  if (TEST_DB === 'pg') await freshPgDatabase(dbName);
   const options = parseOptions([
     'node',
     'profile-ms',
     '--app-name=profile-ms-test',
     '--log-level=error',
-    `--mongo-url=${mongoUrlFor(dbName)}`,
-    '--profile-db=mongo',
-    '--auth-db=mongo',
+    ...dbFlags(dbName, ['profile-db', 'auth-db']),
     '--auth-provider=self-hosted-otp',
     '--sms-sender=mock',
     // ponytail: in-process cache so parallel test files never share (or
@@ -51,10 +82,8 @@ async function startProfileMs(dbName) {
   await service.init();
   await service.server.ready();
 
-  const client = new MongoClient(mongoUrlFor(dbName), { auth: null });
-  await client.connect();
-  const db = client.db();
-  await db.dropDatabase();
+  const store = await openStore(dbName);
+  const { db } = store;
 
   // rate limit counters outlive a test run (1h TTL), so drop the ones this
   // service writes. Pattern scoped, never a flushdb: a dev stack may share redis.
@@ -112,10 +141,10 @@ async function startProfileMs(dbName) {
      */
     inject: (request) => service.server.inject(request),
     async stop() {
-      await db.dropDatabase();
-      await client.close();
+      await store.close();
       await context.memCache.dispose();
       await service.shutdown();
+      await store.drop();
     }
   };
 }

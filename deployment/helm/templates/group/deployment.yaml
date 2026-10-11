@@ -48,5 +48,8 @@ spec:
             {{- if eq "mongo" $dbType -}}
             {{ include "mongo.opton" | nindent 12 }}
             {{- end -}}
+            {{- if eq "pg" $dbType }}
+            - --pg-url={{ .Values.pg.url }}
+            {{- end }}
             {{ include "eventStore.option" (dict "consumerGroup" "group") | nindent 12 }}
 {{- end -}}
