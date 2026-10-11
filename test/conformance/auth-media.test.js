@@ -1,5 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
+const crypto = require('crypto');
 const { WS_TYPE } = require('../../libs/v3-envelope');
 const { BASE, api, connect, pushTopic, signupWithUsername } = require('./helper');
 
@@ -12,6 +13,23 @@ const { describe, it, after } = test;
 
 /** Matches --reauth-grace-ms in the gateway; the close frame lands after it. */
 const REAUTH_GRACE_MS = 5000;
+
+/**
+ * A Web Push endpoint the stack accepts without the network: an IP literal
+ * resolves to itself. Nothing is ever pushed to it, every registration here is
+ * dropped before a message could queue for its device.
+ */
+const PUBLIC_ENDPOINT = 'https://8.8.8.8/conformance';
+
+/** A device's UnifiedPush keys (AUTH_CONTRACT 5.1). */
+function deviceKeys() {
+  const ecdh = crypto.createECDH('prime256v1');
+  ecdh.generateKeys();
+  return {
+    p256dh: ecdh.getPublicKey().toString('base64url'),
+    auth: crypto.randomBytes(16).toString('base64url')
+  };
+}
 
 describe('conformance: sessions, push and media', { skip: BASE ? false : 'CONFORMANCE_BASE_URL not set' }, () => {
   /** @type {*} */ let user;
@@ -64,10 +82,10 @@ describe('conformance: sessions, push and media', { skip: BASE ? false : 'CONFOR
     socket = connect(victim.accesskey);
     await socket.opened;
 
-    // 5.1/4.6 step 3 — register a topic so the revoke has something to deregister
+    // 5.1/4.6 step 3 — register an endpoint so the revoke has something to deregister
     const registered = await api('POST', '/v3.0/push/topic', {
       token: victim.accesskey,
-      body: { topicUrl: `https://ntfy.vartalap/${victim.user_id}-revoke-topic` }
+      body: { endpoint: `${PUBLIC_ENDPOINT}/${victim.user_id}-revoke`, ...deviceKeys() }
     });
     assert.equal(registered.status, 200);
     assert.ok(await pushTopic(victim.user_id, victim.deviceId), 'topic was not registered');
@@ -118,28 +136,78 @@ describe('conformance: sessions, push and media', { skip: BASE ? false : 'CONFOR
     assert.equal(refresh.body.error.code, 'INVALID_REFRESH_TOKEN');
   });
 
-  // -- 11. push topic registration -----------------------------------------
+  // -- 11. push registration -----------------------------------------------
 
-  it('accepts only https topic urls under the configured ntfy base', async () => {
+  it('serves the VAPID public key behind auth (5.0)', async () => {
+    const vapid = await api('GET', '/v3.0/push/vapid', { token: user.accesskey });
+    assert.equal(vapid.status, 200);
+    assert.match(vapid.body.vapidPublicKey, /^[A-Za-z0-9_-]{87}$/);
+    const point = Buffer.from(vapid.body.vapidPublicKey, 'base64url');
+    assert.equal(point.length, 65);
+    assert.equal(point[0], 0x04);
+
+    const anonymous = await api('GET', '/v3.0/push/vapid');
+    assert.equal(anonymous.status, 401);
+  });
+
+  it('registers only https public Web Push endpoints with valid keys (5.1)', async () => {
+    const keys = deviceKeys();
+    const endpoint = `${PUBLIC_ENDPOINT}/${user.user_id}`;
     const register = await api('POST', '/v3.0/push/topic', {
       token: user.accesskey,
-      body: { topicUrl: `https://ntfy.vartalap/${user.user_id}-conformance` }
+      body: { endpoint, ...keys }
     });
     assert.equal(register.status, 200);
     assert.deepEqual(register.body, { status: true });
+    const stored = await pushTopic(user.user_id, user.deviceId);
+    assert.equal(stored.endpoint, endpoint);
+    assert.equal(stored.p256dh, keys.p256dh);
+    assert.equal(stored.auth, keys.auth);
 
-    const foreign = await api('POST', '/v3.0/push/topic', {
+    // a registration replaces the previous one for the same (user_id, deviceId)
+    const replaced = await api('POST', '/v3.0/push/topic', {
       token: user.accesskey,
-      body: { topicUrl: 'https://ntfy.example.com/somebody-elses-topic' }
+      body: { endpoint: `${endpoint}-2`, ...keys }
     });
-    assert.equal(foreign.status, 400);
-    assert.equal(foreign.body.error.code, 'INVALID_TOPIC_URL');
+    assert.equal(replaced.status, 200);
+    assert.equal((await pushTopic(user.user_id, user.deviceId)).endpoint, `${endpoint}-2`);
 
-    const plaintext = await api('POST', '/v3.0/push/topic', {
+    const badEndpoints = [
+      'http://8.8.8.8/insecure',
+      'https://someone:secret@8.8.8.8/userinfo',
+      'https://127.0.0.1/loopback',
+      'https://10.0.0.1/rfc1918',
+      'https://169.254.169.254/link-local',
+      'https://100.64.0.1/cgnat',
+      'https://[::1]/loopback',
+      'https://[fd00::1]/ula',
+      'https://[::ffff:192.168.0.1]/mapped',
+      `${PUBLIC_ENDPOINT}/${'a'.repeat(2048)}`
+    ];
+    const rejected = await Promise.all(badEndpoints.map((bad) => api('POST', '/v3.0/push/topic', {
       token: user.accesskey,
-      body: { topicUrl: 'http://ntfy.vartalap/insecure' }
+      body: { endpoint: bad, ...keys }
+    })));
+    rejected.forEach((res, index) => {
+      assert.equal(res.status, 400, badEndpoints[index].slice(0, 60));
+      assert.equal(res.body.error.code, 'INVALID_PUSH_ENDPOINT', badEndpoints[index].slice(0, 60));
     });
-    assert.equal(plaintext.status, 400);
+
+    const badKeys = [
+      { p256dh: keys.p256dh },
+      { ...keys, p256dh: keys.p256dh.slice(0, 43) },
+      { ...keys, auth: crypto.randomBytes(8).toString('base64url') }
+    ];
+    const keyErrors = await Promise.all(badKeys.map((bad) => api('POST', '/v3.0/push/topic', {
+      token: user.accesskey,
+      body: { endpoint, ...bad }
+    })));
+    keyErrors.forEach((res) => {
+      assert.equal(res.status, 400);
+      assert.equal(res.body.error.code, 'INVALID_PUSH_KEYS');
+    });
+    // none of the rejects touched the registration
+    assert.equal((await pushTopic(user.user_id, user.deviceId)).endpoint, `${endpoint}-2`);
 
     const missingBody = await api('POST', '/v3.0/push/topic', {
       token: user.accesskey,
@@ -147,15 +215,16 @@ describe('conformance: sessions, push and media', { skip: BASE ? false : 'CONFOR
     });
     assert.equal(missingBody.status, 400);
 
-    // null deregisters the device's topic (5.1)
+    // null deregisters the device's endpoint (5.1)
     const dereg = await api('POST', '/v3.0/push/topic', {
       token: user.accesskey,
-      body: { topicUrl: null }
+      body: { endpoint: null }
     });
     assert.equal(dereg.status, 200);
+    assert.equal(await pushTopic(user.user_id, user.deviceId), null);
 
     const anonymous = await api('POST', '/v3.0/push/topic', {
-      body: { topicUrl: 'https://ntfy.vartalap/nope' }
+      body: { endpoint, ...keys }
     });
     assert.equal(anonymous.status, 401);
   });
