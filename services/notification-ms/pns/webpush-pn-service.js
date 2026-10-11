@@ -144,6 +144,10 @@ function send({ endpoint, method, headers, body }, allowPrivate) {
         method,
         headers,
         lookup: allowPrivate ? undefined : lookupPublic,
+        // Node gives each address 250 ms before trying the next; a far push
+        // service (ntfy.sh is ~235 ms away from India) then loses its IPv4
+        // attempt to a dead IPv6 one and the whole send fails (AggregateError).
+        autoSelectFamilyAttemptTimeout: 1000,
         signal: AbortSignal.timeout(SEND_TIMEOUT_MS)
       },
       (res) => {
@@ -203,7 +207,17 @@ class WebPushNotificationService extends IPushNotificationService {
 
   /** 429 / 5xx retry with backoff, honouring Retry-After (AUTH_CONTRACT §5.1). */
   async #deliver(request, allowPrivate, attempt = 1) {
-    const { status, retryAfter } = await send(request, allowPrivate);
+    let status;
+    let retryAfter;
+    try {
+      ({ status, retryAfter } = await send(request, allowPrivate));
+    } catch (error) {
+      // A reset, a timeout or every address failing is as transient as a 5xx;
+      // a non public address is a refusal, never retried.
+      if (error.code === 'ENOTPUBLIC' || attempt >= MAX_ATTEMPTS) throw error;
+      await sleep(retryDelay(null, attempt));
+      return this.#deliver(request, allowPrivate, attempt + 1);
+    }
     if ((status !== 429 && status < 500) || attempt >= MAX_ATTEMPTS) return status;
     const delay = retryDelay(retryAfter, attempt);
     if (delay > MAX_RETRY_DELAY_MS) return status;

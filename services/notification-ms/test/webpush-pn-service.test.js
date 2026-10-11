@@ -88,6 +88,10 @@ async function pushServer(statuses) {
     req.on('end', () => {
       requests.push({ url: req.url, headers: req.headers, body: Buffer.concat(chunks) });
       const [status, headers] = statuses[Math.min(requests.length, statuses.length) - 1];
+      if (status === 'reset') {
+        req.socket.destroy();
+        return;
+      }
       res.writeHead(status, headers).end('ignored');
     });
   });
@@ -214,6 +218,17 @@ test('429 / 5xx retry honouring Retry-After, up to 3 attempts', async () => {
     assert.strictEqual(failing.requests.length, 3, 'gives up after 3 attempts');
   } finally {
     failing.close();
+  }
+});
+
+test('a network error (connection reset) is retried like a 5xx', async () => {
+  const server = await pushServer([['reset'], [201]]);
+  try {
+    const pns = await service(true);
+    assert.strictEqual(await pns.push({ endpoint: `${server.origin}/up/x`, ...device().keys }), 201);
+    assert.strictEqual(server.requests.length, 2);
+  } finally {
+    server.close();
   }
 });
 
