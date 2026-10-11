@@ -89,6 +89,9 @@ function channelView(channel) {
     name: channel.name,
     avatar_url: channel.avatarUrl,
     members: memberIds(channel),
+    // additive (DECISIONS row 150): lets a member added later, or a
+    // reinstalled client, rebuild the roster with its owner and admins
+    roles: Object.fromEntries(channel.members.map((m) => [m.user_id, m.role])),
     created_at: channel.createdAt
   };
 }

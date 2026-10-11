@@ -620,6 +620,11 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
       && event.memberRemoved.channelId === roleGroup);
     assert.equal(removed.memberRemoved.member, alice.user_id);
 
+    // the roster a member rebuilds from carries the roles, handover included
+    const info = await api('GET', `/v3.0/channels/${roleGroup}`, { token: carol.accesskey });
+    assert.equal(info.status, 200);
+    assert.deepEqual(info.body.roles, { [bob.user_id]: 'owner', [carol.user_id]: 'member' });
+
     await carolWs.close();
   });
 });
