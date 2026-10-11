@@ -78,9 +78,11 @@ test('upload presign returns a url scoped to the caller and the declared size', 
   });
 
   assert.strictEqual(res.statusCode, 200);
+  // contentType is what was signed: the client's PUT must send exactly it.
   assert.deepStrictEqual(JSON.parse(res.payload), {
     url: `https://s3.test/upload/${FILE_ID}`,
-    fileId: FILE_ID
+    fileId: FILE_ID,
+    contentType: 'image/jpeg'
   });
   assert.strictEqual(db.created[0].owner, OWNER);
   assert.strictEqual(storage.signed[0].contentType, 'image/jpeg');
@@ -181,6 +183,11 @@ test('content type lookup resolves every extension a record names', async () => 
   // a record dedicated to one extension beats an earlier multi extension one
   assert.strictEqual(getContentTypeByExt('xml'), 'application/xml');
   assert.strictEqual(getContentTypeByExt('nosuchext'), 'application/octet-stream');
+  // What phones record and shoot.
+  assert.strictEqual(getContentTypeByExt('m4a'), 'audio/mp4');
+  assert.strictEqual(getContentTypeByExt('opus'), 'audio/ogg');
+  assert.strictEqual(getContentTypeByExt('mov'), 'video/quicktime');
+  assert.strictEqual(getContentTypeByExt('heic'), 'image/heic');
 });
 
 test('s3 upload url is bucket scoped and signs content type and length', async () => {

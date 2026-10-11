@@ -4150,5 +4150,35 @@
     "context-type": "application/vnd.zzazz.deck+xml",
     "ext": ".zaz",
     "source": "IANA: Zzazz"
+  },
+  {
+    "title": "MPEG-4 Audio (phone recorders, voice notes)",
+    "context-type": "audio/mp4",
+    "ext": ".m4a",
+    "source": "RFC 4337"
+  },
+  {
+    "title": "MP3 Audio",
+    "context-type": "audio/mpeg",
+    "ext": ".mp3",
+    "source": "RFC 3003"
+  },
+  {
+    "title": "Ogg Audio (Vorbis, Opus)",
+    "context-type": "audio/ogg",
+    "ext": ".ogg, .opus",
+    "source": "RFC 5334, RFC 7845"
+  },
+  {
+    "title": "QuickTime Video (phone cameras)",
+    "context-type": "video/quicktime",
+    "ext": ".mov",
+    "source": "IANA: video/quicktime"
+  },
+  {
+    "title": "HEIC Image (phone cameras)",
+    "context-type": "image/heic",
+    "ext": ".heic",
+    "source": "IANA: image/heic"
   }
 ]

@@ -151,9 +151,12 @@ class MediaMetadataMS extends HttpServiceBase {
     };
     payload.fileId = await this.db.createRecord(fileRecord);
     const preSignedURL = await this.getSignedURL(payload, 'upload');
+    // The PUT must carry exactly the content-type signed into the url;
+    // say which, so clients don't need their own copy of this mapping.
     return {
       url: preSignedURL,
-      fileId: payload.fileId
+      fileId: payload.fileId,
+      contentType,
     };
   }
 
