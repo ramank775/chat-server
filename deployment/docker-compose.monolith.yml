@@ -1,6 +1,7 @@
 # Decisions 70 and 71: the same services in one process. No nginx (the auth
 # subrequest is an in-process hook), no redis (in-process cache and delivery),
-# no nats (in-process event bus). Its own compose project, so it can run beside
+# no nats (in-process event bus). What must survive a restart, the undelivered
+# queue included, is in mongo (decision 127). Its own compose project, so it can run beside
 # the microservice stack; override NGINX_PORT / MONGO_PORT / MINIO_PORT /
 # S3_ENDPOINT when it does.
 name: vartalap-monolith

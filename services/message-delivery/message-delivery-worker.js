@@ -7,7 +7,7 @@ const {
 } = require('../../libs/service-base');
 const ChannelServiceClient = require('../../libs/channel-service-client');
 const DeliveryManager = require('../../libs/delivery-manager');
-const { UndeliveredQueue } = require('../../libs/delivery-manager/undelivered-queue');
+const UndeliveredQueue = require('../../libs/delivery-manager/undelivered-queue');
 const { EnvelopeEvent } = require('../../libs/v3-envelope');
 
 const asMain = require.main === module;
@@ -30,17 +30,11 @@ async function prepareEventList(context) {
   return context;
 }
 
-/** Shares the delivery manager's redis client — no second connection. */
-async function initUndeliveredQueue(context) {
-  context.undeliveredQueue = new UndeliveredQueue({ redis: context.deliveryManager.redis });
-  return context;
-}
-
 async function initResources(options) {
   let context = await initDefaultResources(options)
     .then(ChannelServiceClient.init)
     .then(DeliveryManager.init)
-    .then(initUndeliveredQueue)
+    .then(UndeliveredQueue.init)
     .then(prepareEventList);
 
   context = await eventStore.initializeEventStore({
@@ -56,6 +50,7 @@ function parseOptions(argv) {
   cmd = eventStore.addEventStoreOptions(cmd);
   cmd = ChannelServiceClient.addOptions(cmd);
   cmd = DeliveryManager.addOptions(cmd);
+  cmd = UndeliveredQueue.addOptions(cmd);
   cmd = cmd
     .option(
       '--offline-message-topic <offline-message-topic>',
@@ -155,6 +150,7 @@ class MessageDeliveryWorker extends ServiceBase {
 
   async shutdown() {
     await this.eventStore.dispose();
+    await this.undeliveredQueue.dispose();
   }
 }
 

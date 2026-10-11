@@ -108,11 +108,6 @@ class DeliveryManager {
     if (options.eventArg) this.eventArg = options.eventArg;
   }
 
-  /** The connected client, so the undelivered queue can share it. */
-  get redis() {
-    return this._redis;
-  }
-
   async startConsumer(redis = null) {
     // one process, one gateway: `_send` never leaves this manager, so there is
     // no pubsub to subscribe to and no health key for anyone to read.

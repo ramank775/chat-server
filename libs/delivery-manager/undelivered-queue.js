@@ -1,100 +1,115 @@
-const { Redis } = require('ioredis');
+const { ObjectId } = require('mongodb');
+const { addMongodbOptions, initMongoClient } = require('../mongo-utils');
 
 /** SYNC_PROTOCOL.md §19 decisions 1-2: 30 days, 10,000 frames, drop-oldest. */
 const MAX_FRAMES = 10000;
 const TTL_SEC = 30 * 24 * 60 * 60;
 
-/**
- * One list per `user_id:device_id` subject (TRIM_4_12_CONTRACT §7); the drain
- * deletes it.
- */
-const queueKey = (subject) => `sync:pending:${subject}`;
+const COLLECTION = 'undelivered_frames';
+
+/** Enqueue order: `at` is when the frame was queued, `_id` breaks a tie. */
+const FIFO = { at: 1, _id: 1 };
 
 /**
- * The undelivered queue of SYNC_PROTOCOL.md §10.6: `toPushFrame()` bytes
- * held for a user whose sockets were all closed, drained in one shot by
- * `GET /v3.0/sync/pending`.
+ * The undelivered queue of SYNC_PROTOCOL.md §10.6: `toPushFrame()` bytes held
+ * for a `user_id:device_id` subject (TRIM_4_12_CONTRACT §7) whose socket was
+ * closed, drained in one shot by `GET /v3.0/sync/pending`.
  *
- * Written by message-delivery, read by message-ms. The cache lib has no
- * list primitive, so this talks to ioredis directly.
- * ponytail: without a redis client it keeps the queue in process — enough
- * for tests and a single-node dev run, useless the moment there are two
- * replicas. Pass a client for anything real.
+ * Written by message-delivery, read by message-ms. It is the one piece of
+ * server state a restart must not lose (DECISIONS rows 125 and 127), so it
+ * lives in mongo in every mode: one `{subject, frame, at}` document per
+ * frame, expired by a TTL index on `at`.
  */
 class UndeliveredQueue {
-  /** @type {Map<string, Buffer[]>} */
-  _local = new Map();
+  /** @type {import('mongodb').MongoClient} */
+  #client;
 
-  constructor({ redis = null, maxFrames = MAX_FRAMES, ttlSec = TTL_SEC } = {}) {
-    this._redis = redis;
-    this._maxFrames = maxFrames;
-    this._ttlSec = ttlSec;
+  /** @type {import('mongodb').Collection} */
+  #frames;
+
+  #maxFrames;
+
+  /**
+   * @param {{client: import('mongodb').MongoClient, maxFrames?: number}} options
+   *   `client` points at the database the queue lives in.
+   */
+  constructor({ client, maxFrames = MAX_FRAMES }) {
+    this.#client = client;
+    this.#frames = client.db().collection(COLLECTION);
+    this.#maxFrames = maxFrames;
+  }
+
+  /** The drain index and the TTL index. Idempotent; `init` runs it at boot. */
+  async createIndexes() {
+    await this.#frames.createIndexes([
+      { key: { subject: 1, ...FIFO } },
+      { key: { at: 1 }, expireAfterSeconds: TTL_SEC }
+    ]);
   }
 
   /**
    * Append one push frame for a `user_id:device_id` subject, dropping the
-   * oldest past the cap and rolling the TTL forward.
+   * oldest past the cap.
+   * ponytail: the cap check walks up to `maxFrames` index keys per enqueue;
+   * keep a per-subject count if queues ever sit at the cap.
    * @param {string} subject
    * @param {Buffer} frame serialized WsEnvelope{type: WS_PUSH}
    */
   async enqueue(subject, frame) {
-    if (!this._redis) {
-      const frames = this._local.get(subject) || [];
-      frames.push(frame);
-      this._local.set(subject, frames.slice(-this._maxFrames));
-      return;
+    await this.#frames.insertOne({ subject, frame, at: new Date() });
+    const excess = await this.#frames
+      .find({ subject }, { projection: { _id: 1 } })
+      .sort({ at: -1, _id: -1 })
+      .skip(this.#maxFrames)
+      .toArray();
+    if (excess.length) {
+      await this.#frames.deleteMany({ _id: { $in: excess.map(({ _id }) => _id) } });
     }
-    await this._redis
-      .multi()
-      .rpush(queueKey(subject), frame)
-      .ltrim(queueKey(subject), -this._maxFrames, -1)
-      .expire(queueKey(subject), this._ttlSec)
-      .exec();
   }
 
   /**
-   * Hand back everything queued for a `user_id:device_id` subject, in
-   * enqueue order, and clear it — at-most-once by design (§10.6 drain
-   * semantics). Clients order by (server_timestamp_ms, op_id) themselves.
+   * Hand back everything queued for a `user_id:device_id` subject, in enqueue
+   * order, and remove exactly that — at-most-once by design (§10.6 drain
+   * semantics). A drain first claims the frames, each one atomically, so two
+   * drains racing (two gateways, a retried request) never return the same
+   * frame, and one enqueued mid-drain waits for the next drain. Clients order
+   * by (server_timestamp_ms, op_id) themselves.
+   * ponytail: a process that dies between claim and delete strands what it
+   * claimed until the TTL; re-claim claims older than a minute if that shows up.
    * @param {string} subject
    * @returns {Promise<Buffer[]>}
    */
   async drain(subject) {
-    if (!this._redis) {
-      const frames = this._local.get(subject) || [];
-      this._local.delete(subject);
-      return frames;
+    const claim = new ObjectId();
+    await this.#frames.updateMany({ subject, claim: null }, { $set: { claim } });
+    try {
+      const claimed = await this.#frames
+        .find({ subject, claim }, { promoteBuffers: true })
+        .sort(FIFO)
+        .toArray();
+      await this.#frames.deleteMany({ subject, claim });
+      return claimed.map((doc) => doc.frame);
+    } catch (error) {
+      // nothing was handed out: give the frames back for the client's retry
+      await this.#frames.updateMany({ subject, claim }, { $unset: { claim: '' } });
+      throw error;
     }
-    const replies = await this._redis
-      .multi()
-      .lrangeBuffer(queueKey(subject), 0, -1)
-      .del(queueKey(subject))
-      .exec();
-    const [error, frames] = replies[0];
-    if (error) throw error;
-    return frames || [];
   }
 
   async dispose() {
-    if (this._redis) await this._redis.quit();
+    await this.#client.close();
   }
 }
 
 function addOptions(cmd) {
-  return cmd
-    .option('--cache-type <cache-type>', 'Type of cache service (local, redis)', 'local')
-    .option(
-      '--redis-endpoint <redis-endpoint>',
-      'Redis endpoint to connet with in case of cache type redis',
-      '127.0.0.1:6379'
-    );
+  return addMongodbOptions(cmd);
 }
 
+/** On the context's mongo client: one pool per process, monolith included. */
 async function init(context) {
-  const { cacheType, redisEndpoint } = context.options;
-  context.undeliveredQueue = new UndeliveredQueue({
-    redis: cacheType === 'redis' ? new Redis(redisEndpoint) : null
-  });
+  const queue = new UndeliveredQueue({ client: initMongoClient(context) });
+  await queue.createIndexes();
+  context.undeliveredQueue = queue;
   return context;
 }
 
@@ -102,6 +117,7 @@ module.exports = {
   UndeliveredQueue,
   MAX_FRAMES,
   TTL_SEC,
+  COLLECTION,
   addOptions,
   init
 };

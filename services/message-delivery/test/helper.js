@@ -1,9 +1,42 @@
+const { MongoClient } = require('mongodb');
 const { DeliveryManager } = require('../../../libs/delivery-manager');
-const { UndeliveredQueue } = require('../../../libs/delivery-manager/undelivered-queue');
+const { UndeliveredQueue, COLLECTION } = require('../../../libs/delivery-manager/undelivered-queue');
 const { EnvelopeEvent } = require('../../../libs/v3-envelope');
 const { MessageDeliveryWorker } = require('../message-delivery-worker');
 
 const OFFLINE_TOPIC = 'offline-message';
+
+const MONGO_URL = process.env.MONGO_URL || 'mongodb://root:password@localhost:27017/?authSource=admin';
+
+/** A database per test file: files run side by side and share the mongo. */
+function mongoUrlFor(dbName) {
+  const url = new URL(MONGO_URL);
+  url.pathname = `/${dbName}`;
+  return url.toString();
+}
+
+/** One client per database for the whole file; `closeQueues` in an `after`. */
+const clients = new Map();
+
+/**
+ * An empty undelivered queue on the real mongo from
+ * `deployment/docker-compose.infra.yml`.
+ * @param {string} dbName unique per test file
+ * @param {{maxFrames?: number}} [options]
+ */
+async function emptyQueue(dbName, options = {}) {
+  if (!clients.has(dbName)) {
+    clients.set(dbName, new MongoClient(mongoUrlFor(dbName), { auth: null }));
+  }
+  const client = clients.get(dbName);
+  await client.db().collection(COLLECTION).deleteMany({});
+  return new UndeliveredQueue({ client, ...options });
+}
+
+async function closeQueues() {
+  await Promise.all([...clients.values()].map((client) => client.close()));
+  clients.clear();
+}
 
 /** Just enough ioredis for DeliveryManager's routing table and pubsub. */
 class FakeRedis {
@@ -61,11 +94,13 @@ function envelopeEvent({
   );
 }
 
+const DB = 'message-delivery-test';
+
 /**
- * Wire up the real worker over a fake redis, a stub event store and a stub
- * channel-ms. `members` maps channel_id -> user_ids.
+ * Wire up the real worker over a fake redis, a stub event store, a stub
+ * channel-ms and an empty mongo queue. `members` maps channel_id -> user_ids.
  */
-function startWorker({ members = new Map(), maxFrames } = {}) {
+async function startWorker({ members = new Map(), maxFrames } = {}) {
   const redis = new FakeRedis();
   const emitted = [];
   const context = {
@@ -81,7 +116,7 @@ function startWorker({ members = new Map(), maxFrames } = {}) {
       members: async (channelId) => new Set(members.get(channelId) || [])
     },
     deliveryManager: new DeliveryManager({ redis, serverId: 'message-delivery', maxRetry: 3 }),
-    undeliveredQueue: new UndeliveredQueue({ redis: null, maxFrames })
+    undeliveredQueue: await emptyQueue(DB, { maxFrames })
   };
   const worker = new MessageDeliveryWorker(context);
   worker.init();
@@ -115,4 +150,15 @@ const eachSeries = (items, fn) => items.reduce(
   Promise.resolve()
 );
 
-module.exports = { FakeRedis, envelopeEvent, startWorker, settle, eachSeries, OFFLINE_TOPIC };
+module.exports = {
+  FakeRedis,
+  envelopeEvent,
+  startWorker,
+  settle,
+  eachSeries,
+  OFFLINE_TOPIC,
+  DB,
+  mongoUrlFor,
+  emptyQueue,
+  closeQueues
+};
