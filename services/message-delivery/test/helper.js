@@ -15,7 +15,7 @@ function mongoUrlFor(dbName) {
   return url.toString();
 }
 
-/** One client per database for the whole file; `closeQueues` in an `after`. */
+/** One client per database for the whole file; `closeQueues` in an `after` drops them. */
 const clients = new Map();
 
 /**
@@ -34,7 +34,10 @@ async function emptyQueue(dbName, options = {}) {
 }
 
 async function closeQueues() {
-  await Promise.all([...clients.values()].map((client) => client.close()));
+  await Promise.all([...clients.values()].map(async (client) => {
+    await client.db().dropDatabase();
+    await client.close();
+  }));
   clients.clear();
 }
 

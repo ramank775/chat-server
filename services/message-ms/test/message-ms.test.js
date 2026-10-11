@@ -2,7 +2,7 @@ const assert = require('node:assert');
 const { test, describe, before, after } = require('node:test');
 const { initDefaultResources } = require('../../../libs/service-base');
 const { initHttpResource } = require('../../../libs/http-service-base');
-const { emptyQueue } = require('../../message-delivery/test/helper');
+const { emptyQueue, closeQueues } = require('../../message-delivery/test/helper');
 const { decodeWsEnvelope, pushFrame, WS_TYPE } = require('../../../libs/v3-envelope');
 const { MessageMs } = require('../message-ms');
 
@@ -47,8 +47,10 @@ describe('GET /sync/pending (SYNC_PROTOCOL §10.6)', () => {
     await service.server.ready();
   });
 
-  // closes the queue's mongo client too
-  after(async () => { await service.shutdown(); });
+  after(async () => {
+    await closeQueues();
+    await service.shutdown();
+  });
 
   const pull = (userId) => service.server.inject({
     method: 'GET',
