@@ -15,6 +15,7 @@ const {
   decodeServerEvent,
   devOtp,
   eventually,
+  legacyWire,
   mintOpId,
   signup,
   signupWithUsername,
@@ -42,14 +43,6 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
   /** @type {*} */ let bob;
   let aliceOp;
   let bobOp;
-  /** Sequence counters mirroring the server's `seq:<user>:<resource>` space. */
-  const seq = new Map();
-  const nextSeq = (user, resource) => {
-    const key = `${user}:${resource}`;
-    const value = (seq.get(key) || 0) + 1;
-    seq.set(key, value);
-    return value;
-  };
   let dmId;
   let groupId;
   /** @type {*} */ let aliceWs;
@@ -194,7 +187,6 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
     const channelId = crypto.randomUUID();
     const payload = {
       op_id: aliceOp(),
-      resource_seq: nextSeq(alice.user_id, channelId),
       client_timestamp_ms: Date.now(),
       channel_id: channelId,
       kind: 'group',
@@ -220,7 +212,6 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
       token: alice.accesskey,
       body: {
         op_id: aliceOp(),
-        resource_seq: nextSeq(alice.user_id, channelId),
         channel_id: channelId,
         kind: 'group',
         name: 'collides',
@@ -240,7 +231,6 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
       token: alice.accesskey,
       body: {
         op_id: aliceOp(),
-        resource_seq: 1,
         channel_id: crypto.randomUUID(),
         kind: 'one_to_one',
         members: [alice.user_id, bob.user_id]
@@ -259,7 +249,6 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
       token: bob.accesskey,
       body: {
         op_id: aliceOp(),
-        resource_seq: 1,
         channel_id: crypto.randomUUID(),
         kind: 'group',
         name: 'nope',
@@ -280,62 +269,61 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
     assert.equal(bobWs.protocol, `accesskey.${bob.accesskey}`);
   });
 
-  it('acks three in-order envelopes with increasing delivery_sequence', async () => {
+  it('acks a batch with server_timestamp_ms and no delivery_sequence; the peer sees the same', async () => {
     const sent = [1, 2, 3].map((n) => ({
       opId: bobOp(),
       channelId: dmId,
       peer: alice.user_id,
-      resourceSeq: nextSeq(bob.user_id, dmId),
       clientTimestampMs: Date.now(),
       payload: Buffer.from(`hello ${n}`)
     }));
-    assert.deepEqual(sent.map((envelope) => envelope.resourceSeq), [1, 2, 3]);
 
-    const acks = [];
-    // strictly one at a time: `resource_seq` is a compare-and-set on last + 1
-    await sent.reduce(async (previous, envelope) => {
-      await previous;
-      bobWs.send([envelope]);
-      acks.push((await bobWs.ack()).acks.acks[0]);
-    }, Promise.resolve());
-    acks.forEach((ack, index) => {
-      assert.equal(ack.opId, sent[index].opId);
+    // no per-channel counter, so nothing limits a client to one op in flight
+    bobWs.send(sent);
+    const ackFrame = await bobWs.ack();
+    const { acks } = legacyWire.decode(ackFrame.raw).acks;
+    assert.deepEqual(acks.map((ack) => ack.opId), sent.map((envelope) => envelope.opId));
+    acks.forEach((ack) => {
       assert.equal(ack.outcome, ACK_OUTCOME.SUCCESS);
       assert.ok(ack.serverTimestampMs > 0);
+      assert.equal(ack.deliverySequence, undefined, 'Ack.delivery_sequence (6) is retired');
     });
-    assert.ok(acks[1].deliverySequence > acks[0].deliverySequence);
-    assert.ok(acks[2].deliverySequence > acks[1].deliverySequence);
 
-    // §10.4 — the peer sees the same three, in delivery_sequence order
+    // the peer orders by (server_timestamp_ms, op_id), whatever order the
+    // pushes arrive in: each push carries its ack's stamp
+    const stamps = new Map(acks.map((ack) => [ack.opId, ack.serverTimestampMs]));
     const pushes = [];
     await sent.reduce(async (previous) => {
       await previous;
-      pushes.push(await aliceWs.push());
+      pushes.push(legacyWire.decode((await aliceWs.push()).raw).push);
     }, Promise.resolve());
-    assert.deepEqual(
-      pushes.map((frame) => frame.push.opId),
-      sent.map((envelope) => envelope.opId)
-    );
-    pushes.forEach((frame, index) => {
-      assert.equal(frame.push.senderUserId, bob.user_id);
-      assert.equal(Number(frame.push.deliverySequence), Number(acks[index].deliverySequence));
+    assert.deepEqual(pushes.map((push) => push.opId).sort(), [...stamps.keys()].sort());
+    pushes.forEach((push) => {
+      assert.equal(push.senderUserId, bob.user_id);
+      assert.equal(push.serverTimestampMs, stamps.get(push.opId));
+      assert.equal(push.deliverySequence, undefined, 'Envelope.delivery_sequence (22) is retired');
     });
   });
 
-  it('rejects a skipped resource_seq with out_of_order', async () => {
-    bobWs.send([
-      {
-        opId: bobOp(),
-        channelId: dmId,
-        peer: alice.user_id,
-        resourceSeq: 5, // 4 was never sent
-        clientTimestampMs: Date.now(),
-        payload: Buffer.from('gap')
-      }
-    ]);
-    const [ack] = (await bobWs.ack()).acks.acks;
-    assert.equal(ack.outcome, ACK_OUTCOME.PERMANENT);
-    assert.equal(ack.reason, REASON.OUT_OF_ORDER);
+  it('accepts an older client\'s resource_seq whatever it is: gaps, repeats, none', async () => {
+    const sent = [5, 5, 1, undefined].map((resourceSeq, n) => ({
+      opId: bobOp(),
+      channelId: dmId,
+      peer: alice.user_id,
+      resourceSeq,
+      clientTimestampMs: Date.now(),
+      payload: Buffer.from(`legacy ${n}`)
+    }));
+    bobWs.sendLegacy(sent);
+    const { acks } = (await bobWs.ack()).acks;
+    acks.forEach((ack) => assert.equal(ack.outcome, ACK_OUTCOME.SUCCESS, JSON.stringify(ack)));
+
+    // and the field is not passed on
+    await sent.reduce(async (previous) => {
+      await previous;
+      const { push } = legacyWire.decode((await aliceWs.push()).raw);
+      assert.equal(push.resourceSeq, undefined);
+    }, Promise.resolve());
   });
 
   it('rejects an op_id bound to another user with prefix_mismatch', async () => {
@@ -344,7 +332,6 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
         opId: aliceOp(), // minted for alice, sent on bob's socket
         channelId: dmId,
         peer: alice.user_id,
-        resourceSeq: 4,
         clientTimestampMs: Date.now(),
         payload: Buffer.from('not mine')
       }
@@ -355,11 +342,10 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
   });
 
   it('rejects a batch over the 20 envelope cap, one permanent ack each', async () => {
-    const envelopes = Array.from({ length: 21 }, (_, index) => ({
+    const envelopes = Array.from({ length: 21 }, () => ({
       opId: bobOp(),
       channelId: dmId,
       peer: alice.user_id,
-      resourceSeq: 100 + index,
       clientTimestampMs: Date.now(),
       payload: Buffer.from('too many')
     }));
@@ -377,7 +363,6 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
       {
         opId: bobOp(),
         channelId: dmId,
-        resourceSeq: nextSeq(bob.user_id, dmId),
         clientTimestampMs: Date.now(),
         payload: Buffer.from('no peer')
       }
@@ -393,7 +378,6 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
         opId: bobOp(),
         channelId: dmId,
         peer: bob.user_id, // dm_chan(bob, bob) is a different id
-        resourceSeq: nextSeq(bob.user_id, dmId),
         clientTimestampMs: Date.now(),
         payload: Buffer.from('wrong peer')
       }
@@ -416,7 +400,6 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
         opId: malloryOp(),
         channelId: dmId,
         peer: alice.user_id,
-        resourceSeq: 1,
         clientTimestampMs: Date.now(),
         payload: Buffer.from('let me in')
       }
@@ -437,7 +420,6 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
       {
         opId: bobOp(),
         channelId: crypto.randomUUID(),
-        resourceSeq: 1,
         clientTimestampMs: Date.now(),
         payload: Buffer.from('stranger')
       }
@@ -454,7 +436,6 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
       opId: aliceOp(),
       channelId: dmId,
       peer: bob.user_id,
-      resourceSeq: nextSeq(alice.user_id, dmId),
       clientTimestampMs: Date.now(),
       payload: Buffer.from('for bob')
     };
@@ -469,7 +450,7 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
     assert.equal(push.push.senderUserId, alice.user_id);
     assert.equal(push.push.peer, bob.user_id, 'the peer field is echoed on fanout');
     assert.equal(Buffer.from(push.push.payload).toString(), 'for bob');
-    assert.equal(Number(push.push.deliverySequence), Number(ack.deliverySequence));
+    assert.equal(Number(push.push.serverTimestampMs), Number(ack.serverTimestampMs));
 
     // §10.3 rule 4 — the sender never gets its own op back
     await assert.rejects(() =>
@@ -489,7 +470,6 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
       opId: aliceOp(),
       channelId: dmId,
       peer: bob.user_id,
-      resourceSeq: nextSeq(alice.user_id, dmId),
       clientTimestampMs: Date.now(),
       payload: Buffer.from('while you were out')
     };
@@ -527,7 +507,6 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
       token: alice.accesskey,
       body: {
         op_id: aliceOp(),
-        resource_seq: nextSeq(alice.user_id, groupId),
         channel_id: groupId,
         kind: 'group',
         name: 'conformance',
@@ -551,7 +530,7 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
       token: alice.accesskey,
       body: {
         op_id: aliceOp(),
-        resource_seq: nextSeq(alice.user_id, groupId),
+        resource_seq: 7, // an older client's field: accepted, ignored
         members: [carol.user_id]
       }
     });
@@ -566,7 +545,7 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
     // bob leaves; the actor is excluded from its own fanout, alice is told
     const left = await api('DELETE', `/v3.0/channels/${groupId}/members/${bob.user_id}`, {
       token: bob.accesskey,
-      body: { op_id: bobOp(), resource_seq: nextSeq(bob.user_id, groupId) }
+      body: { op_id: bobOp() }
     });
     assert.equal(left.status, 200);
     assert.equal(left.body.member_count, 2);
@@ -599,7 +578,6 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
       token: alice.accesskey,
       body: {
         op_id: aliceOp(),
-        resource_seq: nextSeq(alice.user_id, roleGroup),
         channel_id: roleGroup,
         kind: 'group',
         name: 'roles',
@@ -613,11 +591,7 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
       'PATCH', `/v3.0/channels/${roleGroup}/members/${bob.user_id}`,
       {
         token: alice.accesskey,
-        body: {
-          op_id: aliceOp(),
-          resource_seq: nextSeq(alice.user_id, roleGroup),
-          role: 'admin'
-        }
+        body: { op_id: aliceOp(), role: 'admin' }
       }
     );
     assert.equal(promoted.status, 200);
@@ -632,7 +606,7 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
     // alice leaves: bob (the only admin) inherits the group
     const left = await api('DELETE', `/v3.0/channels/${roleGroup}/members/${alice.user_id}`, {
       token: alice.accesskey,
-      body: { op_id: aliceOp(), resource_seq: nextSeq(alice.user_id, roleGroup) }
+      body: { op_id: aliceOp() }
     });
     assert.equal(left.status, 200);
     assert.equal(left.body.member_count, 2);

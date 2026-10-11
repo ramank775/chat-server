@@ -9,7 +9,7 @@ const {
   encodeWsEnvelope,
   decodeWsEnvelope
 } = require('../../libs/v3-envelope');
-const { mintOpId } = require('../../services/connection-gateway/test/helper');
+const { mintOpId, legacyWire } = require('../../services/connection-gateway/test/helper');
 
 /**
  * Conformance suite: drives the compose stack through nginx rather than
@@ -142,7 +142,10 @@ function connect(accesskey) {
     }
   };
   socket.on('message', (data, isBinary) => {
-    frames.push(isBinary ? decodeWsEnvelope(data) : data.toString());
+    // binary frames keep their bytes, unenumerated, for `legacyWire.decode`
+    frames.push(isBinary
+      ? Object.defineProperty(decodeWsEnvelope(data), 'raw', { value: data })
+      : data.toString());
     drain();
   });
   const closed = new Promise((resolve) => {
@@ -161,6 +164,10 @@ function connect(accesskey) {
     },
     send(envelopes) {
       socket.send(opFrame(envelopes), { binary: true });
+    },
+    /** Send as an older client would, retired `resourceSeq` included. */
+    sendLegacy(envelopes) {
+      socket.send(legacyWire.opFrame(envelopes), { binary: true });
     },
     /** First buffered or future frame matching `match`. */
     waitFor(match, timeoutMs = 8000) {
@@ -214,6 +221,7 @@ module.exports = {
   decodeServerEvent,
   devOtp,
   eventually,
+  legacyWire,
   mintOpId,
   opFrame,
   pushTopic,
