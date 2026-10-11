@@ -4,6 +4,7 @@ networks:
 volumes:
   nats-data:
   mongo-data:
+  pg-data:
   kafka-data:
   minio-data:
   ntfy-data:
@@ -63,6 +64,29 @@ services:
       - MONGO_INITDB_ROOT_USERNAME=${MONGO_USER}
       - MONGO_INITDB_ROOT_PASSWORD=${MONGO_PASSWORD}
       - MONGO_INITDB_DATABASE=chat
+    networks:
+      - vartalap
+
+  # the pg backend (--*-db=pg, --undelivered-queue=pg), off unless asked for:
+  # `--profile pg`, or name the service. WAL settings per DECISIONS row 129.
+  postgres:
+    image: postgres:17-alpine
+    profiles:
+      - pg
+    command: postgres -c wal_compression=lz4 -c checkpoint_timeout=15min -c max_wal_size=4GB
+    ports:
+      - "${PG_PORT:-5432}:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_USER=${PG_USER}
+      - POSTGRES_PASSWORD=${PG_PASSWORD}
+      - POSTGRES_DB=chat
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d chat"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
     networks:
       - vartalap
 

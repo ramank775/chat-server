@@ -95,6 +95,11 @@ gateway:
   enabled: true
   podAnnotations: {}
 
+# PostgreSQL connection string, read by every store (and the undelivered
+# queue) set to `pg`. The *DBType / dbType values below take mongo or pg.
+pg:
+  url: ""
+
 fileMs:
   enabled: true
   storageType: s3
@@ -107,6 +112,8 @@ deliveryMs:
   cacheType: redis
   redis: redis:6379
   dbType: mongo
+  # where the undelivered queue lives: mongo or pg (DECISIONS row 129)
+  undeliveredQueue: mongo
 
 profileMs:
   enabled: true
