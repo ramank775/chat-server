@@ -28,6 +28,33 @@ components:
     apikeyAuth:
       type: http
       scheme: apikey
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: '`Authorization: Bearer <accesskey>` (AUTH_CONTRACT 4.1)'
+  schemas:
+    ErrorEnvelope:
+      type: object
+      description: AUTH_CONTRACT 11.1
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+          required: [code, message]
+      required: [error]
+  responses:
+    AuthError:
+      description: >-
+        401 `MISSING_ACCESSKEY` / `INVALID_ACCESSKEY`, or 403
+        `USERNAME_REQUIRED` while the account has no username (AUTH_CONTRACT 2.4)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
 security:
   - apikeyAuth: []
 tags:
@@ -51,7 +78,112 @@ tags:
   - name: v1.0 > Assets
     description: File service endpoint to upload and download files
   - name: v1.0 > Contact Book
+  - name: v3.0 > Push
+    description: >-
+      Web Push (RFC 8030) endpoint registration, AUTH_CONTRACT 5. Every wake is
+      encrypted to the device keys (RFC 8291, aes128gcm), VAPID signed
+      (RFC 8292) and carries only `{"t":"wake"}`.
 paths:
+  /v3.0/push/vapid:
+    get:
+      tags:
+        - v3.0 > Push
+      summary: Get the server VAPID public key
+      description: >-
+        The key the client passes to its UnifiedPush distributor, so the
+        distributor accepts only pushes signed by this server. A changed key
+        means the client re-registers with its distributor and re-posts
+        `/v3.0/push/topic`.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: The VAPID public key
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  vapidPublicKey:
+                    type: string
+                    description: Uncompressed P-256 point, base64url without padding (87 chars)
+                    example: BCkGhRTonSgzpIq9SrkFnnsNHs_HsBiTun0IHDO7tzVdPx7WXt_2BueoMz9azMG0lB_UVBWFmkgTO6yc-T0UiCA
+                required: [vapidPublicKey]
+        '401':
+          $ref: '#/components/responses/AuthError'
+        '403':
+          $ref: '#/components/responses/AuthError'
+  /v3.0/push/topic:
+    post:
+      tags:
+        - v3.0 > Push
+      summary: Register, replace or deregister the device push endpoint
+      description: >-
+        One endpoint per `(user_id, deviceId)`; a registration replaces the
+        previous one. `endpoint` null or empty deregisters (keys ignored).
+        Logout, account deletion, phone rebind and a 404/410 from the push
+        service deregister implicitly (AUTH_CONTRACT 5.2).
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                endpoint:
+                  type: [string, 'null']
+                  maxLength: 2048
+                  description: >-
+                    The UnifiedPush endpoint. https, no userinfo, and a host
+                    that resolves only to public unicast addresses.
+                  example: https://ntfy.sh/upAbC123
+                p256dh:
+                  type: string
+                  description: Device ECDH public key, uncompressed P-256 point (65 bytes), base64url
+                  example: BNcRdreALRFXTkOOUHK1EtK2wtaz5Ry4YfYCA_0QTpQtUbVlUls0VJXg7A8u-Ts1XbjhazAkj7I99e8QcYP7DkM
+                auth:
+                  type: string
+                  description: Device auth secret (16 bytes), base64url
+                  example: tBHItJI5svbpez7KI4CCXg
+              required: [endpoint]
+      responses:
+        '200':
+          description: Registered, replaced or deregistered
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: boolean
+                    example: true
+        '400':
+          description: >-
+            `INVALID_PUSH_ENDPOINT`: not https, over 2048 chars, has userinfo,
+            or resolves to a non public address. `INVALID_PUSH_KEYS`: `p256dh`
+            or `auth` missing or malformed. `validation_failed`: `endpoint`
+            absent or not a string.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+              examples:
+                endpoint:
+                  value:
+                    error:
+                      code: INVALID_PUSH_ENDPOINT
+                      message: endpoint must be an https url on a public host
+                keys:
+                  value:
+                    error:
+                      code: INVALID_PUSH_KEYS
+                      message: p256dh must be a 65 byte P-256 point and auth 16 bytes, base64url
+        '401':
+          $ref: '#/components/responses/AuthError'
+        '403':
+          $ref: '#/components/responses/AuthError'
   /v1.0/login:
     post:
       tags:
