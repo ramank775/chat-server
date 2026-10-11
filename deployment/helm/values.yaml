@@ -124,6 +124,11 @@ messageRouter:
 notificationMs:
   enabled: true
   dbType: mongo
-  pushNotificationProvider: firebase
-  pushNotificationTTL: 86400
+  pushNotificationProvider: webpush
+  # AUTH_CONTRACT 5: the VAPID key pair (npx web-push generate-vapid-keys).
+  # The private key lives in a Secret under the key `privateKey`.
+  vapid:
+    publicKey: ""
+    subject: ""
+    privateKeySecret: notification-vapid
   offlineMessagePrefix: persistence-message

@@ -100,7 +100,6 @@ services:
     image: binwiederhier/ntfy
     command: serve
     environment:
-      - NTFY_BASE_URL=${NTFY_BASE_URL}
       - NTFY_CACHE_FILE=/var/cache/ntfy/cache.db
     volumes:
       - ntfy-data:/var/cache/ntfy
