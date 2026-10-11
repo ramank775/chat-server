@@ -34,6 +34,7 @@
     "moment": "^2.30.1",
     "mongodb": "^6.7.0",
     "nats": "^2.26.0",
+    "pg": "^8.23.0",
     "protobufjs": "^7.2.5",
     "short-uuid": "^4.2.2",
     "web-push": "3.6.7",

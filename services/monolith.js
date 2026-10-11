@@ -5,6 +5,7 @@ const {
 } = require('../libs/service-base');
 const { addHttpOptions, initHttpResource, HttpServiceBase } = require('../libs/http-service-base');
 const { initMongoClient } = require('../libs/mongo-utils');
+const { initPgPool } = require('../libs/pg-utils');
 const MemCache = require('../libs/cache');
 const EventStore = require('../libs/event-store');
 const ChannelServiceClient = require('../libs/channel-service-client');
@@ -83,10 +84,22 @@ function parseOptions(argv) {
   return options;
 }
 
-/** The resources every service shares: http server, mongo, cache, delivery. */
+/** The resources every service shares: http server, database, cache, delivery. */
 async function initSharedResources(options) {
   const context = await initDefaultResources(options).then(initHttpResource);
-  context.mongoClient = initMongoClient(context);
+  // made here, before the per-service contexts copy `shared`, so every store
+  // gets the same client or pool. Only the backends in use: a pg-only
+  // deployment passes no --mongo-url.
+  const backends = [
+    options.profileDb,
+    options.authDb,
+    options.channelDb,
+    options.notificationDb,
+    options.mediaMetadataDb,
+    options.undeliveredQueue
+  ];
+  if (backends.includes('mongo')) context.mongoClient = initMongoClient(context);
+  if (backends.includes('pg')) context.pgPool = initPgPool(context);
   await MemCache.initMemCache(context);
   await ChannelServiceClient.init(context);
   DeliveryManager.init(context);
@@ -218,7 +231,7 @@ class Monolith extends HttpServiceBase {
 
   async shutdown() {
     await super.shutdown();
-    // every service shares one mongo client and one cache: a second close is a
+    // every service shares one database client and one cache: a second close is a
     // no-op, but a failure must not stop the rest from shutting down
     const services = [...this.mounts.map((mount) => mount.service), ...this.workers];
     await Promise.all(

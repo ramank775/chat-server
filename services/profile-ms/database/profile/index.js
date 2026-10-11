@@ -1,8 +1,10 @@
 const { IProfileDB } = require('./profile-db');
 const mongodb = require('./mongo-profile-db')
+const pg = require('./pg-profile-db')
 
 const DATABASE_IMPL = [
-  mongodb
+  mongodb,
+  pg
 ]
 
 /**
@@ -11,7 +13,7 @@ const DATABASE_IMPL = [
  * @returns {import('commander').Command}
  */
 function addOptions(cmd) {
-  cmd = cmd.option('--profile-db <profile-db>', 'Which database implementation to use (mongo)', 'mongo');
+  cmd = cmd.option('--profile-db <profile-db>', 'Which database implementation to use (mongo, pg)', 'mongo');
   DATABASE_IMPL.forEach(impl => {
     cmd = impl.addOptions(cmd)
   })

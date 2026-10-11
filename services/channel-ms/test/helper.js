@@ -2,14 +2,14 @@ const { MongoClient } = require('mongodb');
 const { SERVER_EVENT_MARKER } = require('../../../libs/v3-envelope');
 const { serverEventPayload } = require('../server-event');
 const { ChannelMs, parseOptions, initResource } = require('../channel-ms');
-
-const MONGO_URL = process.env.MONGO_URL || 'mongodb://root:password@localhost:27017/?authSource=admin';
-
-function mongoUrlFor(dbName) {
-  const url = new URL(MONGO_URL);
-  url.pathname = `/${dbName}`;
-  return url.toString();
-}
+const {
+  TEST_DB,
+  MONGO_URL,
+  mongoUrlFor,
+  freshPgDatabase,
+  dropPgDatabase,
+  dbFlags
+} = require('../../../test/helpers/db');
 
 /**
  * Mint a UUIDv7 `op_id` with the client's layout
@@ -52,10 +52,29 @@ function decodeServerEvent(envelopeEvent) {
   });
 }
 
+/** An empty database for the file, and how to drop it again. */
+async function emptyDatabase(dbName) {
+  if (TEST_DB === 'pg') {
+    await freshPgDatabase(dbName);
+    return { db: null, drop: () => dropPgDatabase(dbName) };
+  }
+  const client = new MongoClient(mongoUrlFor(dbName), { auth: null });
+  await client.connect();
+  const db = client.db();
+  await db.dropDatabase();
+  return {
+    db,
+    drop: async () => {
+      await db.dropDatabase();
+      await client.close();
+    }
+  };
+}
+
 /**
- * Boot channel-ms in process against the real mongo from
- * `deployment/docker-compose.infra.yml`, with a LocalCache and the in-memory
- * event store. No socket is opened: drive it with `inject`.
+ * Boot channel-ms in process against the real mongo or postgres (`TEST_DB`)
+ * from `deployment/docker-compose.infra.yml`, with a LocalCache and the
+ * in-memory event store. No socket is opened: drive it with `inject`.
  * @param {string} dbName database name, unique per test file
  */
 async function startChannelMs(dbName) {
@@ -64,20 +83,16 @@ async function startChannelMs(dbName) {
     'channel-ms',
     '--app-name=channel-ms-test',
     '--log-level=error',
-    `--mongo-url=${mongoUrlFor(dbName)}`,
-    '--channel-db=mongo',
+    ...dbFlags(dbName, ['channel-db']),
     // LocalCache, not redis: dedup windows must not leak between test
     // files (or into a dev stack) the way a shared redis would.
     '--cache-type=local',
     '--event-store=memory',
     '--new-message-topic=new-message'
   ]);
-  // drop first: `initResource` builds the indexes and dropDatabase would take
+  // empty first: `initResource` builds the indexes and dropDatabase would take
   // them with it.
-  const client = new MongoClient(mongoUrlFor(dbName), { auth: null });
-  await client.connect();
-  const db = client.db();
-  await db.dropDatabase();
+  const { db, drop } = await emptyDatabase(dbName);
 
   const context = await initResource(options);
   const service = new ChannelMs(context);
@@ -103,9 +118,8 @@ async function startChannelMs(dbName) {
       return { recipients: last.recipients, envelope: last.envelope, body: decodeServerEvent(last) };
     },
     async stop() {
-      await db.dropDatabase();
-      await client.close();
       await service.shutdown();
+      await drop();
     }
   };
 }

@@ -1,8 +1,10 @@
 const { IAuthDB } = require('./auth-db');
 const mongodb = require('./mongo-auth-db')
+const pg = require('./pg-auth-db')
 
 const DATABASE_IMPL = [
-  mongodb
+  mongodb,
+  pg
 ]
 
 /**
@@ -11,7 +13,7 @@ const DATABASE_IMPL = [
  * @returns {import('commander').Command}
  */
 function addOptions(cmd) {
-  cmd = cmd.option('--auth-db <auth-db>', 'Which database implementation to use (mongo)', 'mongo');
+  cmd = cmd.option('--auth-db <auth-db>', 'Which database implementation to use (mongo, pg)', 'mongo');
   DATABASE_IMPL.forEach(impl => {
     cmd = impl.addOptions(cmd)
   })

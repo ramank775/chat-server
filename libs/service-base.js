@@ -55,9 +55,11 @@ class ServiceBase {
 
   async run() {
     this.log.info(
-      `Starting service with options ${JSON.stringify(this.options, (key, value) =>
-        /(Password|Secret|Key|Cert|Token)$/i.test(key) ? '*****' : value
-      )}`
+      `Starting service with options ${JSON.stringify(this.options, (key, value) => {
+        if (/(Password|Secret|Key|Cert|Token)$/i.test(key)) return '*****';
+        // the password inside a connection string (`--pg-url`)
+        return typeof value === 'string' ? value.replace(/(\/\/[^:/@\s]+:)[^@\s]*@/, '$1*****@') : value;
+      })}`
     );
     this.init();
     this.handleError();
