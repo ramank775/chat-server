@@ -106,11 +106,8 @@ async function startProfileMs(dbName) {
   const revokes = [];
   const pushTopicDeletes = [];
   // trim 4: channel-ms lists groups only, so the stub filters on membership.
-  service.channelClient.get = async (_path, request) => {
-    const me = request.headers['x-user'];
-    return channels.filter((channel) =>
-      channel.members.some((member) => (member.user_id ?? member.username) === me));
-  };
+  service.channelClient.get = async (_path, request) =>
+    channels.filter((channel) => channel.members.includes(request.headers['x-user']));
   service.gatewayClient.post = async (_path, payload) => {
     revokes.push(payload);
     return { status: true };
@@ -130,7 +127,7 @@ async function startProfileMs(dbName) {
     pushTopicDeletes,
     /**
      * Stand in for channel-ms's channel list.
-     * @param {{channelId: string, type?: string, members: {user_id: string}[]}[]} rows
+     * @param {{channel_id: string, members: string[]}[]} rows channel-ms's view of each
      */
     stubChannels(rows) {
       channels = rows;

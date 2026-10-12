@@ -33,6 +33,7 @@ describe('REST-write fanout (SYNC_PROTOCOL 10.2)', () => {
     app.eventStore.events.slice(from).map(({ event, args, key }) => {
       const { envelope, recipients } = EnvelopeEvent.fromBinary(args.toBinary());
       assert.equal(event, 'new-message', 'fanout rides the chat topic');
+      assert.ok(envelope.channelId, 'carries a shared channel, or the client drops it');
       assert.equal(key, envelope.channelId, 'partitioned by channel like a chat envelope');
       assert.equal(envelope.payload[0], SERVER_EVENT_MARKER, 'payload is marked server authored');
       assert.equal(envelope.senderUserId, '', 'no user authored this');
@@ -58,24 +59,21 @@ describe('REST-write fanout (SYNC_PROTOCOL 10.2)', () => {
 
     app.stubChannels([
       {
-        channelId: 'group-0',
-        type: 'group',
-        members: [{ user_id: editor.user_id }, { user_id: peer.user_id }]
+        channel_id: 'group-0',
+        members: [editor.user_id, peer.user_id]
       },
       {
-        channelId: 'group-1',
-        type: 'group',
+        channel_id: 'group-1',
         // the same peer in a second channel: still one envelope for them
         members: [
-          { user_id: editor.user_id },
-          { user_id: peer.user_id },
-          { user_id: groupMate.user_id }
+          editor.user_id,
+          peer.user_id,
+          groupMate.user_id
         ]
       },
       {
-        channelId: 'group-2',
-        type: 'group',
-        members: [{ user_id: peer.user_id }, { user_id: groupMate.user_id }]
+        channel_id: 'group-2',
+        members: [peer.user_id, groupMate.user_id]
       }
     ]);
 
@@ -107,9 +105,8 @@ describe('REST-write fanout (SYNC_PROTOCOL 10.2)', () => {
     const peer = await signupWithUsername(app, { phone: '+919500000006', username: 'peer_two' });
     app.stubChannels([
       {
-        channelId: 'group-4',
-        type: 'group',
-        members: [{ user_id: editor.user_id }, { user_id: peer.user_id }]
+        channel_id: 'group-4',
+        members: [editor.user_id, peer.user_id]
       }
     ]);
 
@@ -141,7 +138,7 @@ describe('REST-write fanout (SYNC_PROTOCOL 10.2)', () => {
 
     // a channel the editor shares with nobody
     app.stubChannels([
-      { channelId: 'solo-1', type: 'group', members: [{ user_id: editor.user_id }] }
+      { channel_id: 'solo-1', members: [editor.user_id] }
     ]);
     from = app.eventStore.events.length;
     assert.equal((await patch(editor.accesskey, { displayName: 'Still alone' })).statusCode, 200);
@@ -151,9 +148,8 @@ describe('REST-write fanout (SYNC_PROTOCOL 10.2)', () => {
     const peer = await signupWithUsername(app, { phone: '+919500000008', username: 'peer_three' });
     app.stubChannels([
       {
-        channelId: 'group-5',
-        type: 'group',
-        members: [{ user_id: editor.user_id }, { user_id: peer.user_id }]
+        channel_id: 'group-5',
+        members: [editor.user_id, peer.user_id]
       }
     ]);
     from = app.eventStore.events.length;

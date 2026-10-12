@@ -694,12 +694,10 @@ class ProfileMs extends HttpServiceBase {
     });
     const members = new Set();
     let channelId = null;
+    // the same view the client gets: `channel_id`, and members as user ids
     channels.forEach((channel) => {
-      channelId = channelId || channel.channelId;
-      // ponytail: channel-ms still keys members by `username`; v3 step 3.4 renames it
-      (channel.members || []).forEach((member) =>
-        members.add(member.user_id ?? member.username ?? member)
-      );
+      channelId = channelId || channel.channel_id;
+      channel.members.forEach((id) => members.add(id));
     });
     // 10.3 rule 4: the editor does not receive their own fanout
     members.delete(userId);
