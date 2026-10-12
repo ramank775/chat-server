@@ -305,7 +305,11 @@ class ProfileMs extends HttpServiceBase {
           usernameKey: Joi.string().allow(null),
           displayName: Joi.string().allow(null, ''),
           avatarUrl: Joi.string().allow(null, ''),
-          statusText: Joi.string().allow(null, '')
+          statusText: Joi.string().allow(null, ''),
+          // SYNC_PROTOCOL 11.4: the client's outbound queue adds these; a
+          // profile edit is a plain overwrite, so a replay needs no dedup
+          op_id: Joi.string().uuid(),
+          client_timestamp_ms: Joi.number().integer()
         })
           .min(1)
           .required()

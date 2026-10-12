@@ -68,6 +68,17 @@ describe('users/me and username rules', () => {
     assert.equal(JSON.parse(unknown.payload).error.code, 'validation_failed');
   });
 
+  test('PATCH from the outbound queue carries op_id and client_timestamp_ms (SYNC_PROTOCOL 11.4)', async () => {
+    const session = await signup(app, { phone: '+919200000012' });
+    const res = await patch(session.accesskey, {
+      avatarUrl: '6acd11791e6a9406d1798701',
+      op_id: '01a1310c-40eb-7000-9d02-09bd781556a0',
+      client_timestamp_ms: 1791824249067
+    });
+    assert.equal(res.statusCode, 200);
+    assert.equal(JSON.parse(res.payload).avatarUrl, '6acd11791e6a9406d1798701');
+  });
+
   test('username shape rules', async () => {
     const session = await signup(app, { phone: '+919200000003' });
     const invalid = ['ab', 'Alice', '1alice', 'a'.repeat(31), 'al..ice', 'al__ice', 'www.alice', 'alice.com', 'ali ce'];
