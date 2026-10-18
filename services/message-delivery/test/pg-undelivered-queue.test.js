@@ -33,7 +33,13 @@ describe('pg undelivered queue (DECISIONS row 129)', { skip: TEST_DB !== 'pg' },
   });
 
   const entry = (opId, ts, recipients) => ({
-    opId, ts, recipients, sender: '00000000a', senderDevice: 'd1', frame: Buffer.from(opId)
+    opId,
+    ts,
+    expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+    recipients,
+    sender: '00000000a',
+    senderDevice: 'd1',
+    frame: Buffer.from(opId)
   });
 
   test('one row per fanout, and a read deletes nothing', async () => {
@@ -51,8 +57,8 @@ describe('pg undelivered queue (DECISIONS row 129)', { skip: TEST_DB !== 'pg' },
     const old = new Date(Date.now() - (TTL_SEC * 1000 + 10 * DAY_MS));
     await queue.maintain(old);
     await pool.query(
-      `INSERT INTO undelivered (ts, op_id, recipients, sender, sender_device, frame, at)
-       VALUES (1, 'stale', $1, '', '', $2, $3)`,
+      `INSERT INTO undelivered (ts, op_id, recipients, sender, sender_device, frame, expires_at, at)
+       VALUES (1, 'stale', $1, '', '', $2, $3, $3)`,
       [[ALICE], Buffer.from('stale'), old]
     );
     await queue.append(entry('fresh', 2, [ALICE]));

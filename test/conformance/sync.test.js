@@ -533,6 +533,27 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
     assert.deepEqual(own.body.frames, []);
   });
 
+  it('an envelope past its sender\'s ttl_sec is left out of the timeline', async () => {
+    const envelope = {
+      opId: aliceOp(),
+      channelId: dmId,
+      peer: bob.user_id,
+      clientTimestampMs: Date.now(),
+      payload: Buffer.from('gone soon'),
+      ttlSec: 1
+    };
+    aliceWs.send([envelope]);
+    const [ack] = (await aliceWs.ack()).acks.acks;
+    assert.equal(ack.outcome, ACK_OUTCOME.SUCCESS);
+    const stamp = Number(ack.serverTimestampMs);
+
+    const kept = (await pending(stamp)).find((frame) => frame.push.opId === envelope.opId);
+    assert.ok(kept, 'there until it expires');
+    assert.equal(kept.push.ttlSec, 1, 'echoed for the other side to apply too');
+    await new Promise((resolve) => { setTimeout(resolve, 1500); });
+    assert.ok(!(await pendingOps(stamp)).includes(envelope.opId));
+  });
+
   // -- 9. channel server events (0x53) -------------------------------------
 
   it('fans ChannelCreated, ChannelMemberAdded and ChannelMemberRemoved out', async () => {

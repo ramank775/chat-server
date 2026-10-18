@@ -124,6 +124,14 @@ message Envelope {
   // from `sender_user_id` and does not need to read it.
   string peer = 7;
 
+  // How long the server keeps this envelope on its recipients'
+  // timeline for a later pull, in seconds (SYNC_PROTOCOL.md §10.6).
+  // 0 or absent means the maximum, 30 days (§19 decision 1); more is
+  // capped to it. Once expired it is left out of every pull and
+  // deleted; a live push is unaffected. Ignored on an ephemeral
+  // envelope, which is never kept. Echoed unchanged on fanout.
+  uint32 ttl_sec = 8;
+
   // ---------------------------------------------------------------------------
   // Server-stamped fields. Absent on client→server. Populated by the
   // server before fanout to recipients.

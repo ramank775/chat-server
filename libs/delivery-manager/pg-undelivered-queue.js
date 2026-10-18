@@ -12,8 +12,9 @@ const MAINTAIN_LOCK = "hashtext('vartalap.undelivered'), 0";
 
 /**
  * `undelivered` is the timeline, append-only, one partition per UTC day of
- * `at`: nothing ever deletes a row, whole days are dropped past the retention
- * instead. One row per fanout, its readers in `recipients`.
+ * `at`: nothing ever deletes a row, whole days are dropped past the 30-day
+ * maximum instead, and reads leave out rows past their own `expires_at`. One
+ * row per fanout, its readers in `recipients`.
  */
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS undelivered (
@@ -23,6 +24,7 @@ const SCHEMA = `
     sender text NOT NULL,
     sender_device text NOT NULL,
     frame bytea NOT NULL,
+    expires_at timestamptz NOT NULL,
     at timestamptz NOT NULL DEFAULT now()
   ) PARTITION BY RANGE (at);
   CREATE INDEX IF NOT EXISTS undelivered_recipients ON undelivered USING gin (recipients);
@@ -36,14 +38,14 @@ const SCHEMA = `
  * never race it.
  */
 const APPEND = `
-  INSERT INTO undelivered (ts, op_id, recipients, sender, sender_device, frame)
-  SELECT $1, $2, $3, $4, $5, $6
+  INSERT INTO undelivered (ts, op_id, recipients, sender, sender_device, frame, expires_at)
+  SELECT $1, $2, $3, $4, $5, $6, $7
   WHERE NOT EXISTS (SELECT 1 FROM undelivered WHERE op_id = $2)`;
 
 /** A page plus one (`$4`), to tell whether more wait past it. */
 const PENDING = `
   SELECT frame FROM undelivered
-  WHERE recipients @> ARRAY[$1]::text[] AND ts >= $2
+  WHERE recipients @> ARRAY[$1]::text[] AND ts >= $2 AND expires_at > now()
     AND NOT (sender = $1 AND sender_device = $3)
   ORDER BY ts, op_id LIMIT $4`;
 
@@ -136,11 +138,11 @@ class PgUndeliveredQueue {
 
   /**
    * Store one fanout (see the mongo `append`).
-   * @param {{opId: string, ts: number, recipients: string[], sender: string,
-   *   senderDevice: string, frame: Buffer}} entry
+   * @param {{opId: string, ts: number, expiresAt: Date, recipients: string[],
+   *   sender: string, senderDevice: string, frame: Buffer}} entry
    */
-  async append({ opId, ts, recipients, sender, senderDevice, frame }) {
-    const values = [ts, opId, recipients, sender, senderDevice, frame];
+  async append({ opId, ts, expiresAt, recipients, sender, senderDevice, frame }) {
+    const values = [ts, opId, recipients, sender, senderDevice, frame, expiresAt];
     try {
       await this.#pool.query(APPEND, values);
     } catch (error) {

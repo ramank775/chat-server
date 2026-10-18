@@ -69,7 +69,13 @@ describe('GET /sync/pending (SYNC_PROTOCOL §10.6)', () => {
     clock += 1;
     const frame = frameFor(channelId, n, clock);
     await queue.append({
-      opId: `op-${channelId}-${n}`, ts: clock, recipients, sender, senderDevice, frame
+      opId: `op-${channelId}-${n}`,
+      ts: clock,
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      recipients,
+      sender,
+      senderDevice,
+      frame
     });
     return clock;
   };

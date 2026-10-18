@@ -110,7 +110,8 @@ function envelopeEvent({
   ephemeral = false,
   payload = Buffer.from('chat'),
   recipients = [],
-  serverTimestampMs = 1700000000000
+  // now: an envelope stamped long ago has expired (§10.6)
+  serverTimestampMs = Date.now()
 } = {}) {
   return EnvelopeEvent.of(
     {

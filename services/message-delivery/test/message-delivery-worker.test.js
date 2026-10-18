@@ -1,7 +1,7 @@
 const assert = require('node:assert');
 const { test, describe, after } = require('node:test');
 const { MongoClient } = require('mongodb');
-const { COLLECTION, TTL_SEC } = require('../../../libs/delivery-manager/undelivered-queue');
+const { COLLECTION, TTL_SEC, expiryOf } = require('../../../libs/delivery-manager/undelivered-queue');
 const { decodeWsEnvelope, WS_TYPE } = require('../../../libs/v3-envelope');
 const {
   envelopeEvent,
@@ -154,10 +154,11 @@ describe('message-delivery fanout (SYNC_PROTOCOL §10.3)', () => {
   });
 });
 
-/** One stored fanout, as message-delivery appends it. */
+/** One stored fanout, as message-delivery appends it; good for an hour. */
 const entry = (opId, ts, recipients, extra = {}) => ({
   opId,
   ts,
+  expiresAt: new Date(Date.now() + 60 * 60 * 1000),
   recipients,
   sender: SENDER,
   senderDevice: 'device-1',
@@ -176,8 +177,9 @@ describe('timeline (SYNC_PROTOCOL §10.6, §19 decision 1)', () => {
     await harness.offline(ALICE);
 
     const order = [['channel-1', 'op-3', 1], ['channel-2', 'op-1', 2], ['channel-1', 'op-2', 3]];
+    const now = Date.now();
     await eachSeries(order, ([channelId, opId, ts]) => harness.worker.onMessage(
-      envelopeEvent({ opId, channelId, serverTimestampMs: 1700000000000 + ts })
+      envelopeEvent({ opId, channelId, serverTimestampMs: now + ts })
     ));
 
     const pulled = (await harness.queue.pending(ALICE, 'device-1')).frames
@@ -249,6 +251,38 @@ describe('timeline (SYNC_PROTOCOL §10.6, §19 decision 1)', () => {
     assert.deepStrictEqual((await names(queue, ALICE)).frames, ['first']);
   });
 
+  test('an expired envelope is left out of every pull', async () => {
+    const queue = await emptyQueue(DB);
+    await queue.append(entry('gone', 1, [ALICE], { expiresAt: new Date(Date.now() - 1) }));
+    await queue.append(entry('kept', 2, [ALICE]));
+
+    assert.deepStrictEqual((await names(queue, ALICE)).frames, ['kept']);
+  });
+
+  test('expiry: the sender\'s ttl_sec, at most and by default 30 days', () => {
+    const at = 1700000000000;
+    const day = 24 * 60 * 60;
+    assert.strictEqual(expiryOf({ serverTimestampMs: at }).getTime(), at + TTL_SEC * 1000);
+    assert.strictEqual(expiryOf({ serverTimestampMs: at, ttlSec: 0 }).getTime(), at + TTL_SEC * 1000);
+    assert.strictEqual(expiryOf({ serverTimestampMs: at, ttlSec: day }).getTime(), at + day * 1000);
+    assert.strictEqual(expiryOf({ serverTimestampMs: at, ttlSec: 99 * day }).getTime(),
+      at + TTL_SEC * 1000, 'capped');
+  });
+
+  test('fanout keeps an envelope for its sender\'s ttl_sec', async () => {
+    const harness = await startWorker({ members: new Map([['channel-1', [SENDER, ALICE]]]) });
+    await harness.offline(ALICE);
+    const now = Date.now();
+
+    const event = envelopeEvent({ opId: 'op-short', serverTimestampMs: now - 2000 });
+    event.envelope.ttlSec = 1;
+    await harness.worker.onMessage(event);
+    await harness.worker.onMessage(envelopeEvent({ opId: 'op-default', serverTimestampMs: now }));
+
+    assert.deepStrictEqual(await opIdsFor(harness.queue, ALICE), ['op-default'],
+      'stamped 2 s ago with a 1 s TTL: already expired');
+  });
+
   test('the timeline survives a restart', async () => {
     const before = await emptyQueue(DB);
     await before.append(entry('frame-1', 1, [ALICE]));
@@ -263,7 +297,7 @@ describe('timeline (SYNC_PROTOCOL §10.6, §19 decision 1)', () => {
     }
   });
 
-  test('stored once per fanout, a TTL of the §19 thirty days on the store time', {
+  test('stored once per fanout, deleted by a TTL index on each envelope\'s expiry', {
     skip: TEST_DB !== 'mongo' && 'mongo only: pg drops day partitions instead'
   }, async () => {
     const queue = await emptyQueue(DB);
@@ -277,8 +311,8 @@ describe('timeline (SYNC_PROTOCOL §10.6, §19 decision 1)', () => {
       assert.strictEqual(await collection.countDocuments(), 1, 'one document, three readers');
       const indexes = await collection.indexes();
       const ttl = indexes.find((index) => index.expireAfterSeconds !== undefined);
-      assert.deepStrictEqual(ttl.key, { at: 1 });
-      assert.strictEqual(ttl.expireAfterSeconds, TTL_SEC);
+      assert.deepStrictEqual(ttl.key, { expiresAt: 1 });
+      assert.strictEqual(ttl.expireAfterSeconds, 0);
       assert.ok(indexes.some((index) => index.key.recipients === 1 && index.key.ts === 1));
     } finally {
       await client.close();

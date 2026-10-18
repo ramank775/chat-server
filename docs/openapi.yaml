@@ -429,8 +429,9 @@ paths:
       summary: Read the caller's timeline from this device's pointer
       description: >-
         Every `WsEnvelope{type: WS_PUSH}` fanned out to the calling user is
-        kept once on the server for 30 days, pushed live or not. This returns
-        the ones naming this user with a `server_timestamp_ms` at or after
+        kept once on the server, pushed live or not, until it expires: its
+        sender's `ttl_sec`, at most and by default 30 days. This returns
+        the unexpired ones naming this user with a `server_timestamp_ms` at or after
         `since`, oldest first (then by `op_id`), up to 500, leaving out what
         this very device sent. It removes nothing and remembers nothing: the
         device keeps the newest `server_timestamp_ms` it has handled and

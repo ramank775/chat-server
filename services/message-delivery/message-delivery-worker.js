@@ -8,6 +8,8 @@ const {
 const ChannelServiceClient = require('../../libs/channel-service-client');
 const DeliveryManager = require('../../libs/delivery-manager');
 const UndeliveredQueue = require('../../libs/delivery-manager/undelivered-queue');
+
+const { expiryOf } = UndeliveredQueue;
 const { EnvelopeEvent } = require('../../libs/v3-envelope');
 
 const asMain = require.main === module;
@@ -120,13 +122,15 @@ class MessageDeliveryWorker extends ServiceBase {
 
     // §10.3 step 2 — on the timeline before any device is pushed to, stored
     // once for all its readers: a push into a socket that died is still there
-    // from the device's pointer on, on its next pull (§10.6). Ephemeral
-    // envelopes (typing) are worthless once missed: never stored.
+    // from the device's pointer on, on its next pull (§10.6), until it
+    // expires (its sender's `ttl_sec`, at most and by default 30 days).
+    // Ephemeral envelopes (typing) are worthless once missed: never stored.
     if (!event.ephemeral && readers.length) {
       const { envelope } = event;
       await this.undeliveredQueue.append({
         opId: envelope.opId,
         ts: envelope.serverTimestampMs,
+        expiresAt: expiryOf(envelope),
         recipients: readers,
         sender: envelope.senderUserId || '',
         senderDevice: event.senderDevice,
