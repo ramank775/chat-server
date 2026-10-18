@@ -1,4 +1,3 @@
-const short = require('short-uuid');
 const crypto = require('crypto');
 const path = require('path');
 const schemas = require('./schema');
@@ -7,8 +6,9 @@ function uuidv4() {
   return crypto.randomUUID();
 }
 
+/** 22 url-safe characters, 128 random bits: short-uuid's size, no dependency. */
 function shortuuid() {
-  return short.generate();
+  return crypto.randomBytes(16).toString('base64url');
 }
 
 function extractInfoFromRequest(req, key = 'x-user', defaultValue = null) {
