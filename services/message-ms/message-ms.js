@@ -1,3 +1,4 @@
+const Joi = require('joi');
 const {
   initDefaultOptions,
   initDefaultResources,
@@ -25,7 +26,7 @@ function parseOptions(argv) {
 
 /**
  * The REST half of the sync wire (SYNC_PROTOCOL.md §10.6). v3 makes the
- * server a relay, so all this serves is the undelivered-queue drain —
+ * server a relay, so all this serves is the device's log past its pointer —
  * message history lives on the client.
  */
 class MessageMs extends HttpServiceBase {
@@ -45,28 +46,40 @@ class MessageMs extends HttpServiceBase {
       {
         validate: {
           headers: schemas.authHeaders,
+          query: Joi.object({ after: Joi.number().integer().min(0).default(0) })
         }
       }
     );
   }
 
   /**
-   * `GET /v3.0/sync/pending` — hand back every queued push frame for the
-   * calling device and clear the queue in the same request (at-most-once by
-   * design). The queue is keyed per `(user_id, device_id)`, so another
-   * device of the same user keeps its own (TRIM_4_12_CONTRACT §7).
+   * `GET /v3.0/sync/pending?after=` — a page of the calling device's log past
+   * its pointer, oldest first, and whether more wait. Removes nothing: the
+   * device moves its own pointer, and a frame stays for the retention. The
+   * log is keyed per `(user_id, device_id)`, so another device of the same
+   * user keeps its own (TRIM_4_12_CONTRACT §7).
    */
   async pendingSync(req, res) {
-    const user = extractInfoFromRequest(req, 'x-user');
-    // the gateway's default for a session that carried no device id
-    const device = extractInfoFromRequest(req, 'x-device', 'default');
-    const frames = await this.undeliveredQueue.drain(`${user}:${device}`);
+    const subject = this.subject(req);
+    const { frames, more } = await this.undeliveredQueue.pending(subject, req.query.after);
     this.statsClient.increment({
       stat: 'sync.pending.frame_count',
       value: frames.length,
-      tags: { user, device }
+      tags: { user: subject.split(':')[0] }
     });
-    return res.response({ frames: frames.map((frame) => frame.toString('base64')) }).code(200);
+    return res.response({
+      frames: frames.map((frame) => frame.toString('base64')),
+      more
+    }).code(200);
+  }
+
+  /** The calling device's queue: `user_id:device_id`. */
+  // eslint-disable-next-line class-methods-use-this
+  subject(req) {
+    const user = extractInfoFromRequest(req, 'x-user');
+    // the gateway's default for a session that carried no device id
+    const device = extractInfoFromRequest(req, 'x-device', 'default');
+    return `${user}:${device}`;
   }
 
   async shutdown() {

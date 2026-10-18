@@ -426,20 +426,30 @@ paths:
     get:
       tags:
         - v3.0 > Sync
-      summary: Drain what was queued for this device while it was offline
+      summary: Read this device's log past its pointer
       description: >-
-        Every `WsEnvelope{type: WS_PUSH}` queued for the calling
-        `(user_id, deviceId)` while it had no socket, in enqueue order, and
-        the queue is cleared in the same request: each frame is handed out
-        at most once, also when two requests race. Up to 10,000 frames per
-        device, each kept 30 days, oldest dropped first; the queue survives
-        server restarts. Clients order what they receive by
+        Every `WsEnvelope{type: WS_PUSH}` fanned out to the calling
+        `(user_id, deviceId)` is kept in its log for 30 days, pushed live or
+        not, under the fanout's `offset` (stamped on the envelope). This
+        returns the frames with an offset past `after`, oldest first, up to
+        500, and removes nothing: the device keeps the offset of the newest
+        frame it has handled and passes it as `after` next time. The log
+        survives server restarts. Clients order what they receive by
         (`server_timestamp_ms`, `op_id`), not by position.
       security:
         - bearerAuth: []
+      parameters:
+        - name: after
+          in: query
+          required: false
+          description: The device's pointer; 0 or absent reads everything kept
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
       responses:
         '200':
-          description: The queued frames; empty when there are none
+          description: The frames past the pointer; empty when there are none
           content:
             application/json:
               schema:
@@ -451,7 +461,12 @@ paths:
                       type: string
                       contentEncoding: base64
                       description: A serialized `WsEnvelope` (proto/v3-envelope.proto) with `push` set
-                required: [frames]
+                  more:
+                    type: boolean
+                    description: More frames wait past this page; pull again after its last offset
+                required: [frames, more]
+        '400':
+          description: '`after` is not a non-negative integer'
         '401':
           $ref: '#/components/responses/AuthError'
   /v3.0/push/vapid:

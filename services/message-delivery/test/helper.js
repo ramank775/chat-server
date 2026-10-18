@@ -25,9 +25,8 @@ const clients = new Map();
  * An empty undelivered queue on the real mongo or postgres (`TEST_DB`) from
  * `deployment/docker-compose.infra.yml`.
  * @param {string} dbName unique per test file
- * @param {{maxFrames?: number}} [options]
  */
-async function emptyQueue(dbName, options = {}) {
+async function emptyQueue(dbName) {
   if (TEST_DB === 'pg') {
     if (!clients.has(dbName)) {
       await freshPgDatabase(dbName);
@@ -35,9 +34,9 @@ async function emptyQueue(dbName, options = {}) {
       clients.set(dbName, initPgPool({ options: { pgUrl: pgUrlFor(dbName) } }));
     }
     const pool = clients.get(dbName);
-    const queue = new PgUndeliveredQueue({ pool, ...options });
+    const queue = new PgUndeliveredQueue({ pool });
     await queue.init();
-    await pool.query('TRUNCATE undelivered, undelivered_cursor');
+    await pool.query('TRUNCATE undelivered');
     return queue;
   }
   if (!clients.has(dbName)) {
@@ -45,7 +44,9 @@ async function emptyQueue(dbName, options = {}) {
   }
   const client = clients.get(dbName);
   await client.db().collection(COLLECTION).deleteMany({});
-  return new UndeliveredQueue({ client, ...options });
+  const queue = new UndeliveredQueue({ client });
+  await queue.createIndexes();
+  return queue;
 }
 
 /** The queue in `dbName` on a connection of its own, as after a restart. */
@@ -130,7 +131,7 @@ const DB = 'message-delivery-test';
  * Wire up the real worker over a fake redis, a stub event store, a stub
  * channel-ms and an empty queue. `members` maps channel_id -> user_ids.
  */
-async function startWorker({ members = new Map(), maxFrames } = {}) {
+async function startWorker({ members = new Map() } = {}) {
   const redis = new FakeRedis();
   const emitted = [];
   const context = {
@@ -146,7 +147,7 @@ async function startWorker({ members = new Map(), maxFrames } = {}) {
       members: async (channelId) => new Set(members.get(channelId) || [])
     },
     deliveryManager: new DeliveryManager({ redis, serverId: 'message-delivery', maxRetry: 3 }),
-    undeliveredQueue: await emptyQueue(DB, { maxFrames })
+    undeliveredQueue: await emptyQueue(DB)
   };
   const worker = new MessageDeliveryWorker(context);
   worker.init();

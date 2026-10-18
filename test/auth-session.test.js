@@ -55,14 +55,19 @@ describe('auth/session and the /auth subrequest', () => {
         payload: { refreshToken: session.refreshToken }
       });
 
-    // the monolith seeds its device registry from these on boot
-    const devices = () => app.server.context.authDB.sessionDevices();
-    assert.ok((await devices()).some((d) => d.user_id === session.user_id && d.deviceId === 'd1'));
+    // the monolith's fanout reads its devices from these
+    const devices = (revokedSince) =>
+      app.server.context.authDB.devicesOf([session.user_id], revokedSince);
+    const beforeRevoke = new Date();
+    assert.deepEqual(await devices(beforeRevoke), [{ user_id: session.user_id, deviceId: 'd1' }]);
 
     const first = await revoke();
     assert.equal(first.statusCode, 200);
     assert.deepEqual(JSON.parse(first.payload), { status: true });
-    assert.ok(!(await devices()).some((d) => d.user_id === session.user_id));
+    assert.deepEqual(await devices(beforeRevoke), [{ user_id: session.user_id, deviceId: 'd1' }],
+      'logged out: still queued for, so it finds its messages when it signs back in');
+    assert.deepEqual(await devices(new Date(Date.now() + 1000)), [],
+      'revoked before the window: forgotten');
 
     const second = await revoke();
     assert.equal(second.statusCode, 200, 'revoking twice is a no-op');

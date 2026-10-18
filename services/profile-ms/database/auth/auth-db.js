@@ -170,10 +170,14 @@ class IAuthDB {
 
   /**
    * @abstract
-   * Every device with an unrevoked session.
+   * The devices of `userIds` that fanout queues for: every session not
+   * revoked, or revoked (a logout) at or after `revokedSince`.
+   * @param {string[]} _userIds
+   * @param {Date} _revokedSince
    * @returns {Promise<{user_id: string, deviceId: string}[]>}
    */
-  async sessionDevices() {
+  // eslint-disable-next-line no-unused-vars
+  async devicesOf(_userIds, _revokedSince) {
     throw new Error('Method not implemented');
   }
 

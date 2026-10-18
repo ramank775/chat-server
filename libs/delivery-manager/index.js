@@ -70,6 +70,12 @@ class DeliveryManager {
   messageHandler;
 
   /**
+   * Optional durable device directory, user_ids -> their devices' rows.
+   * @type {(userIds: string[]) => Promise<{user_id: string, deviceId: string}[]>}
+   */
+  deviceDirectory;
+
+  /**
    * Codec for the pubsub payload. v2 carries `MessageEvent`; the v3 sync
    * wire sets this to `EnvelopeEvent` (libs/v3-envelope.js) so a fanout
    * envelope travels between gateways without a v2 `Message` round trip.
@@ -148,15 +154,21 @@ class DeliveryManager {
 
   /**
    * Expand member user_ids into `user_id:device_id` delivery subjects.
-   * ponytail: a device the registry has never seen has no subject, so nothing
-   * is queued for it — the device directory is built from connections, not
-   * from the session rows profile-ms holds. Ceiling: a message sent between a
-   * login and that device's first socket is dropped instead of queued. Seed
-   * the set at session issue if that window ever matters.
+   * With a `deviceDirectory` (the monolith: profile-ms's session rows) a
+   * device counts from sign-in and survives a restart. Without one, from the
+   * registry.
+   * ponytail: the registry knows a device from its first socket. Ceiling: a
+   * message sent between a login and that socket is dropped instead of
+   * queued; give the distributed deployment a directory call into profile-ms
+   * when it runs for real.
    * @param {string[]} userIds
    * @returns {Promise<string[]>}
    */
   async subjects(userIds) {
+    if (this.deviceDirectory) {
+      const rows = await this.deviceDirectory(userIds);
+      return rows.map(({ user_id: userId, deviceId }) => `${userId}:${deviceId}`);
+    }
     const devices = await Promise.all(
       userIds.map((userId) => this._redis.smembers(deviceSetKey(userId)))
     );

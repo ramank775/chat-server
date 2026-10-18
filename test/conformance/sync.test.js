@@ -460,40 +460,74 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
       ));
   });
 
-  // -- 8. undelivered queue drain ------------------------------------------
+  // -- 8. device log: kept for the retention, read past a pointer ---------
 
-  it('queues for an offline user and drains it exactly once', async () => {
-    await bobWs.close();
-    bobWs = null;
+  /** bob's log past `pointer`, decoded; it may also hold server events (§10.2). */
+  const pending = async (pointer) => {
+    const query = pointer === undefined ? '' : `?after=${pointer}`;
+    const response = await api('GET', `/v3.0/sync/pending${query}`, { token: bob.accesskey });
+    assert.equal(response.status, 200);
+    assert.equal(typeof response.body.more, 'boolean');
+    return response.body.frames.map((entry) => decodeWsEnvelope(Buffer.from(entry, 'base64')));
+  };
+  const pendingOps = async (pointer) => (await pending(pointer)).map((frame) => frame.push.opId);
 
+  it('a live push carries its offset and is in the device log all the same', async () => {
     const envelope = {
       opId: aliceOp(),
       channelId: dmId,
       peer: bob.user_id,
       clientTimestampMs: Date.now(),
-      payload: Buffer.from('while you were out')
+      payload: Buffer.from('logged')
     };
     aliceWs.send([envelope]);
-    const [ack] = (await aliceWs.ack()).acks.acks;
-    assert.equal(ack.outcome, ACK_OUTCOME.SUCCESS);
+    const push = await bobWs.push();
+    assert.equal(push.push.opId, envelope.opId);
+    const offset = Number(push.push.offset);
+    assert.ok(offset > 0, 'stamped on the live push');
 
-    const drained = await eventually(async () => {
-      const response = await api('GET', '/v3.0/sync/pending', { token: bob.accesskey });
-      assert.equal(response.status, 200);
-      const frames = response.body.frames.map((entry) =>
-        decodeWsEnvelope(Buffer.from(entry, 'base64')));
-      // the queue may also hold server events bob was offline for (§10.2)
-      return frames.some((frame) => frame.push.opId === envelope.opId) ? frames : null;
+    // §10.3 step 2 — had bob's socket been dead, his next pull would have it
+    assert.ok((await pendingOps(offset - 1)).includes(envelope.opId));
+    // §10.6 — and a pointer at it moves past it
+    assert.ok(!(await pendingOps(offset)).includes(envelope.opId));
+  });
+
+  it('logs for an offline device; a pull removes nothing, the pointer moves past', async () => {
+    await bobWs.close();
+    bobWs = null;
+
+    const send = async (text) => {
+      const envelope = {
+        opId: aliceOp(),
+        channelId: dmId,
+        peer: bob.user_id,
+        clientTimestampMs: Date.now(),
+        payload: Buffer.from(text)
+      };
+      aliceWs.send([envelope]);
+      const [ack] = (await aliceWs.ack()).acks.acks;
+      assert.equal(ack.outcome, ACK_OUTCOME.SUCCESS);
+      return envelope;
+    };
+    const first = await send('while you were out');
+    const second = await send('and this');
+
+    const mine = await eventually(async () => {
+      const frames = (await pending()).filter((frame) =>
+        [first.opId, second.opId].includes(frame.push.opId));
+      return frames.length === 2 ? frames : null;
     });
-    const mine = drained.filter((frame) => frame.push.opId === envelope.opId);
-    assert.equal(mine.length, 1);
-    assert.equal(mine[0].type, WS_TYPE.WS_PUSH);
+    assert.deepEqual(mine.map((frame) => frame.push.opId), [first.opId, second.opId]);
     assert.equal(mine[0].push.senderUserId, alice.user_id);
     assert.equal(Buffer.from(mine[0].push.payload).toString(), 'while you were out');
+    const [offset1, offset2] = mine.map((frame) => Number(frame.push.offset));
+    assert.ok(offset2 > offset1, 'offsets increase');
 
-    const second = await api('GET', '/v3.0/sync/pending', { token: bob.accesskey });
-    assert.equal(second.status, 200);
-    assert.deepEqual(second.body.frames, []);
+    // nothing was taken off: the same pull returns them again
+    assert.ok((await pendingOps()).includes(first.opId));
+    // the device's pointer is what moves
+    assert.deepEqual(await pendingOps(offset1), [second.opId]);
+    assert.deepEqual(await pendingOps(offset2), []);
   });
 
   // -- 9. channel server events (0x53) -------------------------------------

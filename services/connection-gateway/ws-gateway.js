@@ -32,6 +32,7 @@ const asMain = require.main === module;
 const EVENT_TYPE = {
   NEW_MESSAGE_EVENT: 'new-message',
   CONNECTION_STATE: 'connection-state',
+  OFFLINE_EVENT: 'offline-event',
 }
 
 /** Locked by SYNC_PROTOCOL.md §19; not operator-tunable, so not flags. */
@@ -42,6 +43,7 @@ const RATE_LIMIT = {                        // §14.1 / §19 decision 4
   user: { capacity: 100, refillPerSec: 30 },
   ip: { capacity: 100, refillPerSec: 100 }
 };
+const HEARTBEAT_MS = 30 * 1000;             // §5.10
 
 /** AUTH_CONTRACT.md §6.5 — the only application close codes this server may use. */
 const REVOKE_REASON = {
@@ -55,6 +57,7 @@ async function prepareListEvent(context) {
   context.events = {
     [EVENT_TYPE.NEW_MESSAGE_EVENT]: options.newMessageTopic,
     [EVENT_TYPE.CONNECTION_STATE]: options.userConnectionStateTopic,
+    [EVENT_TYPE.OFFLINE_EVENT]: options.offlineMessageTopic,
   };
   return context;
 }
@@ -90,6 +93,10 @@ function parseOptions(argv) {
     .option(
       '--user-connection-state-topic <user-connection-state-topic>',
       'Used by producer to publish user connect/disconnect state'
+    )
+    .option(
+      '--offline-message-topic <offline-message-topic>',
+      'Used by producer to wake a device whose socket died under a push'
     )
     .option(
       '--reauth-grace-ms <reauth-grace-ms>',
@@ -156,15 +163,16 @@ class Gateway extends HttpServiceBase {
 
     this.deliveryManager.eventArg = EnvelopeEvent;
     this.deliveryManager.messageHandler = this.messageHandler.bind(this);
-    // The undelivered queue is message-delivery's (V3_RELEASE_PLAN §3.3). It
-    // owns `offlineMessageHandler` and is expected to expose
-    //   queueForUser(user_id, wsEnvelopeBytes)
-    // over the recipients it gets back from us. Nothing to do here — and when
-    // we share one manager with it (monolith), leave its handler alone.
+    // message-delivery queues every frame before it reaches us and owns
+    // `offlineMessageHandler` (the wake for the recipients we could not
+    // reach). Nothing to do here — and when we share one manager with it
+    // (monolith), leave its handler alone.
     if (!this.deliveryManager.offlineMessageHandler) {
       this.deliveryManager.offlineMessageHandler = () => { };
     }
     await this.deliveryManager.startConsumer();
+    this.heartbeatTimer = setInterval(() => this.heartbeat(), HEARTBEAT_MS);
+    if (this.heartbeatTimer.unref) this.heartbeatTimer.unref();
   }
 
   initWebsocket() {
@@ -197,8 +205,13 @@ class Gateway extends HttpServiceBase {
       ws.remoteIp = (request.headers['x-forwarded-for'] || '').split(',')[0].trim()
         || request.socket.remoteAddress;
       this.onConnect(ws);
+      ws.on('pong', () => {
+        ws.missedPing = false;
+        // everything pushed before that ping reached the device
+        ws.confirmed = ws.pushedAtPing;
+      });
       ws.on('message', (payload, isBinary) => this.onMessage(ws, payload, isBinary));
-      ws.on('close', () => this.onDisconnect(ws));
+      ws.on('close', (code) => this.onDisconnect(ws, code));
     });
   }
 
@@ -230,7 +243,7 @@ class Gateway extends HttpServiceBase {
     );
   }
 
-  async onDisconnect(ws) {
+  async onDisconnect(ws, code) {
     const { userId, deviceId } = ws;
     if (!this._unregister(ws)) return;
     this.statsClient.gauge({
@@ -240,12 +253,50 @@ class Gateway extends HttpServiceBase {
     });
     // the route is per device; the connection-state event is per user
     await this.deliveryManager.userLeft(userId, deviceId);
+    await this.wakeIfLost(ws, code);
     if (this.userSessions.has(userId)) return; // another device is still online
     await this.publishEvent(
       EVENT_TYPE.CONNECTION_STATE,
       ConnectionStateEvent.disconnect(userId, this.options.gatewayName),
       userId
     );
+  }
+
+  /**
+   * §12.1 — the socket died (no close frame: the heartbeat gave up on it, or
+   * the app was killed) after pushes no pong has confirmed. They may never
+   * have arrived; they are in the device's log, so wake it to pull them now
+   * rather than whenever the app next opens. A close the client sent itself
+   * needs nothing: it pulls past its pointer when it comes back.
+   */
+  async wakeIfLost(ws, code) {
+    if (code === 1000 || code === 1001) return;
+    if ((ws.pushed || 0) <= (ws.confirmed || 0)) return;
+    const subject = sessionKey(ws.userId, ws.deviceId);
+    try {
+      await this.publishEvent(EVENT_TYPE.OFFLINE_EVENT, EnvelopeEvent.of({}, [subject]), subject);
+    } catch (e) {
+      this.log.error('Wake on close failed', { err: e, user: ws.userId });
+    }
+  }
+
+  /**
+   * §5.10 — ping every socket; one that has not answered the previous ping
+   * died without a close (the phone changed networks or lost coverage).
+   * Terminating it is an ordinary close: the device goes offline, and
+   * `wakeIfLost` wakes it for whatever it may have missed.
+   */
+  heartbeat() {
+    this.sessions.forEach((ws) => {
+      if (ws.missedPing) {
+        ws.terminate();
+        return;
+      }
+      if (ws.readyState !== WebSocket.OPEN) return;
+      ws.missedPing = true;
+      ws.pushedAtPing = ws.pushed || 0;
+      ws.ping();
+    });
   }
 
   /** Drop a socket from both indexes. Returns false when it was already gone. */
@@ -262,6 +313,8 @@ class Gateway extends HttpServiceBase {
   // ---- client -> server ------------------------------------------------
 
   async onMessage(ws, payload, isBinary) {
+    // any frame proves the socket alive, as a pong does (§5.10)
+    ws.missedPing = false;
     this.statsClient.increment({
       stat: 'message.received.count',
       tags: { channel: 'websocket', gateway: this.options.gatewayName, user: ws.userId }
@@ -492,13 +545,16 @@ class Gateway extends HttpServiceBase {
    */
   pushToSubject(subject, frame, event) {
     const user = subject.split(':')[0];
-    if (!this.send(this.sessions.get(subject), frame)) {
+    const ws = this.sessions.get(subject);
+    if (!this.send(ws, frame)) {
       this.statsClient.increment({
         stat: 'message.delivery.error_count',
         tags: { channel: 'websocket', gateway: this.options.gatewayName, user, code: 404 }
       });
       return false;
     }
+    // §5.10 — a pong for a later ping confirms it arrived (`wakeIfLost`)
+    ws.pushed = (ws.pushed || 0) + 1;
     if (event) {
       this.statsClient.timing({
         stat: 'message.delivery.latency',
@@ -544,6 +600,7 @@ class Gateway extends HttpServiceBase {
   }
 
   async shutdown() {
+    clearInterval(this.heartbeatTimer);
     if (this.context.wss) this.context.wss.close();
     await super.shutdown();
     const { eventStore } = this.context;

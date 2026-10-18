@@ -124,22 +124,31 @@ class MessageDeliveryWorker extends ServiceBase {
       return;
     }
     event.setRecipients(recipients);
+    // §10.3 step 2 — in every device's log before any is pushed to, under
+    // one offset stamped on the envelope, so the live push carries it too:
+    // a push into a socket that died is still there past the device's
+    // pointer on its next pull (§10.6). Ephemeral envelopes (typing) are
+    // worthless once missed: never logged.
+    if (!event.ephemeral) {
+      const offset = await this.undeliveredQueue.nextOffset();
+      event.envelope.offset = offset;
+      const frame = event.toPushFrame();
+      await Promise.all(recipients.map((subject) =>
+        this.undeliveredQueue.enqueue(subject, offset, frame)));
+    }
     await this.deliveryManager.dispatch(event);
   }
 
   /**
-   * SYNC_PROTOCOL.md §10.3 step 3 — every subject delivery-manager could not
-   * reach gets the push frame queued, then an offline-message event so
-   * notification-ms fires the Web Push wake (§12.1; it owns the debounce). Both
-   * are keyed per `(user_id, device_id)`.
+   * SYNC_PROTOCOL.md §10.3 step 4 — every subject delivery-manager could not
+   * reach (already logged by `onMessage`) gets an offline-message event so
+   * notification-ms fires the Web Push wake (§12.1; it owns the debounce),
+   * keyed per `(user_id, device_id)`.
    * @param {EnvelopeEvent} event
    */
   async handleOfflineMessage(event) {
-    // Ephemeral envelopes (typing, presence) are worthless once missed.
     if (event.ephemeral) return;
-    const frame = event.toPushFrame();
     await Promise.all(event.recipients.map(async (subject) => {
-      await this.undeliveredQueue.enqueue(subject, frame);
       await this.eventStore.emit(this.events[EVENT_TYPE.OFFLINE_EVENT], event, subject);
       this.statsClient.increment({
         stat: 'message.undelivered.count',

@@ -340,6 +340,59 @@ test('a fanout envelope is pushed to the recipient device, not to the user', asy
   });
 });
 
+/** A server-stamped fanout envelope for `subjects`, as delivery-manager hands it over. */
+const fanout = (gateway, subjects, offset = 1) => gateway.messageHandler(EnvelopeEvent.of({
+  opId: mintOpId(ALICE),
+  channelId: CHANNEL,
+  payload: payload(),
+  senderUserId: ALICE,
+  serverTimestampMs: 1700000000123,
+  offset
+}, subjects));
+
+test('heartbeat: a socket that misses a ping is terminated, and woken for an unconfirmed push', async () => {
+  await withGateway(async (harness) => {
+    const alice = connect(harness.uri, ALICE, 'device-1');
+    // a phone that went out of coverage: the socket is there, nothing answers
+    const bob = connect(harness.uri, BOB, 'device-1', undefined, { autoPong: false });
+    await Promise.all([alice.opened, bob.opened]);
+    fanout(harness.gateway, [`${ALICE}:device-1`, `${BOB}:device-1`]);
+    await Promise.all([alice.next(), bob.next()]);
+
+    harness.gateway.heartbeat();
+    await new Promise((resolve) => { setTimeout(resolve, 100); });
+    harness.gateway.heartbeat();
+
+    assert.strictEqual((await bob.closed).code, 1006, 'terminated, no close handshake');
+    await new Promise((resolve) => { setTimeout(resolve, 50); });
+    assert.deepStrictEqual(harness.wakes().map((w) => w.key), [`${BOB}:device-1`],
+      'the push into the dead socket may be lost: wake bob to pull it');
+    assert.strictEqual(alice.socket.readyState, 1, 'alice answered: still open');
+    alice.close();
+  });
+});
+
+test('no wake when the pushes were confirmed by a pong, or the client closed itself', async () => {
+  await withGateway(async (harness) => {
+    const alice = connect(harness.uri, ALICE, 'device-1');
+    const bob = connect(harness.uri, BOB, 'device-1');
+    await Promise.all([alice.opened, bob.opened]);
+    fanout(harness.gateway, [`${ALICE}:device-1`, `${BOB}:device-1`]);
+    await Promise.all([alice.next(), bob.next()]);
+
+    // alice's pong confirms the push; then her socket dies all the same
+    harness.gateway.heartbeat();
+    await new Promise((resolve) => { setTimeout(resolve, 100); });
+    alice.socket.terminate();
+    // bob never pongs before leaving, but he closes the socket himself
+    bob.close();
+    await Promise.all([alice.closed, bob.closed]);
+    await new Promise((resolve) => { setTimeout(resolve, 50); });
+
+    assert.deepStrictEqual(harness.wakes(), []);
+  });
+});
+
 test('a text frame that is not the keepalive is a protocol error', async () => {
   await withGateway(async ({ uri }) => {
     const client = connect(uri, ALICE);
