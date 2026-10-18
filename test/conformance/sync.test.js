@@ -481,6 +481,8 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
       payload: Buffer.from('kept')
     };
     aliceWs.send([envelope]);
+    const [ack] = (await aliceWs.ack()).acks.acks;
+    assert.equal(ack.outcome, ACK_OUTCOME.SUCCESS);
     const push = await bobWs.push();
     assert.equal(push.push.opId, envelope.opId);
     const stamp = Number(push.push.serverTimestampMs);
