@@ -1,4 +1,4 @@
-const { MAX_FRAMES, TTL_SEC } = require('./undelivered-queue');
+const { TTL_SEC, PAGE } = require('./undelivered-queue');
 const { ensureSchema } = require('../pg-utils');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -7,58 +7,47 @@ const RETENTION_MS = TTL_SEC * 1000;
 /** Partitions exist this many days past today, so no insert waits on the daily job. */
 const AHEAD_DAYS = 3;
 
-/** The maintenance job's lock: the two-key space never meets the per-subject locks. */
+/** The maintenance job's lock. */
 const MAINTAIN_LOCK = "hashtext('vartalap.undelivered'), 0";
 
 /**
- * `undelivered` is append-only, one partition per UTC day of `at`; nothing
- * ever deletes a row, whole days are dropped past the retention instead. The
- * id sequence must keep its default cache of 1, or ids stop following
- * nextval order across sessions. `undelivered_cursor` is one row per subject,
- * the last id handed out; `last_id` is unindexed and the pages keep 30% free,
- * so each drain's update stays HOT.
+ * `undelivered` is the timeline, append-only, one partition per UTC day of
+ * `at`: nothing ever deletes a row, whole days are dropped past the 30-day
+ * maximum instead, and reads leave out rows past their own `expires_at`. One
+ * row per fanout, its readers in `recipients`.
  */
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS undelivered (
-    id bigserial,
-    subject text NOT NULL,
+    ts bigint NOT NULL,
+    op_id text NOT NULL,
+    recipients text[] NOT NULL,
+    sender text NOT NULL,
+    sender_device text NOT NULL,
     frame bytea NOT NULL,
+    expires_at timestamptz NOT NULL,
     at timestamptz NOT NULL DEFAULT now()
   ) PARTITION BY RANGE (at);
-  CREATE INDEX IF NOT EXISTS undelivered_subject_id ON undelivered (subject, id);
-  CREATE TABLE IF NOT EXISTS undelivered_cursor (
-    subject text PRIMARY KEY,
-    last_id bigint NOT NULL
-  ) WITH (fillfactor = 70);
+  CREATE INDEX IF NOT EXISTS undelivered_recipients ON undelivered USING gin (recipients);
+  CREATE INDEX IF NOT EXISTS undelivered_ts ON undelivered (ts, op_id);
+  CREATE INDEX IF NOT EXISTS undelivered_op ON undelivered (op_id);
 `;
 
 /**
- * Lock, then draw the id, then commit, all in one statement: the lock is held
- * from before `nextval` until the commit, so a subject's ids commit in order
- * and a drain (same lock) never sees a higher id while a lower one is in flight.
+ * Once per op_id, as the mongo one: a unique index on a partitioned table must
+ * include `at`, so the check is a lookup. Fanouts run one at a time, so two
+ * never race it.
  */
-const ENQUEUE = `
-  WITH locked AS (SELECT pg_advisory_xact_lock(hashtext($1)))
-  INSERT INTO undelivered (subject, frame) SELECT $1, $2 FROM locked`;
+const APPEND = `
+  INSERT INTO undelivered (ts, op_id, recipients, sender, sender_device, frame, expires_at)
+  SELECT $1, $2, $3, $4, $5, $6, $7
+  WHERE NOT EXISTS (SELECT 1 FROM undelivered WHERE op_id = $2)`;
 
-/**
- * Everything past the cursor, capped to the newest `$2`, and the cursor moved
- * to the newest id read. Whatever the cap skipped is past the cursor's
- * reach for good: drop-oldest, as the mongo queue does at enqueue.
- */
-const DRAIN = `
-  WITH batch AS (
-    SELECT id, frame FROM undelivered
-    WHERE subject = $1
-      AND id > COALESCE((SELECT last_id FROM undelivered_cursor WHERE subject = $1), 0)
-    ORDER BY id DESC
-    LIMIT $2
-  ), advanced AS (
-    INSERT INTO undelivered_cursor (subject, last_id)
-    SELECT $1, max(id) FROM batch HAVING count(*) > 0
-    ON CONFLICT (subject) DO UPDATE SET last_id = EXCLUDED.last_id
-  )
-  SELECT frame FROM batch ORDER BY id`;
+/** A page plus one (`$4`), to tell whether more wait past it. */
+const PENDING = `
+  SELECT frame FROM undelivered
+  WHERE recipients @> ARRAY[$1]::text[] AND ts >= $2 AND expires_at > now()
+    AND NOT (sender = $1 AND sender_device = $3)
+  ORDER BY ts, op_id LIMIT $4`;
 
 /** Every day partition, attached or left behind by a run that died mid-drop. */
 const PARTITIONS = `
@@ -78,15 +67,12 @@ const partitionDay = (name) =>
 const bound = (ms) => `'${new Date(ms).toISOString()}'`;
 
 /**
- * The undelivered queue of SYNC_PROTOCOL.md §10.6 on postgres (DECISIONS row
- * 129): the same surface and drain semantics as the mongo `UndeliveredQueue`,
- * as an append-only log read through a per-subject cursor.
+ * The timeline of SYNC_PROTOCOL.md §10.6 on postgres (DECISIONS row 129): the
+ * same surface and semantics as the mongo `UndeliveredQueue`.
  */
 class PgUndeliveredQueue {
   /** @type {import('pg').Pool} */
   #pool;
-
-  #maxFrames;
 
   #log;
 
@@ -94,11 +80,10 @@ class PgUndeliveredQueue {
   #timer;
 
   /**
-   * @param {{pool: import('pg').Pool, maxFrames?: number, log?: {error: Function}}} options
+   * @param {{pool: import('pg').Pool, log?: {error: Function}}} options
    */
-  constructor({ pool, maxFrames = MAX_FRAMES, log }) {
+  constructor({ pool, log }) {
     this.#pool = pool;
-    this.#maxFrames = maxFrames;
     this.#log = log;
   }
 
@@ -116,7 +101,7 @@ class PgUndeliveredQueue {
   /**
    * Create the partitions for `now`'s day and the next `AHEAD_DAYS`, and drop
    * every day that ended more than the retention ago (detach concurrently,
-   * then drop, so enqueues and drains never wait on it). Every process runs
+   * then drop, so enqueues and pulls never wait on it). Every process runs
    * it; the session lock queues them, and whoever comes second finds it done.
    * @param {Date} [now]
    */
@@ -152,47 +137,34 @@ class PgUndeliveredQueue {
   }
 
   /**
-   * Append one push frame for a `user_id:device_id` subject. The cap is
-   * applied when the queue is read.
-   * @param {string} subject
-   * @param {Buffer} frame serialized WsEnvelope{type: WS_PUSH}
+   * Store one fanout (see the mongo `append`).
+   * @param {{opId: string, ts: number, expiresAt: Date, recipients: string[],
+   *   sender: string, senderDevice: string, frame: Buffer}} entry
    */
-  async enqueue(subject, frame) {
+  async append({ opId, ts, expiresAt, recipients, sender, senderDevice, frame }) {
+    const values = [ts, opId, recipients, sender, senderDevice, frame, expiresAt];
     try {
-      await this.#pool.query(ENQUEUE, [subject, frame]);
+      await this.#pool.query(APPEND, values);
     } catch (error) {
       // 23514: no partition holds `now()`. The daily job is behind or the
       // clock jumped; make the partitions and insert once more.
       if (error.code !== '23514') throw error;
       await this.maintain();
-      await this.#pool.query(ENQUEUE, [subject, frame]);
+      await this.#pool.query(APPEND, values);
     }
   }
 
   /**
-   * Hand back everything queued for a subject since its last drain, in
-   * enqueue order, and move the cursor past it in the same transaction:
-   * at-most-once, as the mongo queue. Drains of one subject queue on its lock,
-   * so two never return the same frame, and a frame enqueued meanwhile waits
-   * for the next drain.
-   * @param {string} subject
-   * @returns {Promise<Buffer[]>}
+   * A page of `userId`'s timeline from `since` on (see the mongo `pending`).
+   * @param {string} userId
+   * @param {string} deviceId
+   * @param {number} [since]
+   * @param {number} [limit]
+   * @returns {Promise<{frames: Buffer[], more: boolean}>}
    */
-  async drain(subject) {
-    const client = await this.#pool.connect();
-    try {
-      // READ COMMITTED: the drain's snapshot is taken after the lock is granted
-      await client.query('BEGIN ISOLATION LEVEL READ COMMITTED');
-      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [subject]);
-      const { rows } = await client.query(DRAIN, [subject, this.#maxFrames]);
-      await client.query('COMMIT');
-      client.release();
-      return rows.map((row) => row.frame);
-    } catch (error) {
-      // dropping the connection rolls back the transaction and its lock
-      client.release(error);
-      throw error;
-    }
+  async pending(userId, deviceId, since = 0, limit = PAGE) {
+    const { rows } = await this.#pool.query(PENDING, [userId, since, deviceId, limit + 1]);
+    return { frames: rows.slice(0, limit).map((row) => row.frame), more: rows.length > limit };
   }
 
   async dispose() {
@@ -203,6 +175,6 @@ class PgUndeliveredQueue {
 
 module.exports = {
   PgUndeliveredQueue,
-  ENQUEUE,
+  APPEND,
   partitionName
 };

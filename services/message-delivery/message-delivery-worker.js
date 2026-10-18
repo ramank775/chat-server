@@ -8,6 +8,8 @@ const {
 const ChannelServiceClient = require('../../libs/channel-service-client');
 const DeliveryManager = require('../../libs/delivery-manager');
 const UndeliveredQueue = require('../../libs/delivery-manager/undelivered-queue');
+
+const { expiryOf } = UndeliveredQueue;
 const { EnvelopeEvent } = require('../../libs/v3-envelope');
 
 const asMain = require.main === module;
@@ -109,16 +111,35 @@ class MessageDeliveryWorker extends ServiceBase {
       ? event.recipients
       : [...(await this.channelClient.members(event.channelId))];
 
-    // TRIM_4_12_CONTRACT §7-§8 — delivery is per `(user_id, device_id)`, and
-    // every device except the sending one gets the envelope, the sender's own
-    // other devices included.
-    // ponytail: a server-authored event carries no sending device, so the
-    // actor's whole user is skipped, as it was before the trim. Ceiling: at
-    // max_devices > 1 the actor's other devices would miss channel events
-    // until channel-ms threads its `x-device` into the fanout.
+    // A server-authored event carries no sending device: its actor is not a
+    // reader at all, as before the trim. A client's envelope is for every
+    // member, the sender's user included; only its sending device is left
+    // out (TRIM_4_12_CONTRACT §7-§8), at the read and at the push below.
+    // ponytail: at max_devices > 1 the actor's other devices would miss
+    // channel events until channel-ms threads its `x-device` into the fanout.
     const sending = event.senderSubject;
-    const recipients = (await this.deliveryManager.subjects(members)).filter((subject) =>
-      (sending ? subject !== sending : !subject.startsWith(`${event.senderUserId}:`)));
+    const readers = sending ? members : members.filter((id) => id !== event.senderUserId);
+
+    // §10.3 step 2 — on the timeline before any device is pushed to, stored
+    // once for all its readers: a push into a socket that died is still there
+    // from the device's pointer on, on its next pull (§10.6), until it
+    // expires (its sender's `ttl_sec`, at most and by default 30 days).
+    // Ephemeral envelopes (typing) are worthless once missed: never stored.
+    if (!event.ephemeral && readers.length) {
+      const { envelope } = event;
+      await this.undeliveredQueue.append({
+        opId: envelope.opId,
+        ts: envelope.serverTimestampMs,
+        expiresAt: expiryOf(envelope),
+        recipients: readers,
+        sender: envelope.senderUserId || '',
+        senderDevice: event.senderDevice,
+        frame: event.toPushFrame()
+      });
+    }
+
+    const recipients = (await this.deliveryManager.subjects(readers))
+      .filter((subject) => subject !== sending);
     if (!recipients.length) {
       this.log.info(`No fanout recipients for channel ${event.channelId}`);
       return;
@@ -128,18 +149,15 @@ class MessageDeliveryWorker extends ServiceBase {
   }
 
   /**
-   * SYNC_PROTOCOL.md §10.3 step 3 — every subject delivery-manager could not
-   * reach gets the push frame queued, then an offline-message event so
-   * notification-ms fires the Web Push wake (§12.1; it owns the debounce). Both
-   * are keyed per `(user_id, device_id)`.
+   * SYNC_PROTOCOL.md §10.3 step 4 — every subject delivery-manager could not
+   * reach (already on the timeline) gets an offline-message event so
+   * notification-ms fires the Web Push wake (§12.1; it owns the debounce),
+   * keyed per `(user_id, device_id)`.
    * @param {EnvelopeEvent} event
    */
   async handleOfflineMessage(event) {
-    // Ephemeral envelopes (typing, presence) are worthless once missed.
     if (event.ephemeral) return;
-    const frame = event.toPushFrame();
     await Promise.all(event.recipients.map(async (subject) => {
-      await this.undeliveredQueue.enqueue(subject, frame);
       await this.eventStore.emit(this.events[EVENT_TYPE.OFFLINE_EVENT], event, subject);
       this.statsClient.increment({
         stat: 'message.undelivered.count',

@@ -1,7 +1,7 @@
 const path = require('path');
 const protobufjs = require('protobufjs');
 const { uuidv4 } = require('../../helper');
-const { EnvelopeEvent, SERVER_EVENT_MARKER } = require('../../libs/v3-envelope');
+const { EnvelopeEvent, SERVER_EVENT_MARKER, serverNow } = require('../../libs/v3-envelope');
 
 /**
  * SYNC_PROTOCOL.md §10.2 — the REST→WS bridge. Every channel write fans out
@@ -46,7 +46,7 @@ function channelServerEvent(type, body, { channelId, actor, recipients }) {
   const bytes = definition
     .encode(definition.fromObject({ version: 1, type, [VARIANT[type]]: body }))
     .finish();
-  const now = Date.now();
+  const now = serverNow();
   return EnvelopeEvent.of(
     {
       // Server-authored, so there is no client op_id to echo: recipients

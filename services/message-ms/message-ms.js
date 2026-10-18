@@ -1,3 +1,4 @@
+const Joi = require('joi');
 const {
   initDefaultOptions,
   initDefaultResources,
@@ -25,8 +26,8 @@ function parseOptions(argv) {
 
 /**
  * The REST half of the sync wire (SYNC_PROTOCOL.md §10.6). v3 makes the
- * server a relay, so all this serves is the undelivered-queue drain —
- * message history lives on the client.
+ * server a relay, so all this serves is the user's timeline from the
+ * device's own pointer — message history lives on the client.
  */
 class MessageMs extends HttpServiceBase {
   constructor(context) {
@@ -45,29 +46,35 @@ class MessageMs extends HttpServiceBase {
       {
         validate: {
           headers: schemas.authHeaders,
+          query: Joi.object({ since: Joi.number().integer().min(0).default(0) })
         }
       }
     );
   }
 
   /**
-   * `GET /v3.0/sync/pending` — hand back every queued push frame for the
-   * calling device and clear the queue in the same request (at-most-once by
-   * design). The queue is keyed per `(user_id, device_id)`, so another
-   * device of the same user keeps its own (TRIM_4_12_CONTRACT §7).
+   * `GET /v3.0/sync/pending?since=` — a page of the caller's timeline from the
+   * device's pointer (a server_timestamp_ms, inclusive) on, oldest first, and
+   * whether more wait. Removes nothing and remembers nothing: the device keeps
+   * its own pointer, and an envelope stays for the retention. What this device
+   * sent itself is left out; the user's other devices get it.
    */
   async pendingSync(req, res) {
     const user = extractInfoFromRequest(req, 'x-user');
     // the gateway's default for a session that carried no device id
     const device = extractInfoFromRequest(req, 'x-device', 'default');
-    const frames = await this.undeliveredQueue.drain(`${user}:${device}`);
+    const { frames, more } = await this.undeliveredQueue.pending(user, device, req.query.since);
     this.statsClient.increment({
       stat: 'sync.pending.frame_count',
       value: frames.length,
-      tags: { user, device }
+      tags: { user }
     });
-    return res.response({ frames: frames.map((frame) => frame.toString('base64')) }).code(200);
+    return res.response({
+      frames: frames.map((frame) => frame.toString('base64')),
+      more
+    }).code(200);
   }
+
 
   async shutdown() {
     await super.shutdown();

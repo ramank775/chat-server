@@ -89,6 +89,7 @@ async function startGateway(overrides = {}) {
     gatewayName: 'test-gateway',
     newMessageTopic: 'new-message',
     userConnectionStateTopic: 'connection-state',
+    offlineMessageTopic: 'offline-message',
     reauthGraceMs: 40,
     ...overrides
   };
@@ -97,7 +98,8 @@ async function startGateway(overrides = {}) {
   context.statsClient = { increment: noop, decrement: noop, gauge: noop, timing: noop };
   context.events = {
     'new-message': options.newMessageTopic,
-    'connection-state': options.userConnectionStateTopic
+    'connection-state': options.userConnectionStateTopic,
+    'offline-event': options.offlineMessageTopic
   };
   context = await initHttpResource(context);
   context.memCache = new LocalCache();
@@ -125,15 +127,17 @@ async function startGateway(overrides = {}) {
     published,
     uri: gateway.uri,
     addChannel(channelId, members) { channels.set(channelId, new Set(members)); },
+    wakes() { return published.filter((p) => p.topic === options.offlineMessageTopic); },
     publishedEnvelopes() { return published.filter((p) => p.topic === options.newMessageTopic); },
     async stop() { await gateway.shutdown(); }
   };
 }
 
 /** Open a client socket the way nginx would proxy it after a successful auth. */
-function connect(uri, userId, deviceId = 'device-1', accesskey = ACCESSKEY) {
+function connect(uri, userId, deviceId = 'device-1', accesskey = ACCESSKEY, options = {}) {
   const socket = new WebSocket(`${uri.replace('http', 'ws')}/wss`, [`accesskey.${accesskey}`], {
-    headers: { 'x-user': userId, 'x-device': deviceId }
+    headers: { 'x-user': userId, 'x-device': deviceId },
+    ...options
   });
   const queue = [];
   const waiters = [];

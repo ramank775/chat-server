@@ -460,40 +460,98 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
       ));
   });
 
-  // -- 8. undelivered queue drain ------------------------------------------
+  // -- 8. timeline: kept for the retention, read from the device's pointer --
 
-  it('queues for an offline user and drains it exactly once', async () => {
-    await bobWs.close();
-    bobWs = null;
+  /** bob's timeline from `pointer` on, decoded; it may also hold server events (§10.2). */
+  const pending = async (pointer) => {
+    const query = pointer === undefined ? '' : `?since=${pointer}`;
+    const response = await api('GET', `/v3.0/sync/pending${query}`, { token: bob.accesskey });
+    assert.equal(response.status, 200);
+    assert.equal(typeof response.body.more, 'boolean');
+    return response.body.frames.map((entry) => decodeWsEnvelope(Buffer.from(entry, 'base64')));
+  };
+  const pendingOps = async (pointer) => (await pending(pointer)).map((frame) => frame.push.opId);
 
+  it('a live push is on the timeline all the same', async () => {
     const envelope = {
       opId: aliceOp(),
       channelId: dmId,
       peer: bob.user_id,
       clientTimestampMs: Date.now(),
-      payload: Buffer.from('while you were out')
+      payload: Buffer.from('kept')
     };
     aliceWs.send([envelope]);
     const [ack] = (await aliceWs.ack()).acks.acks;
     assert.equal(ack.outcome, ACK_OUTCOME.SUCCESS);
+    const push = await bobWs.push();
+    assert.equal(push.push.opId, envelope.opId);
+    const stamp = Number(push.push.serverTimestampMs);
 
-    const drained = await eventually(async () => {
-      const response = await api('GET', '/v3.0/sync/pending', { token: bob.accesskey });
-      assert.equal(response.status, 200);
-      const frames = response.body.frames.map((entry) =>
-        decodeWsEnvelope(Buffer.from(entry, 'base64')));
-      // the queue may also hold server events bob was offline for (§10.2)
-      return frames.some((frame) => frame.push.opId === envelope.opId) ? frames : null;
+    // §10.3 step 2 — had bob's socket been dead, his next pull would have it
+    assert.ok((await pendingOps(stamp)).includes(envelope.opId), 'since is inclusive');
+    assert.ok(!(await pendingOps(stamp + 1)).includes(envelope.opId));
+  });
+
+  it('kept for an offline device; a pull removes nothing, the device\'s pointer moves', async () => {
+    await bobWs.close();
+    bobWs = null;
+
+    const send = async (text) => {
+      const envelope = {
+        opId: aliceOp(),
+        channelId: dmId,
+        peer: bob.user_id,
+        clientTimestampMs: Date.now(),
+        payload: Buffer.from(text)
+      };
+      aliceWs.send([envelope]);
+      const [ack] = (await aliceWs.ack()).acks.acks;
+      assert.equal(ack.outcome, ACK_OUTCOME.SUCCESS);
+      return { ...envelope, stamp: Number(ack.serverTimestampMs) };
+    };
+    const first = await send('while you were out');
+    await new Promise((resolve) => { setTimeout(resolve, 5); });
+    const second = await send('and this');
+
+    const mine = await eventually(async () => {
+      const frames = (await pending(first.stamp)).filter((frame) =>
+        [first.opId, second.opId].includes(frame.push.opId));
+      return frames.length === 2 ? frames : null;
     });
-    const mine = drained.filter((frame) => frame.push.opId === envelope.opId);
-    assert.equal(mine.length, 1);
-    assert.equal(mine[0].type, WS_TYPE.WS_PUSH);
+    assert.deepEqual(mine.map((frame) => frame.push.opId), [first.opId, second.opId]);
     assert.equal(mine[0].push.senderUserId, alice.user_id);
     assert.equal(Buffer.from(mine[0].push.payload).toString(), 'while you were out');
 
-    const second = await api('GET', '/v3.0/sync/pending', { token: bob.accesskey });
-    assert.equal(second.status, 200);
-    assert.deepEqual(second.body.frames, []);
+    // nothing was taken off: the same pull returns them again
+    assert.ok((await pendingOps(first.stamp)).includes(first.opId));
+    // the device's pointer is what moves
+    assert.deepEqual(await pendingOps(second.stamp), [second.opId]);
+    assert.deepEqual(await pendingOps(second.stamp + 1), []);
+
+    // and alice's own device never gets her envelopes back
+    const own = await api('GET', `/v3.0/sync/pending?since=${first.stamp}`, { token: alice.accesskey });
+    assert.deepEqual(own.body.frames, []);
+  });
+
+  it('an envelope past its sender\'s ttl_sec is left out of the timeline', async () => {
+    const envelope = {
+      opId: aliceOp(),
+      channelId: dmId,
+      peer: bob.user_id,
+      clientTimestampMs: Date.now(),
+      payload: Buffer.from('gone soon'),
+      ttlSec: 1
+    };
+    aliceWs.send([envelope]);
+    const [ack] = (await aliceWs.ack()).acks.acks;
+    assert.equal(ack.outcome, ACK_OUTCOME.SUCCESS);
+    const stamp = Number(ack.serverTimestampMs);
+
+    const kept = (await pending(stamp)).find((frame) => frame.push.opId === envelope.opId);
+    assert.ok(kept, 'there until it expires');
+    assert.equal(kept.push.ttlSec, 1, 'echoed for the other side to apply too');
+    await new Promise((resolve) => { setTimeout(resolve, 1500); });
+    assert.ok(!(await pendingOps(stamp)).includes(envelope.opId));
   });
 
   // -- 9. channel server events (0x53) -------------------------------------

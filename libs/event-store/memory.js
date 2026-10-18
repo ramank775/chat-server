@@ -106,11 +106,21 @@ class MemoryEventStore extends IEventStore {
     );
   }
 
+  /**
+   * Resolves once every consumer has handled the event and rejects if one
+   * threw: the point kafka's acked produce gives a publisher. The gateway acks
+   * a sender only after this, so SUCCESS means the frame is queued for every
+   * recipient (SYNC_PROTOCOL.md §10.3 step 2). No consumer emits on its own
+   * topic, so waiting here never waits on itself.
+   */
   async emit(event, args, key) {
     this.events.push({ event, args, key });
-    this.#bus.publish(event, args, key, (error) =>
-      this.#log.error(`Error while handling ${event}`, { error })
-    );
+    let failed;
+    await this.#bus.publish(event, args, key, (error) => {
+      this.#log.error(`Error while handling ${event}`, { error });
+      failed = failed || error;
+    });
+    if (failed) throw failed;
   }
 
   async dispose() {

@@ -177,9 +177,11 @@ class PgAuthDB extends IAuthDB {
     );
   }
 
-  async sessionDevices() {
+  async devicesOf(userIds, revokedSince) {
     const { rows } = await this.#pool.query(
-      `SELECT ${selectList(['user_id', 'deviceId'])} FROM sessions WHERE revoked_at IS NULL`
+      `SELECT ${selectList(['user_id', 'deviceId'])} FROM sessions
+       WHERE user_id = ANY($1) AND (revoked_at IS NULL OR revoked_at >= $2)`,
+      [userIds, revokedSince]
     );
     return rows;
   }

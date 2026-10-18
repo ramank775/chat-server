@@ -1,101 +1,104 @@
-const { ObjectId } = require('mongodb');
 const { addMongodbOptions, initMongoClient } = require('../mongo-utils');
 const { addPgOptions, initPgPool } = require('../pg-utils');
 
-/** SYNC_PROTOCOL.md §19 decisions 1-2: 30 days, 10,000 frames, drop-oldest. */
-const MAX_FRAMES = 10000;
+/**
+ * SYNC_PROTOCOL.md §19 decision 1: the longest an envelope is kept, read or
+ * not, and how long when its sender set no `ttl_sec`.
+ */
 const TTL_SEC = 30 * 24 * 60 * 60;
 
-const COLLECTION = 'undelivered_frames';
+/** SYNC_PROTOCOL.md §10.6: frames per pull. */
+const PAGE = 500;
 
-/** Enqueue order: `at` is when the frame was queued, `_id` breaks a tie. */
-const FIFO = { at: 1, _id: 1 };
+const COLLECTION = 'timeline';
 
 /**
- * The undelivered queue of SYNC_PROTOCOL.md §10.6: `toPushFrame()` bytes held
- * for a `user_id:device_id` subject (TRIM_4_12_CONTRACT §7) whose socket was
- * closed, drained in one shot by `GET /v3.0/sync/pending`.
+ * The timeline of SYNC_PROTOCOL.md §10.6: every non-ephemeral fanout stored
+ * once, as the `toPushFrame()` bytes with the user_ids it is for, and kept
+ * until it expires (its sender's `ttl_sec`, at most and by default 30 days)
+ * whether anyone read it or not. A user's timeline is built when
+ * a device asks (`GET /v3.0/sync/pending?since=`): the envelopes naming that
+ * user, from the device's own pointer on, less what that very device sent.
+ * Nothing is removed on a read, so a push into a socket that died is still
+ * there for the next pull, and the server keeps no pointer of anyone's.
  *
  * Written by message-delivery, read by message-ms. It is the one piece of
  * server state a restart must not lose (DECISIONS rows 125 and 127), so it
  * lives in the database in every mode. This is the mongo one (the default):
- * one `{subject, frame, at}` document per frame, expired by a TTL index on
- * `at`. `--undelivered-queue pg` picks pg-undelivered-queue.js instead.
+ * one document per envelope, the recipients a multikey index, deleted by a
+ * TTL index on `expiresAt` (which runs about once a minute, so reads filter
+ * on it too). `--undelivered-queue pg` picks pg-undelivered-queue.js
+ * instead.
  */
 class UndeliveredQueue {
   /** @type {import('mongodb').MongoClient} */
   #client;
 
   /** @type {import('mongodb').Collection} */
-  #frames;
-
-  #maxFrames;
+  #envelopes;
 
   /**
-   * @param {{client: import('mongodb').MongoClient, maxFrames?: number}} options
-   *   `client` points at the database the queue lives in.
+   * @param {{client: import('mongodb').MongoClient}} options `client` points at
+   *   the database the timeline lives in.
    */
-  constructor({ client, maxFrames = MAX_FRAMES }) {
+  constructor({ client }) {
     this.#client = client;
-    this.#frames = client.db().collection(COLLECTION);
-    this.#maxFrames = maxFrames;
+    this.#envelopes = client.db().collection(COLLECTION);
   }
 
-  /** The drain index and the TTL index. Idempotent; `init` runs it at boot. */
+  /** The read index, the op_id index and the TTL index. Idempotent; `init` runs it at boot. */
   async createIndexes() {
-    await this.#frames.createIndexes([
-      { key: { subject: 1, ...FIFO } },
-      { key: { at: 1 }, expireAfterSeconds: TTL_SEC }
+    await this.#envelopes.createIndexes([
+      { key: { recipients: 1, ts: 1, opId: 1 } },
+      { key: { opId: 1 }, unique: true },
+      { key: { expiresAt: 1 }, expireAfterSeconds: 0 }
     ]);
   }
 
   /**
-   * Append one push frame for a `user_id:device_id` subject, dropping the
-   * oldest past the cap.
-   * ponytail: the cap check walks up to `maxFrames` index keys per enqueue;
-   * keep a per-subject count if queues ever sit at the cap.
-   * @param {string} subject
-   * @param {Buffer} frame serialized WsEnvelope{type: WS_PUSH}
+   * Store one fanout. Once per op_id: a sender's retry that fans out again
+   * keeps the first.
+   * @param {{opId: string, ts: number, expiresAt: Date, recipients: string[],
+   *   sender: string, senderDevice: string, frame: Buffer}} entry `ts` is the
+   *   envelope's server_timestamp_ms, `expiresAt` from `expiryOf()`;
+   *   `sender`/`senderDevice` are '' when server-authored.
    */
-  async enqueue(subject, frame) {
-    await this.#frames.insertOne({ subject, frame, at: new Date() });
-    const excess = await this.#frames
-      .find({ subject }, { projection: { _id: 1 } })
-      .sort({ at: -1, _id: -1 })
-      .skip(this.#maxFrames)
-      .toArray();
-    if (excess.length) {
-      await this.#frames.deleteMany({ _id: { $in: excess.map(({ _id }) => _id) } });
-    }
+  async append({ opId, ts, expiresAt, recipients, sender, senderDevice, frame }) {
+    await this.#envelopes.updateOne(
+      { opId },
+      { $setOnInsert: { ts, expiresAt, recipients, sender, senderDevice, frame } },
+      { upsert: true }
+    );
   }
 
   /**
-   * Hand back everything queued for a `user_id:device_id` subject, in enqueue
-   * order, and remove exactly that — at-most-once by design (§10.6 drain
-   * semantics). A drain first claims the frames, each one atomically, so two
-   * drains racing (two gateways, a retried request) never return the same
-   * frame, and one enqueued mid-drain waits for the next drain. Clients order
-   * by (server_timestamp_ms, op_id) themselves.
-   * ponytail: a process that dies between claim and delete strands what it
-   * claimed until the TTL; re-claim claims older than a minute if that shows up.
-   * @param {string} subject
-   * @returns {Promise<Buffer[]>}
+   * A page of `userId`'s timeline from `since` on, oldest first (§10.6), less
+   * what `deviceId` sent itself. Inclusive: several envelopes share a
+   * millisecond, so the pointer's own one comes back and the client's op_id
+   * dedup absorbs it.
+   * ponytail: a page ends mid-millisecond only past 500 envelopes for one user
+   * in one millisecond, which the §14 rate limits rule out.
+   * @param {string} userId
+   * @param {string} deviceId
+   * @param {number} [since] the device's pointer, a server_timestamp_ms
+   * @param {number} [limit]
+   * @returns {Promise<{frames: Buffer[], more: boolean}>}
    */
-  async drain(subject) {
-    const claim = new ObjectId();
-    await this.#frames.updateMany({ subject, claim: null }, { $set: { claim } });
-    try {
-      const claimed = await this.#frames
-        .find({ subject, claim }, { promoteBuffers: true })
-        .sort(FIFO)
-        .toArray();
-      await this.#frames.deleteMany({ subject, claim });
-      return claimed.map((doc) => doc.frame);
-    } catch (error) {
-      // nothing was handed out: give the frames back for the client's retry
-      await this.#frames.updateMany({ subject, claim }, { $unset: { claim: '' } });
-      throw error;
-    }
+  async pending(userId, deviceId, since = 0, limit = PAGE) {
+    const docs = await this.#envelopes
+      .find(
+        {
+          recipients: userId,
+          ts: { $gte: since },
+          expiresAt: { $gt: new Date() },
+          $nor: [{ sender: userId, senderDevice: deviceId }]
+        },
+        { promoteBuffers: true, projection: { frame: 1 } }
+      )
+      .sort({ ts: 1, opId: 1 })
+      .limit(limit + 1)
+      .toArray();
+    return { frames: docs.slice(0, limit).map((doc) => doc.frame), more: docs.length > limit };
   }
 
   async dispose() {
@@ -103,10 +106,19 @@ class UndeliveredQueue {
   }
 }
 
+/**
+ * When a stored envelope expires: its sender's `ttl_sec` from the server stamp,
+ * capped at `TTL_SEC`; 0 (unset) means `TTL_SEC`.
+ * @param {{serverTimestampMs: number, ttlSec?: number}} envelope
+ */
+function expiryOf({ serverTimestampMs, ttlSec }) {
+  return new Date(serverTimestampMs + Math.min(ttlSec || TTL_SEC, TTL_SEC) * 1000);
+}
+
 function addOptions(cmd) {
   return addPgOptions(addMongodbOptions(cmd)).option(
     '--undelivered-queue <undelivered-queue>',
-    'Where the undelivered queue lives (mongo, pg)',
+    'Where the timeline lives (mongo, pg)',
     'mongo'
   );
 }
@@ -125,7 +137,7 @@ async function init(context) {
     queue = new UndeliveredQueue({ client: initMongoClient(context) });
     await queue.createIndexes();
   } else {
-    throw new Error(`${type} is not a registered undelivered queue implementation`);
+    throw new Error(`${type} is not a registered timeline implementation`);
   }
   context.undeliveredQueue = queue;
   return context;
@@ -133,9 +145,10 @@ async function init(context) {
 
 module.exports = {
   UndeliveredQueue,
-  MAX_FRAMES,
   TTL_SEC,
+  PAGE,
   COLLECTION,
+  expiryOf,
   addOptions,
   init
 };

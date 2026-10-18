@@ -1,7 +1,7 @@
 const assert = require('node:assert');
 const { test, describe, after } = require('node:test');
 const { MongoClient } = require('mongodb');
-const { COLLECTION, TTL_SEC } = require('../../../libs/delivery-manager/undelivered-queue');
+const { COLLECTION, TTL_SEC, expiryOf } = require('../../../libs/delivery-manager/undelivered-queue');
 const { decodeWsEnvelope, WS_TYPE } = require('../../../libs/v3-envelope');
 const {
   envelopeEvent,
@@ -25,21 +25,28 @@ const BOB_1 = `${BOB}:device-1`;
 
 after(closeQueues);
 
+/** op_ids on `userId`'s timeline as `deviceId` would pull it from `since`. */
+const opIdsFor = async (queue, userId, deviceId = 'device-1', since = 0) =>
+  (await queue.pending(userId, deviceId, since)).frames.map((frame) => decodeWsEnvelope(frame).push.opId);
+
 describe('message-delivery fanout (SYNC_PROTOCOL §10.3)', () => {
-  test('an online device is pushed to its gateway and never queued', async () => {
+  test('an online device is pushed to its gateway, and the envelope is on the timeline', async () => {
     const harness = await startWorker({ members: new Map([['channel-1', [SENDER, ALICE]]]) });
     await harness.online(ALICE);
 
-    await harness.worker.onMessage(envelopeEvent());
+    const event = envelopeEvent();
+    await harness.worker.onMessage(event);
     await settle();
 
     assert.strictEqual(harness.redis.published.length, 1);
     assert.strictEqual(harness.redis.published[0].channel, 'msg:gateway-1:0');
-    assert.deepStrictEqual(await harness.queue.drain(ALICE_1), []);
-    assert.deepStrictEqual(harness.wakeEvents(), []);
+    const { frames } = await harness.queue.pending(ALICE, 'device-1');
+    assert.strictEqual(frames.length, 1, 'a push into a dead socket must not be lost');
+    assert.ok(frames[0].equals(event.toPushFrame()));
+    assert.deepStrictEqual(harness.wakeEvents(), [], 'online: no wake');
   });
 
-  test('the sending device is excluded, its user\'s other devices are not', async () => {
+  test('the sending device is left out, its user\'s other devices are not', async () => {
     const harness = await startWorker({ members: new Map([['channel-1', [SENDER, ALICE]]]) });
     await harness.offline(SENDER, 'device-1');
     await harness.offline(SENDER, 'device-2');
@@ -49,9 +56,12 @@ describe('message-delivery fanout (SYNC_PROTOCOL §10.3)', () => {
     await harness.worker.onMessage(event);
 
     assert.deepStrictEqual(event.recipients.sort(), [ALICE_1, `${SENDER}:device-2`].sort());
+    assert.deepStrictEqual(await opIdsFor(harness.queue, SENDER, 'device-1'), []);
+    assert.deepStrictEqual(await opIdsFor(harness.queue, SENDER, 'device-2'), ['op-1']);
+    assert.deepStrictEqual(await opIdsFor(harness.queue, ALICE), ['op-1']);
   });
 
-  test('a server-authored event skips the whole actor, which has no device', async () => {
+  test('a server-authored event is not on its actor\'s timeline at all', async () => {
     const harness = await startWorker({ members: new Map([['channel-1', [SENDER, ALICE]]]) });
     await harness.offline(SENDER, 'device-1');
     await harness.offline(SENDER, 'device-2');
@@ -61,51 +71,61 @@ describe('message-delivery fanout (SYNC_PROTOCOL §10.3)', () => {
     await harness.worker.onMessage(event);
 
     assert.deepStrictEqual(event.recipients, [ALICE_1]);
+    assert.deepStrictEqual(await opIdsFor(harness.queue, SENDER, 'device-2'), []);
+    assert.deepStrictEqual(await opIdsFor(harness.queue, ALICE), ['op-1']);
   });
 
-  test('an offline device is queued with the exact push-frame bytes and woken', async () => {
+  test('an offline device is woken; the timeline holds the exact push-frame bytes', async () => {
     const harness = await startWorker({ members: new Map([['channel-1', [SENDER, ALICE]]]) });
     await harness.offline(ALICE);
 
     const event = envelopeEvent();
     await harness.worker.onMessage(event);
 
-    const queued = await harness.queue.drain(ALICE_1);
-    assert.strictEqual(queued.length, 1);
-    assert.ok(queued[0].equals(event.toPushFrame()));
+    const { frames } = await harness.queue.pending(ALICE, 'device-1');
+    assert.strictEqual(frames.length, 1);
+    assert.ok(frames[0].equals(event.toPushFrame()));
 
     const wakes = harness.wakeEvents();
     assert.strictEqual(wakes.length, 1);
     assert.strictEqual(wakes[0].key, ALICE_1, 'the wake is keyed per (user, device)');
   });
 
-  test('a queue is per device, not per user', async () => {
+  test('every device of a reader reads the same timeline', async () => {
     const harness = await startWorker({ members: new Map([['channel-1', [SENDER, ALICE]]]) });
     await harness.offline(ALICE, 'device-1');
     await harness.offline(ALICE, 'device-2');
 
     await harness.worker.onMessage(envelopeEvent());
 
-    assert.strictEqual((await harness.queue.drain(ALICE_1)).length, 1);
-    assert.strictEqual((await harness.queue.drain(`${ALICE}:device-2`)).length, 1);
+    assert.deepStrictEqual(await opIdsFor(harness.queue, ALICE, 'device-1'), ['op-1']);
+    assert.deepStrictEqual(await opIdsFor(harness.queue, ALICE, 'device-2'), ['op-1']);
+    assert.deepStrictEqual(await opIdsFor(harness.queue, ALICE, 'a-device-signed-in-later'), ['op-1']);
   });
 
-  test('a device the registry has never seen gets no fanout', async () => {
+  test('a reader with no device yet still has it on the timeline', async () => {
     const harness = await startWorker({ members: new Map([['channel-1', [SENDER, ALICE]]]) });
 
     await harness.worker.onMessage(envelopeEvent());
 
     assert.deepStrictEqual(harness.wakeEvents(), []);
+    assert.deepStrictEqual(await opIdsFor(harness.queue, ALICE), ['op-1']);
   });
 
-  test('ephemeral envelopes are dropped for offline recipients, never queued', async () => {
-    const harness = await startWorker({ members: new Map([['channel-1', [SENDER, ALICE]]]) });
+  test('ephemeral envelopes are never stored, online or not', async () => {
+    const harness = await startWorker({
+      members: new Map([['channel-1', [SENDER, ALICE, BOB]]])
+    });
     await harness.offline(ALICE);
+    await harness.online(BOB);
 
     await harness.worker.onMessage(envelopeEvent({ ephemeral: true }));
+    await settle();
 
-    assert.deepStrictEqual(await harness.queue.drain(ALICE_1), []);
+    assert.deepStrictEqual(await opIdsFor(harness.queue, ALICE), []);
+    assert.deepStrictEqual(await opIdsFor(harness.queue, BOB), []);
     assert.deepStrictEqual(harness.wakeEvents(), []);
+    assert.strictEqual(harness.redis.published.length, 1, 'still pushed live to BOB');
   });
 
   test('a DM or server event with explicit recipients bypasses membership', async () => {
@@ -119,8 +139,8 @@ describe('message-delivery fanout (SYNC_PROTOCOL §10.3)', () => {
     await harness.worker.onMessage(event);
 
     assert.deepStrictEqual(event.recipients, [ALICE_1, BOB_1]);
-    assert.strictEqual((await harness.queue.drain(ALICE_1)).length, 1);
-    assert.strictEqual((await harness.queue.drain(BOB_1)).length, 1);
+    assert.deepStrictEqual(await opIdsFor(harness.queue, ALICE), ['op-1']);
+    assert.deepStrictEqual(await opIdsFor(harness.queue, BOB), ['op-1']);
   });
 
   test('a channel with no members other than the sender fans out to nobody', async () => {
@@ -134,121 +154,166 @@ describe('message-delivery fanout (SYNC_PROTOCOL §10.3)', () => {
   });
 });
 
-describe('undelivered queue (SYNC_PROTOCOL §10.6, §19 decisions 1-2)', () => {
-  test('drains in enqueue order, channels interleaved as they arrived', async () => {
+/** One stored fanout, as message-delivery appends it; good for an hour. */
+const entry = (opId, ts, recipients, extra = {}) => ({
+  opId,
+  ts,
+  expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+  recipients,
+  sender: SENDER,
+  senderDevice: 'device-1',
+  frame: Buffer.from(opId),
+  ...extra
+});
+const names = async (queue, userId, since = 0, limit = undefined) => {
+  const { frames, more } = await queue.pending(userId, 'device-1', since, limit);
+  return { frames: frames.map(String), more };
+};
+
+describe('timeline (SYNC_PROTOCOL §10.6, §19 decision 1)', () => {
+  test('pages come in timestamp order, channels interleaved as they were stamped', async () => {
     const members = new Map([['channel-1', [SENDER, ALICE]], ['channel-2', [SENDER, ALICE]]]);
     const harness = await startWorker({ members });
     await harness.offline(ALICE);
 
-    const order = [['channel-1', 'op-3'], ['channel-2', 'op-1'], ['channel-1', 'op-2']];
-    await eachSeries(order, ([channelId, opId]) => harness.worker.onMessage(
-      envelopeEvent({ opId, channelId })
+    const order = [['channel-1', 'op-3', 1], ['channel-2', 'op-1', 2], ['channel-1', 'op-2', 3]];
+    const now = Date.now();
+    await eachSeries(order, ([channelId, opId, ts]) => harness.worker.onMessage(
+      envelopeEvent({ opId, channelId, serverTimestampMs: now + ts })
     ));
 
-    const drained = (await harness.queue.drain(ALICE_1))
+    const pulled = (await harness.queue.pending(ALICE, 'device-1')).frames
       .map((frame) => decodeWsEnvelope(frame).push)
       .map((push) => [push.channelId, push.opId]);
-    assert.deepStrictEqual(drained, order);
+    assert.deepStrictEqual(pulled, order.map(([channelId, opId]) => [channelId, opId]));
   });
 
-  test('every queued frame is a decodable WS_PUSH envelope', async () => {
+  test('every stored frame is a decodable WS_PUSH envelope', async () => {
     const harness = await startWorker({ members: new Map([['channel-1', [SENDER, ALICE]]]) });
     await harness.offline(ALICE);
 
     await harness.worker.onMessage(envelopeEvent({ payload: Buffer.from([0x53, 0x01]) }));
 
-    const [frame] = await harness.queue.drain(ALICE_1);
+    const [frame] = (await harness.queue.pending(ALICE, 'device-1')).frames;
     const decoded = decodeWsEnvelope(frame);
     assert.strictEqual(decoded.type, WS_TYPE.WS_PUSH);
     assert.strictEqual(decoded.push.senderUserId, SENDER);
     assert.ok(decoded.push.payload.equals(Buffer.from([0x53, 0x01])));
   });
 
-  test('the frame cap drops the oldest frames', async () => {
-    const queue = await emptyQueue(DB, { maxFrames: 3 });
-    await eachSeries([1, 2, 3, 4, 5], (n) => queue.enqueue(ALICE_1, Buffer.from(`frame-${n}`)));
-
-    const frames = await queue.drain(ALICE_1);
-    assert.deepStrictEqual(frames.map(String), ['frame-3', 'frame-4', 'frame-5']);
-  });
-
-  test('the cap is per subject', async () => {
-    const queue = await emptyQueue(DB, { maxFrames: 2 });
-    await eachSeries([1, 2, 3], (n) => queue.enqueue(ALICE_1, Buffer.from(`alice-${n}`)));
-    await queue.enqueue(BOB_1, Buffer.from('bob-1'));
-
-    assert.deepStrictEqual((await queue.drain(ALICE_1)).map(String), ['alice-2', 'alice-3']);
-    assert.deepStrictEqual((await queue.drain(BOB_1)).map(String), ['bob-1']);
-  });
-
-  test('a drain empties the queue', async () => {
+  test('a read removes nothing; `since` is the device\'s pointer, inclusive', async () => {
     const queue = await emptyQueue(DB);
-    await queue.enqueue(ALICE_1, Buffer.from('frame'));
+    await queue.append(entry('a', 100, [ALICE]));
+    await queue.append(entry('b', 200, [ALICE]));
+    await queue.append(entry('c', 300, [ALICE]));
 
-    assert.strictEqual((await queue.drain(ALICE_1)).length, 1);
-    assert.deepStrictEqual(await queue.drain(ALICE_1), []);
+    assert.deepStrictEqual((await names(queue, ALICE)).frames, ['a', 'b', 'c']);
+    assert.deepStrictEqual((await names(queue, ALICE)).frames, ['a', 'b', 'c']);
+    assert.deepStrictEqual((await names(queue, ALICE, 200)).frames, ['b', 'c']);
+    assert.deepStrictEqual((await names(queue, ALICE, 301)).frames, []);
   });
 
-  test('queues are per (user, device)', async () => {
+  test('an envelope stored after a pull, in the pointer\'s own millisecond, is not missed', async () => {
     const queue = await emptyQueue(DB);
-    await queue.enqueue(ALICE_1, Buffer.from('for-alice'));
+    await queue.append(entry('op-b', 500, [ALICE]));
+    const first = await names(queue, ALICE);
+    assert.deepStrictEqual(first.frames, ['op-b']);
 
-    assert.deepStrictEqual(await queue.drain(BOB_1), []);
-    assert.deepStrictEqual(await queue.drain(`${ALICE}:device-2`), []);
-    assert.strictEqual((await queue.drain(ALICE_1)).length, 1);
+    // the device's pointer is now 500; another envelope stamped 500 lands
+    await queue.append(entry('op-a', 500, [ALICE]));
+    assert.deepStrictEqual((await names(queue, ALICE, 500)).frames, ['op-a', 'op-b']);
   });
 
-  test('frames survive a restart: a new queue on a new connection drains them', async () => {
+  test('pages: at most `limit`, ordered by (timestamp, op_id), and whether more wait', async () => {
+    const queue = await emptyQueue(DB);
+    await eachSeries([['e', 1], ['d', 2], ['c', 2], ['b', 3], ['a', 4]],
+      ([name, ts]) => queue.append(entry(name, ts, [ALICE])));
+
+    assert.deepStrictEqual(await names(queue, ALICE, 0, 2), { frames: ['e', 'c'], more: true });
+    assert.deepStrictEqual(await names(queue, ALICE, 2, 2), { frames: ['c', 'd'], more: true });
+    assert.deepStrictEqual(await names(queue, ALICE, 3, 2), { frames: ['b', 'a'], more: false });
+  });
+
+  test('a timeline holds only what names its user', async () => {
+    const queue = await emptyQueue(DB);
+    await queue.append(entry('for-alice', 1, [ALICE]));
+    await queue.append(entry('for-both', 2, [ALICE, BOB]));
+
+    assert.deepStrictEqual((await names(queue, ALICE)).frames, ['for-alice', 'for-both']);
+    assert.deepStrictEqual((await names(queue, BOB)).frames, ['for-both']);
+  });
+
+  test('a sender retry that fans out again is stored once', async () => {
+    const queue = await emptyQueue(DB);
+    await queue.append(entry('op-1', 1, [ALICE], { frame: Buffer.from('first') }));
+    await queue.append(entry('op-1', 9, [ALICE], { frame: Buffer.from('retry') }));
+
+    assert.deepStrictEqual((await names(queue, ALICE)).frames, ['first']);
+  });
+
+  test('an expired envelope is left out of every pull', async () => {
+    const queue = await emptyQueue(DB);
+    await queue.append(entry('gone', 1, [ALICE], { expiresAt: new Date(Date.now() - 1) }));
+    await queue.append(entry('kept', 2, [ALICE]));
+
+    assert.deepStrictEqual((await names(queue, ALICE)).frames, ['kept']);
+  });
+
+  test('expiry: the sender\'s ttl_sec, at most and by default 30 days', () => {
+    const at = 1700000000000;
+    const day = 24 * 60 * 60;
+    assert.strictEqual(expiryOf({ serverTimestampMs: at }).getTime(), at + TTL_SEC * 1000);
+    assert.strictEqual(expiryOf({ serverTimestampMs: at, ttlSec: 0 }).getTime(), at + TTL_SEC * 1000);
+    assert.strictEqual(expiryOf({ serverTimestampMs: at, ttlSec: day }).getTime(), at + day * 1000);
+    assert.strictEqual(expiryOf({ serverTimestampMs: at, ttlSec: 99 * day }).getTime(),
+      at + TTL_SEC * 1000, 'capped');
+  });
+
+  test('fanout keeps an envelope for its sender\'s ttl_sec', async () => {
+    const harness = await startWorker({ members: new Map([['channel-1', [SENDER, ALICE]]]) });
+    await harness.offline(ALICE);
+    const now = Date.now();
+
+    const event = envelopeEvent({ opId: 'op-short', serverTimestampMs: now - 2000 });
+    event.envelope.ttlSec = 1;
+    await harness.worker.onMessage(event);
+    await harness.worker.onMessage(envelopeEvent({ opId: 'op-default', serverTimestampMs: now }));
+
+    assert.deepStrictEqual(await opIdsFor(harness.queue, ALICE), ['op-default'],
+      'stamped 2 s ago with a 1 s TTL: already expired');
+  });
+
+  test('the timeline survives a restart', async () => {
     const before = await emptyQueue(DB);
-    await eachSeries([1, 2], (n) => before.enqueue(ALICE_1, Buffer.from(`frame-${n}`)));
+    await before.append(entry('frame-1', 1, [ALICE]));
+    await before.append(entry('frame-2', 2, [ALICE]));
 
     // DECISIONS row 125: the in-process queue lost these on every deploy
     const restarted = reopenQueue(DB);
     try {
-      assert.deepStrictEqual((await restarted.drain(ALICE_1)).map(String), ['frame-1', 'frame-2']);
+      assert.deepStrictEqual((await names(restarted, ALICE)).frames, ['frame-1', 'frame-2']);
     } finally {
       await restarted.dispose();
     }
   });
 
-  test('concurrent drains never hand out a frame twice, and lose none', async () => {
-    const queue = await emptyQueue(DB);
-    const first = Array.from({ length: 200 }, (_, n) => `early-${n}`);
-    await eachSeries(first, (name) => queue.enqueue(ALICE_1, Buffer.from(name)));
-
-    // five drains race each other and a burst of late enqueues
-    const late = Array.from({ length: 50 }, (_, n) => `late-${n}`);
-    const [drains] = await Promise.all([
-      Promise.all(Array.from({ length: 5 }, () => queue.drain(ALICE_1))),
-      eachSeries(late, (name) => queue.enqueue(ALICE_1, Buffer.from(name)))
-    ]);
-    const leftover = await queue.drain(ALICE_1);
-
-    const handedOut = [...drains, leftover].flat().map(String);
-    assert.strictEqual(new Set(handedOut).size, handedOut.length, 'a frame was handed out twice');
-    assert.deepStrictEqual([...handedOut].sort(), [...first, ...late].sort());
-    // and each drain's share is still in enqueue order
-    const position = new Map([...first, ...late].map((name, index) => [name, index]));
-    [...drains, leftover].forEach((frames) => {
-      const at = frames.map((frame) => position.get(String(frame)));
-      assert.deepStrictEqual(at, [...at].sort((a, b) => a - b));
-    });
-  });
-
-  test('the indexes include a TTL of the §19 thirty days on the enqueue time', {
+  test('stored once per fanout, deleted by a TTL index on each envelope\'s expiry', {
     skip: TEST_DB !== 'mongo' && 'mongo only: pg drops day partitions instead'
   }, async () => {
     const queue = await emptyQueue(DB);
     await queue.createIndexes();
     await queue.createIndexes(); // idempotent: every boot runs it
+    await queue.append(entry('op-group', 1, [ALICE, BOB, SENDER]));
 
     const client = new MongoClient(mongoUrlFor(DB), { auth: null });
     try {
-      const indexes = await client.db().collection(COLLECTION).indexes();
+      const collection = client.db().collection(COLLECTION);
+      assert.strictEqual(await collection.countDocuments(), 1, 'one document, three readers');
+      const indexes = await collection.indexes();
       const ttl = indexes.find((index) => index.expireAfterSeconds !== undefined);
-      assert.deepStrictEqual(ttl.key, { at: 1 });
-      assert.strictEqual(ttl.expireAfterSeconds, TTL_SEC);
-      assert.ok(indexes.some((index) => index.key.subject === 1));
+      assert.deepStrictEqual(ttl.key, { expiresAt: 1 });
+      assert.strictEqual(ttl.expireAfterSeconds, 0);
+      assert.ok(indexes.some((index) => index.key.recipients === 1 && index.key.ts === 1));
     } finally {
       await client.close();
     }

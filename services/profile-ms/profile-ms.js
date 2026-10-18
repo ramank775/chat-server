@@ -14,7 +14,7 @@ const { profileDB } = require('./database');
 const { addAuthProviderOptions, initializeAuthProvider, AuthError } = require('./auth-provider');
 const { SmsGatewayError, SmsGatewayUnavailableError } = require('./auth-provider/sms-sender');
 const { HttpClient } = require('../../libs/http-client');
-const { EnvelopeEvent, SERVER_EVENT_MARKER } = require('../../libs/v3-envelope');
+const { EnvelopeEvent, SERVER_EVENT_MARKER, serverNow } = require('../../libs/v3-envelope');
 const { validateUsername } = require('./username');
 const { uuidv4, hashSecret, verifySecret, sha256, errorEnvelope } = require('../../helper');
 
@@ -716,7 +716,7 @@ class ProfileMs extends HttpServiceBase {
    * @param {string} channelId
    */
   async publishServerEvent(body, recipients, channelId) {
-    const nowMs = Date.now();
+    const nowMs = serverNow();
     const envelope = {
       opId: uuidv4(),
       channelId,
