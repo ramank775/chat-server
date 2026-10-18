@@ -78,6 +78,10 @@ class S3Storage extends IMediaStorage {
       region: this.#options.region,
       endpoint: this.#options.endpoint || undefined,
       forcePathStyle: !!this.#options.forcePathStyle,
+      // SDK >= 3.729 otherwise signs a CRC32 of the empty body into every
+      // upload url; S3, R2 and B2 then reject the real bytes (minio ignores it).
+      requestChecksumCalculation: 'WHEN_REQUIRED',
+      responseChecksumValidation: 'WHEN_REQUIRED',
     });
   }
 

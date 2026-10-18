@@ -219,4 +219,7 @@ test('s3 upload url is bucket scoped and signs content type and length', async (
   const signedHeaders = parsed.searchParams.get('X-Amz-SignedHeaders').split(';');
   assert.ok(signedHeaders.includes('content-type'), signedHeaders.join(','));
   assert.ok(signedHeaders.includes('content-length'), signedHeaders.join(','));
+  // A checksum signed before the bytes exist is the empty body's: S3 rejects the upload.
+  const checksums = [...parsed.searchParams.keys()].filter((k) => /checksum/i.test(k));
+  assert.deepStrictEqual(checksums, []);
 });
