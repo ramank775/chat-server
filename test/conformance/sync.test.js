@@ -460,11 +460,11 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
       ));
   });
 
-  // -- 8. device log: kept for the retention, read past a pointer ---------
+  // -- 8. timeline: kept for the retention, read from the device's pointer --
 
-  /** bob's log past `pointer`, decoded; it may also hold server events (§10.2). */
+  /** bob's timeline from `pointer` on, decoded; it may also hold server events (§10.2). */
   const pending = async (pointer) => {
-    const query = pointer === undefined ? '' : `?after=${pointer}`;
+    const query = pointer === undefined ? '' : `?since=${pointer}`;
     const response = await api('GET', `/v3.0/sync/pending${query}`, { token: bob.accesskey });
     assert.equal(response.status, 200);
     assert.equal(typeof response.body.more, 'boolean');
@@ -472,27 +472,25 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
   };
   const pendingOps = async (pointer) => (await pending(pointer)).map((frame) => frame.push.opId);
 
-  it('a live push carries its offset and is in the device log all the same', async () => {
+  it('a live push is on the timeline all the same', async () => {
     const envelope = {
       opId: aliceOp(),
       channelId: dmId,
       peer: bob.user_id,
       clientTimestampMs: Date.now(),
-      payload: Buffer.from('logged')
+      payload: Buffer.from('kept')
     };
     aliceWs.send([envelope]);
     const push = await bobWs.push();
     assert.equal(push.push.opId, envelope.opId);
-    const offset = Number(push.push.offset);
-    assert.ok(offset > 0, 'stamped on the live push');
+    const stamp = Number(push.push.serverTimestampMs);
 
     // §10.3 step 2 — had bob's socket been dead, his next pull would have it
-    assert.ok((await pendingOps(offset - 1)).includes(envelope.opId));
-    // §10.6 — and a pointer at it moves past it
-    assert.ok(!(await pendingOps(offset)).includes(envelope.opId));
+    assert.ok((await pendingOps(stamp)).includes(envelope.opId), 'since is inclusive');
+    assert.ok(!(await pendingOps(stamp + 1)).includes(envelope.opId));
   });
 
-  it('logs for an offline device; a pull removes nothing, the pointer moves past', async () => {
+  it('kept for an offline device; a pull removes nothing, the device\'s pointer moves', async () => {
     await bobWs.close();
     bobWs = null;
 
@@ -507,27 +505,30 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
       aliceWs.send([envelope]);
       const [ack] = (await aliceWs.ack()).acks.acks;
       assert.equal(ack.outcome, ACK_OUTCOME.SUCCESS);
-      return envelope;
+      return { ...envelope, stamp: Number(ack.serverTimestampMs) };
     };
     const first = await send('while you were out');
+    await new Promise((resolve) => { setTimeout(resolve, 5); });
     const second = await send('and this');
 
     const mine = await eventually(async () => {
-      const frames = (await pending()).filter((frame) =>
+      const frames = (await pending(first.stamp)).filter((frame) =>
         [first.opId, second.opId].includes(frame.push.opId));
       return frames.length === 2 ? frames : null;
     });
     assert.deepEqual(mine.map((frame) => frame.push.opId), [first.opId, second.opId]);
     assert.equal(mine[0].push.senderUserId, alice.user_id);
     assert.equal(Buffer.from(mine[0].push.payload).toString(), 'while you were out');
-    const [offset1, offset2] = mine.map((frame) => Number(frame.push.offset));
-    assert.ok(offset2 > offset1, 'offsets increase');
 
     // nothing was taken off: the same pull returns them again
-    assert.ok((await pendingOps()).includes(first.opId));
+    assert.ok((await pendingOps(first.stamp)).includes(first.opId));
     // the device's pointer is what moves
-    assert.deepEqual(await pendingOps(offset1), [second.opId]);
-    assert.deepEqual(await pendingOps(offset2), []);
+    assert.deepEqual(await pendingOps(second.stamp), [second.opId]);
+    assert.deepEqual(await pendingOps(second.stamp + 1), []);
+
+    // and alice's own device never gets her envelopes back
+    const own = await api('GET', `/v3.0/sync/pending?since=${first.stamp}`, { token: alice.accesskey });
+    assert.deepEqual(own.body.frames, []);
   });
 
   // -- 9. channel server events (0x53) -------------------------------------

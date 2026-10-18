@@ -341,13 +341,12 @@ test('a fanout envelope is pushed to the recipient device, not to the user', asy
 });
 
 /** A server-stamped fanout envelope for `subjects`, as delivery-manager hands it over. */
-const fanout = (gateway, subjects, offset = 1) => gateway.messageHandler(EnvelopeEvent.of({
+const fanout = (gateway, subjects) => gateway.messageHandler(EnvelopeEvent.of({
   opId: mintOpId(ALICE),
   channelId: CHANNEL,
   payload: payload(),
   senderUserId: ALICE,
-  serverTimestampMs: 1700000000123,
-  offset
+  serverTimestampMs: 1700000000123
 }, subjects));
 
 test('heartbeat: a socket that misses a ping is terminated, and woken for an unconfirmed push', async () => {

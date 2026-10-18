@@ -11,27 +11,41 @@ const AHEAD_DAYS = 3;
 const MAINTAIN_LOCK = "hashtext('vartalap.undelivered'), 0";
 
 /**
- * `undelivered` is append-only, one partition per UTC day of `at`: nothing
- * ever deletes a row, whole days are dropped past the retention instead.
- * `seq` is the fanout's offset from `undelivered_seq`, shared by every
- * recipient's row of one fanout (`offset` is a reserved word).
+ * `undelivered` is the timeline, append-only, one partition per UTC day of
+ * `at`: nothing ever deletes a row, whole days are dropped past the retention
+ * instead. One row per fanout, its readers in `recipients`.
  */
 const SCHEMA = `
-  CREATE SEQUENCE IF NOT EXISTS undelivered_seq;
   CREATE TABLE IF NOT EXISTS undelivered (
-    subject text NOT NULL,
-    seq bigint NOT NULL,
+    ts bigint NOT NULL,
+    op_id text NOT NULL,
+    recipients text[] NOT NULL,
+    sender text NOT NULL,
+    sender_device text NOT NULL,
     frame bytea NOT NULL,
     at timestamptz NOT NULL DEFAULT now()
   ) PARTITION BY RANGE (at);
-  CREATE INDEX IF NOT EXISTS undelivered_subject_seq ON undelivered (subject, seq);
+  CREATE INDEX IF NOT EXISTS undelivered_recipients ON undelivered USING gin (recipients);
+  CREATE INDEX IF NOT EXISTS undelivered_ts ON undelivered (ts, op_id);
+  CREATE INDEX IF NOT EXISTS undelivered_op ON undelivered (op_id);
 `;
 
-const ENQUEUE = 'INSERT INTO undelivered (subject, seq, frame) VALUES ($1, $2, $3)';
+/**
+ * Once per op_id, as the mongo one: a unique index on a partitioned table must
+ * include `at`, so the check is a lookup. Fanouts run one at a time, so two
+ * never race it.
+ */
+const APPEND = `
+  INSERT INTO undelivered (ts, op_id, recipients, sender, sender_device, frame)
+  SELECT $1, $2, $3, $4, $5, $6
+  WHERE NOT EXISTS (SELECT 1 FROM undelivered WHERE op_id = $2)`;
 
-/** A page plus one (`$3`), to tell whether more wait past it. */
+/** A page plus one (`$4`), to tell whether more wait past it. */
 const PENDING = `
-  SELECT frame FROM undelivered WHERE subject = $1 AND seq > $2 ORDER BY seq LIMIT $3`;
+  SELECT frame FROM undelivered
+  WHERE recipients @> ARRAY[$1]::text[] AND ts >= $2
+    AND NOT (sender = $1 AND sender_device = $3)
+  ORDER BY ts, op_id LIMIT $4`;
 
 /** Every day partition, attached or left behind by a run that died mid-drop. */
 const PARTITIONS = `
@@ -51,9 +65,8 @@ const partitionDay = (name) =>
 const bound = (ms) => `'${new Date(ms).toISOString()}'`;
 
 /**
- * The device logs of SYNC_PROTOCOL.md §10.6 on postgres (DECISIONS row 129):
- * the same surface and semantics as the mongo `UndeliveredQueue`, and the
- * same one-fanout-at-a-time ceiling.
+ * The timeline of SYNC_PROTOCOL.md §10.6 on postgres (DECISIONS row 129): the
+ * same surface and semantics as the mongo `UndeliveredQueue`.
  */
 class PgUndeliveredQueue {
   /** @type {import('pg').Pool} */
@@ -121,40 +134,34 @@ class PgUndeliveredQueue {
     }
   }
 
-  /** The next offset: strictly increasing, one per fanout. */
-  async nextOffset() {
-    const { rows } = await this.#pool.query("SELECT nextval('undelivered_seq') AS seq");
-    return Number(rows[0].seq);
-  }
-
   /**
-   * Append one push frame to a subject's log.
-   * @param {string} subject
-   * @param {number} offset from `nextOffset`, stamped on the frame's envelope
-   * @param {Buffer} frame serialized WsEnvelope{type: WS_PUSH}
+   * Store one fanout (see the mongo `append`).
+   * @param {{opId: string, ts: number, recipients: string[], sender: string,
+   *   senderDevice: string, frame: Buffer}} entry
    */
-  async enqueue(subject, offset, frame) {
+  async append({ opId, ts, recipients, sender, senderDevice, frame }) {
+    const values = [ts, opId, recipients, sender, senderDevice, frame];
     try {
-      await this.#pool.query(ENQUEUE, [subject, offset, frame]);
+      await this.#pool.query(APPEND, values);
     } catch (error) {
       // 23514: no partition holds `now()`. The daily job is behind or the
       // clock jumped; make the partitions and insert once more.
       if (error.code !== '23514') throw error;
       await this.maintain();
-      await this.#pool.query(ENQUEUE, [subject, offset, frame]);
+      await this.#pool.query(APPEND, values);
     }
   }
 
   /**
-   * The frames in a subject's log past `after`, oldest first, and whether
-   * more wait (§10.6). Removes nothing.
-   * @param {string} subject
-   * @param {number} [after]
+   * A page of `userId`'s timeline from `since` on (see the mongo `pending`).
+   * @param {string} userId
+   * @param {string} deviceId
+   * @param {number} [since]
    * @param {number} [limit]
    * @returns {Promise<{frames: Buffer[], more: boolean}>}
    */
-  async pending(subject, after = 0, limit = PAGE) {
-    const { rows } = await this.#pool.query(PENDING, [subject, after, limit + 1]);
+  async pending(userId, deviceId, since = 0, limit = PAGE) {
+    const { rows } = await this.#pool.query(PENDING, [userId, since, deviceId, limit + 1]);
     return { frames: rows.slice(0, limit).map((row) => row.frame), more: rows.length > limit };
   }
 
@@ -166,6 +173,6 @@ class PgUndeliveredQueue {
 
 module.exports = {
   PgUndeliveredQueue,
-  ENQUEUE,
+  APPEND,
   partitionName
 };

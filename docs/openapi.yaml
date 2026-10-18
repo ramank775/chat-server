@@ -426,30 +426,32 @@ paths:
     get:
       tags:
         - v3.0 > Sync
-      summary: Read this device's log past its pointer
+      summary: Read the caller's timeline from this device's pointer
       description: >-
-        Every `WsEnvelope{type: WS_PUSH}` fanned out to the calling
-        `(user_id, deviceId)` is kept in its log for 30 days, pushed live or
-        not, under the fanout's `offset` (stamped on the envelope). This
-        returns the frames with an offset past `after`, oldest first, up to
-        500, and removes nothing: the device keeps the offset of the newest
-        frame it has handled and passes it as `after` next time. The log
+        Every `WsEnvelope{type: WS_PUSH}` fanned out to the calling user is
+        kept once on the server for 30 days, pushed live or not. This returns
+        the ones naming this user with a `server_timestamp_ms` at or after
+        `since`, oldest first (then by `op_id`), up to 500, leaving out what
+        this very device sent. It removes nothing and remembers nothing: the
+        device keeps the newest `server_timestamp_ms` it has handled and
+        passes it as `since` next time; the frames at that millisecond come
+        back and the client's `op_id` dedup absorbs them. The timeline
         survives server restarts. Clients order what they receive by
-        (`server_timestamp_ms`, `op_id`), not by position.
+        (`server_timestamp_ms`, `op_id`).
       security:
         - bearerAuth: []
       parameters:
-        - name: after
+        - name: since
           in: query
           required: false
-          description: The device's pointer; 0 or absent reads everything kept
+          description: The device's pointer, a server_timestamp_ms, inclusive; 0 or absent reads everything kept
           schema:
             type: integer
             minimum: 0
             default: 0
       responses:
         '200':
-          description: The frames past the pointer; empty when there are none
+          description: The frames from the pointer on; empty when there are none
           content:
             application/json:
               schema:
@@ -463,10 +465,10 @@ paths:
                       description: A serialized `WsEnvelope` (proto/v3-envelope.proto) with `push` set
                   more:
                     type: boolean
-                    description: More frames wait past this page; pull again after its last offset
+                    description: More frames wait past this page; pull again from its last server_timestamp_ms
                 required: [frames, more]
         '400':
-          description: '`after` is not a non-negative integer'
+          description: '`since` is not a non-negative integer'
         '401':
           $ref: '#/components/responses/AuthError'
   /v3.0/push/vapid:

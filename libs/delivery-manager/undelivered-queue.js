@@ -1,107 +1,94 @@
 const { addMongodbOptions, initMongoClient } = require('../mongo-utils');
 const { addPgOptions, initPgPool } = require('../pg-utils');
 
-/** SYNC_PROTOCOL.md §19 decision 1: a frame is kept 30 days, read or not. */
+/** SYNC_PROTOCOL.md §19 decision 1: an envelope is kept 30 days, read or not. */
 const TTL_SEC = 30 * 24 * 60 * 60;
 
 /** SYNC_PROTOCOL.md §10.6: frames per pull. */
 const PAGE = 500;
 
-const COLLECTION = 'undelivered_frames';
-
-/** The one document holding the last offset handed out. */
-const COUNTERS = 'counters';
+const COLLECTION = 'timeline';
 
 /**
- * The device logs of SYNC_PROTOCOL.md §10.6, Kafka style: every `toPushFrame()`
- * fanned out to a `user_id:device_id` subject (TRIM_4_12_CONTRACT §7), under
- * the fanout's offset, kept for the retention whether the device read it or
- * not. Nothing is removed on a read: the device keeps its own pointer and
- * pulls what lies past it (`GET /v3.0/sync/pending?after=`), so a frame
- * pushed into a socket that died is still there for the next pull.
+ * The timeline of SYNC_PROTOCOL.md §10.6: every non-ephemeral fanout stored
+ * once, as the `toPushFrame()` bytes with the user_ids it is for, and kept for
+ * the retention whether anyone read it or not. A user's timeline is built when
+ * a device asks (`GET /v3.0/sync/pending?since=`): the envelopes naming that
+ * user, from the device's own pointer on, less what that very device sent.
+ * Nothing is removed on a read, so a push into a socket that died is still
+ * there for the next pull, and the server keeps no pointer of anyone's.
  *
  * Written by message-delivery, read by message-ms. It is the one piece of
  * server state a restart must not lose (DECISIONS rows 125 and 127), so it
  * lives in the database in every mode. This is the mongo one (the default):
- * one `{subject, offset, frame, at}` document per frame, expired by a TTL
- * index on `at`. `--undelivered-queue pg` picks pg-undelivered-queue.js
+ * one document per envelope, the recipients a multikey index, expired by a
+ * TTL index on `at`. `--undelivered-queue pg` picks pg-undelivered-queue.js
  * instead.
- *
- * ponytail: offsets are drawn and frames written by one fanout at a time
- * (the monolith's bus runs a topic's events in order), so a device never
- * sees a higher offset land before a lower one. Ceiling: two message-delivery
- * workers would break that; give each subject one writer (a partition, as
- * kafka does) before running more than one.
  */
 class UndeliveredQueue {
   /** @type {import('mongodb').MongoClient} */
   #client;
 
   /** @type {import('mongodb').Collection} */
-  #frames;
-
-  /** @type {import('mongodb').Collection} */
-  #counters;
+  #envelopes;
 
   /**
    * @param {{client: import('mongodb').MongoClient}} options `client` points at
-   *   the database the logs live in.
+   *   the database the timeline lives in.
    */
   constructor({ client }) {
     this.#client = client;
-    this.#frames = client.db().collection(COLLECTION);
-    this.#counters = client.db().collection(COUNTERS);
+    this.#envelopes = client.db().collection(COLLECTION);
   }
 
-  /** The read index and the TTL index. Idempotent; `init` runs it at boot. */
+  /** The read index, the op_id index and the TTL index. Idempotent; `init` runs it at boot. */
   async createIndexes() {
-    await this.#frames.createIndexes([
-      { key: { subject: 1, offset: 1 }, unique: true },
+    await this.#envelopes.createIndexes([
+      { key: { recipients: 1, ts: 1, opId: 1 } },
+      { key: { opId: 1 }, unique: true },
       { key: { at: 1 }, expireAfterSeconds: TTL_SEC }
     ]);
   }
 
   /**
-   * The next offset: strictly increasing across restarts, one per fanout and
-   * shared by all its recipients.
-   * @returns {Promise<number>}
+   * Store one fanout. Once per op_id: a sender's retry that fans out again
+   * keeps the first.
+   * @param {{opId: string, ts: number, recipients: string[], sender: string,
+   *   senderDevice: string, frame: Buffer}} entry `ts` is the envelope's
+   *   server_timestamp_ms; `sender`/`senderDevice` are '' when server-authored.
    */
-  async nextOffset() {
-    const counter = await this.#counters.findOneAndUpdate(
-      { _id: COLLECTION },
-      { $inc: { offset: 1 } },
-      { upsert: true, returnDocument: 'after' }
-    );
-    return counter.offset;
-  }
-
-  /**
-   * Append one push frame to a subject's log. Once per offset: a fanout run
-   * again writes nothing new.
-   * @param {string} subject
-   * @param {number} offset from `nextOffset`, stamped on the frame's envelope
-   * @param {Buffer} frame serialized WsEnvelope{type: WS_PUSH}
-   */
-  async enqueue(subject, offset, frame) {
-    await this.#frames.updateOne(
-      { subject, offset },
-      { $setOnInsert: { frame, at: new Date() } },
+  async append({ opId, ts, recipients, sender, senderDevice, frame }) {
+    await this.#envelopes.updateOne(
+      { opId },
+      { $setOnInsert: { ts, recipients, sender, senderDevice, frame, at: new Date() } },
       { upsert: true }
     );
   }
 
   /**
-   * The frames in a subject's log past `after`, oldest first, and whether
-   * more wait past this page (§10.6). Removes nothing.
-   * @param {string} subject
-   * @param {number} [after] the device's pointer; 0 reads everything kept
+   * A page of `userId`'s timeline from `since` on, oldest first (§10.6), less
+   * what `deviceId` sent itself. Inclusive: several envelopes share a
+   * millisecond, so the pointer's own one comes back and the client's op_id
+   * dedup absorbs it.
+   * ponytail: a page ends mid-millisecond only past 500 envelopes for one user
+   * in one millisecond, which the §14 rate limits rule out.
+   * @param {string} userId
+   * @param {string} deviceId
+   * @param {number} [since] the device's pointer, a server_timestamp_ms
    * @param {number} [limit]
    * @returns {Promise<{frames: Buffer[], more: boolean}>}
    */
-  async pending(subject, after = 0, limit = PAGE) {
-    const docs = await this.#frames
-      .find({ subject, offset: { $gt: after } }, { promoteBuffers: true, projection: { frame: 1 } })
-      .sort({ offset: 1 })
+  async pending(userId, deviceId, since = 0, limit = PAGE) {
+    const docs = await this.#envelopes
+      .find(
+        {
+          recipients: userId,
+          ts: { $gte: since },
+          $nor: [{ sender: userId, senderDevice: deviceId }]
+        },
+        { promoteBuffers: true, projection: { frame: 1 } }
+      )
+      .sort({ ts: 1, opId: 1 })
       .limit(limit + 1)
       .toArray();
     return { frames: docs.slice(0, limit).map((doc) => doc.frame), more: docs.length > limit };
@@ -115,7 +102,7 @@ class UndeliveredQueue {
 function addOptions(cmd) {
   return addPgOptions(addMongodbOptions(cmd)).option(
     '--undelivered-queue <undelivered-queue>',
-    'Where the undelivered queue lives (mongo, pg)',
+    'Where the timeline lives (mongo, pg)',
     'mongo'
   );
 }
@@ -134,7 +121,7 @@ async function init(context) {
     queue = new UndeliveredQueue({ client: initMongoClient(context) });
     await queue.createIndexes();
   } else {
-    throw new Error(`${type} is not a registered undelivered queue implementation`);
+    throw new Error(`${type} is not a registered timeline implementation`);
   }
   context.undeliveredQueue = queue;
   return context;

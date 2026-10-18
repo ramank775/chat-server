@@ -8,12 +8,12 @@ const { emptyQueue, reopenQueue, closeQueues } = require('./helper');
 
 const DB = 'pg-undelivered-queue-test';
 const DAY_MS = 24 * 60 * 60 * 1000;
-const ALICE_1 = '00000000b:device-1';
+const ALICE = '00000000b';
 
 const range = (n) => Array.from({ length: n }, (_, index) => index);
 const dayOf = (ms) => Math.floor(ms / DAY_MS) * DAY_MS;
 
-/** DECISIONS row 129: the append-only, day-partitioned log. `TEST_DB=pg` only. */
+/** DECISIONS row 129: the append-only, day-partitioned timeline. `TEST_DB=pg` only. */
 describe('pg undelivered queue (DECISIONS row 129)', { skip: TEST_DB !== 'pg' }, () => {
   /** The tests' own connections, for what the queue does not expose. */
   let pool;
@@ -32,13 +32,16 @@ describe('pg undelivered queue (DECISIONS row 129)', { skip: TEST_DB !== 'pg' },
     await closeQueues();
   });
 
-  test('nothing deletes a row: a read past the pointer leaves the log as it was', async () => {
-    const queue = await emptyQueue(DB);
-    const first = await queue.nextOffset();
-    await queue.enqueue(ALICE_1, first, Buffer.from('one'));
-    await queue.enqueue(ALICE_1, await queue.nextOffset(), Buffer.from('two'));
+  const entry = (opId, ts, recipients) => ({
+    opId, ts, recipients, sender: '00000000a', senderDevice: 'd1', frame: Buffer.from(opId)
+  });
 
-    assert.deepStrictEqual((await queue.pending(ALICE_1, first)).frames.map(String), ['two']);
+  test('one row per fanout, and a read deletes nothing', async () => {
+    const queue = await emptyQueue(DB);
+    await queue.append(entry('group', 1, ['00000000b', '00000000c', '00000000d']));
+    await queue.append(entry('dm', 2, ['00000000b', '00000000a']));
+
+    assert.deepStrictEqual((await queue.pending('00000000b', 'd1', 2)).frames.map(String), ['dm']);
     const { rows } = await pool.query('SELECT count(*)::int AS n FROM undelivered');
     assert.strictEqual(rows[0].n, 2);
   });
@@ -47,13 +50,12 @@ describe('pg undelivered queue (DECISIONS row 129)', { skip: TEST_DB !== 'pg' },
     const queue = await emptyQueue(DB);
     const old = new Date(Date.now() - (TTL_SEC * 1000 + 10 * DAY_MS));
     await queue.maintain(old);
-    await pool.query('INSERT INTO undelivered (subject, seq, frame, at) VALUES ($1, $2, $3, $4)', [
-      ALICE_1,
-      await queue.nextOffset(),
-      Buffer.from('stale'),
-      old
-    ]);
-    await queue.enqueue(ALICE_1, await queue.nextOffset(), Buffer.from('fresh'));
+    await pool.query(
+      `INSERT INTO undelivered (ts, op_id, recipients, sender, sender_device, frame, at)
+       VALUES (1, 'stale', $1, '', '', $2, $3)`,
+      [[ALICE], Buffer.from('stale'), old]
+    );
+    await queue.append(entry('fresh', 2, [ALICE]));
     assert.ok((await partitions()).includes(partitionName(dayOf(old.getTime()))));
 
     // every process runs the job: three at once, on connections of their own
@@ -63,15 +65,15 @@ describe('pg undelivered queue (DECISIONS row 129)', { skip: TEST_DB !== 'pg' },
 
     const day = dayOf(Date.now());
     assert.deepStrictEqual(await partitions(), range(4).map((n) => partitionName(day + n * DAY_MS)));
-    assert.deepStrictEqual((await queue.pending(ALICE_1)).frames.map(String), ['fresh']);
+    assert.deepStrictEqual((await queue.pending(ALICE, 'd2')).frames.map(String), ['fresh']);
   });
 
-  test('an enqueue never fails for want of a partition', async () => {
+  test('a store never fails for want of a partition', async () => {
     const queue = await emptyQueue(DB);
     const name = partitionName(dayOf(Date.now()));
     await pool.query(`ALTER TABLE undelivered DETACH PARTITION ${name}; DROP TABLE ${name}`);
 
-    await queue.enqueue(ALICE_1, await queue.nextOffset(), Buffer.from('after the gap'));
-    assert.deepStrictEqual((await queue.pending(ALICE_1)).frames.map(String), ['after the gap']);
+    await queue.append(entry('after the gap', 1, [ALICE]));
+    assert.deepStrictEqual((await queue.pending(ALICE, 'd2')).frames.map(String), ['after the gap']);
   });
 });

@@ -72,6 +72,23 @@ const REASON = {
   DOWNSTREAM_TIMEOUT: 'downstream_timeout'
 };
 
+let lastStampMs = 0;
+
+/**
+ * `server_timestamp_ms` for a new envelope (§6): never below the last one this
+ * process stamped. Every stamper (gateway, channel-ms, profile-ms) stamps and
+ * publishes in one synchronous step, and the bus delivers a topic in order, so
+ * envelopes reach the timeline in stamp order: a device whose pointer is at
+ * `t` has seen everything stamped before `t` that is meant for it (§10.6).
+ * ponytail: one process. Ceiling: a clock set back across a restart, or a
+ * second process stamping, breaks that; seed this from the timeline's newest
+ * stamp at boot, and stamp in one place, if either ever happens.
+ */
+function serverNow() {
+  lastStampMs = Math.max(Date.now(), lastStampMs);
+  return lastStampMs;
+}
+
 /** SYNC_PROTOCOL.md §10.2 / §19 decision 15 — server-authored payload marker. */
 const SERVER_EVENT_MARKER = 0x53;
 
@@ -243,6 +260,11 @@ class EnvelopeEvent extends IEventArg {
     return this._envelope.senderUserId;
   }
 
+  /** The sending device; '' for a server-authored event. */
+  get senderDevice() {
+    return this._senderDevice;
+  }
+
   /**
    * The one subject fanout skips: the socket this envelope came in on. Empty
    * for a server-authored event, where the actor's whole user is skipped.
@@ -275,6 +297,7 @@ module.exports = {
   reauthFrame,
   errorFrame,
   opIdUserBits,
+  serverNow,
   dmChannelId,
   isDmChannelId,
   isUserId

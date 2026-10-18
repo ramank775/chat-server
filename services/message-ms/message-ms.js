@@ -26,8 +26,8 @@ function parseOptions(argv) {
 
 /**
  * The REST half of the sync wire (SYNC_PROTOCOL.md §10.6). v3 makes the
- * server a relay, so all this serves is the device's log past its pointer —
- * message history lives on the client.
+ * server a relay, so all this serves is the user's timeline from the
+ * device's own pointer — message history lives on the client.
  */
 class MessageMs extends HttpServiceBase {
   constructor(context) {
@@ -46,26 +46,28 @@ class MessageMs extends HttpServiceBase {
       {
         validate: {
           headers: schemas.authHeaders,
-          query: Joi.object({ after: Joi.number().integer().min(0).default(0) })
+          query: Joi.object({ since: Joi.number().integer().min(0).default(0) })
         }
       }
     );
   }
 
   /**
-   * `GET /v3.0/sync/pending?after=` — a page of the calling device's log past
-   * its pointer, oldest first, and whether more wait. Removes nothing: the
-   * device moves its own pointer, and a frame stays for the retention. The
-   * log is keyed per `(user_id, device_id)`, so another device of the same
-   * user keeps its own (TRIM_4_12_CONTRACT §7).
+   * `GET /v3.0/sync/pending?since=` — a page of the caller's timeline from the
+   * device's pointer (a server_timestamp_ms, inclusive) on, oldest first, and
+   * whether more wait. Removes nothing and remembers nothing: the device keeps
+   * its own pointer, and an envelope stays for the retention. What this device
+   * sent itself is left out; the user's other devices get it.
    */
   async pendingSync(req, res) {
-    const subject = this.subject(req);
-    const { frames, more } = await this.undeliveredQueue.pending(subject, req.query.after);
+    const user = extractInfoFromRequest(req, 'x-user');
+    // the gateway's default for a session that carried no device id
+    const device = extractInfoFromRequest(req, 'x-device', 'default');
+    const { frames, more } = await this.undeliveredQueue.pending(user, device, req.query.since);
     this.statsClient.increment({
       stat: 'sync.pending.frame_count',
       value: frames.length,
-      tags: { user: subject.split(':')[0] }
+      tags: { user }
     });
     return res.response({
       frames: frames.map((frame) => frame.toString('base64')),
@@ -73,14 +75,6 @@ class MessageMs extends HttpServiceBase {
     }).code(200);
   }
 
-  /** The calling device's queue: `user_id:device_id`. */
-  // eslint-disable-next-line class-methods-use-this
-  subject(req) {
-    const user = extractInfoFromRequest(req, 'x-user');
-    // the gateway's default for a session that carried no device id
-    const device = extractInfoFromRequest(req, 'x-device', 'default');
-    return `${user}:${device}`;
-  }
 
   async shutdown() {
     await super.shutdown();

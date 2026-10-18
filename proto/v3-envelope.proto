@@ -142,14 +142,6 @@ message Envelope {
   // Retired: the per-channel sequence the server used to stamp on fanout.
   reserved 22;
   reserved "delivery_sequence";
-
-  // Server-stamped on WS_PUSH: this envelope's position in the
-  // recipient device's log, strictly increasing and the same for every
-  // recipient of one fanout. The client keeps the offset of the newest
-  // envelope it has handled and pulls `GET /v3.0/sync/pending?after=`
-  // it (SYNC_PROTOCOL.md §10.6). 0 on an ephemeral envelope, which is
-  // never logged. Absent on client→server.
-  uint64 offset = 23;
 }
 
 

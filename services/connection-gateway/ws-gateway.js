@@ -22,6 +22,7 @@ const {
   reauthFrame,
   errorFrame,
   opIdUserBits,
+  serverNow,
   dmChannelId,
   isDmChannelId,
   isUserId
@@ -446,7 +447,7 @@ class Gateway extends HttpServiceBase {
       await this.publishEnvelope({
         ...envelope,
         senderUserId: userId,
-        serverTimestampMs: Date.now()
+        serverTimestampMs: serverNow()
       }, recipients, ws.deviceId);
       return null;
     }
@@ -454,7 +455,7 @@ class Gateway extends HttpServiceBase {
     // The server keeps no per-channel order: it stamps server_timestamp_ms
     // and clients order a channel by (server_timestamp_ms, op_id). An edit
     // that arrives before its message is the client's to hold (DECISIONS row 127).
-    const serverTimestampMs = Date.now();
+    const serverTimestampMs = serverNow();
     try {
       await this.publishEnvelope({
         ...envelope,

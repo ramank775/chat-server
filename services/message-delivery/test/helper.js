@@ -109,7 +109,8 @@ function envelopeEvent({
   senderDevice = 'device-1',
   ephemeral = false,
   payload = Buffer.from('chat'),
-  recipients = []
+  recipients = [],
+  serverTimestampMs = 1700000000000
 } = {}) {
   return EnvelopeEvent.of(
     {
@@ -118,7 +119,7 @@ function envelopeEvent({
       payload,
       ephemeral,
       senderUserId,
-      serverTimestampMs: 1700000000000
+      serverTimestampMs
     },
     recipients,
     senderDevice

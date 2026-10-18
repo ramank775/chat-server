@@ -109,39 +109,44 @@ class MessageDeliveryWorker extends ServiceBase {
       ? event.recipients
       : [...(await this.channelClient.members(event.channelId))];
 
-    // TRIM_4_12_CONTRACT §7-§8 — delivery is per `(user_id, device_id)`, and
-    // every device except the sending one gets the envelope, the sender's own
-    // other devices included.
-    // ponytail: a server-authored event carries no sending device, so the
-    // actor's whole user is skipped, as it was before the trim. Ceiling: at
-    // max_devices > 1 the actor's other devices would miss channel events
-    // until channel-ms threads its `x-device` into the fanout.
+    // A server-authored event carries no sending device: its actor is not a
+    // reader at all, as before the trim. A client's envelope is for every
+    // member, the sender's user included; only its sending device is left
+    // out (TRIM_4_12_CONTRACT §7-§8), at the read and at the push below.
+    // ponytail: at max_devices > 1 the actor's other devices would miss
+    // channel events until channel-ms threads its `x-device` into the fanout.
     const sending = event.senderSubject;
-    const recipients = (await this.deliveryManager.subjects(members)).filter((subject) =>
-      (sending ? subject !== sending : !subject.startsWith(`${event.senderUserId}:`)));
+    const readers = sending ? members : members.filter((id) => id !== event.senderUserId);
+
+    // §10.3 step 2 — on the timeline before any device is pushed to, stored
+    // once for all its readers: a push into a socket that died is still there
+    // from the device's pointer on, on its next pull (§10.6). Ephemeral
+    // envelopes (typing) are worthless once missed: never stored.
+    if (!event.ephemeral && readers.length) {
+      const { envelope } = event;
+      await this.undeliveredQueue.append({
+        opId: envelope.opId,
+        ts: envelope.serverTimestampMs,
+        recipients: readers,
+        sender: envelope.senderUserId || '',
+        senderDevice: event.senderDevice,
+        frame: event.toPushFrame()
+      });
+    }
+
+    const recipients = (await this.deliveryManager.subjects(readers))
+      .filter((subject) => subject !== sending);
     if (!recipients.length) {
       this.log.info(`No fanout recipients for channel ${event.channelId}`);
       return;
     }
     event.setRecipients(recipients);
-    // §10.3 step 2 — in every device's log before any is pushed to, under
-    // one offset stamped on the envelope, so the live push carries it too:
-    // a push into a socket that died is still there past the device's
-    // pointer on its next pull (§10.6). Ephemeral envelopes (typing) are
-    // worthless once missed: never logged.
-    if (!event.ephemeral) {
-      const offset = await this.undeliveredQueue.nextOffset();
-      event.envelope.offset = offset;
-      const frame = event.toPushFrame();
-      await Promise.all(recipients.map((subject) =>
-        this.undeliveredQueue.enqueue(subject, offset, frame)));
-    }
     await this.deliveryManager.dispatch(event);
   }
 
   /**
    * SYNC_PROTOCOL.md §10.3 step 4 — every subject delivery-manager could not
-   * reach (already logged by `onMessage`) gets an offline-message event so
+   * reach (already on the timeline) gets an offline-message event so
    * notification-ms fires the Web Push wake (§12.1; it owns the debounce),
    * keyed per `(user_id, device_id)`.
    * @param {EnvelopeEvent} event
