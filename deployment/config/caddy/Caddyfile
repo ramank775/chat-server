@@ -1,0 +1,7 @@
+# Caddy gets and renews the certificate for {$DOMAIN} by itself (ports 80 and
+# 443 open, the DNS record pointing here). WebSocket upgrades (/wss) pass
+# through reverse_proxy as is. Caddy sets X-Forwarded-For itself and ignores
+# the client's, which the per-IP OTP limits rely on.
+{$DOMAIN} {
+	reverse_proxy app:8000
+}
