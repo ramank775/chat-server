@@ -70,9 +70,13 @@ class SelfHostedOtpAuthProvider extends IAuthProvider {
     };
   }
 
-  async resendOtp(sessionId) {
+  async resendOtp(sessionId, beforeSend = async () => {}) {
     const now = new Date();
     const session = await this.#liveOtpSession(sessionId, now);
+    // no SMS for a code that can no longer be used
+    if (session.attempts >= OTP_MAX_ATTEMPTS) {
+      throw this.#lockedError(session, now);
+    }
     if (session.resendAfter > now) {
       return {
         sessionId,
@@ -81,6 +85,7 @@ class SelfHostedOtpAuthProvider extends IAuthProvider {
         phone: session.phone
       };
     }
+    await beforeSend(session.phone);
     const code = sixDigitCode();
     await this.#sms.send({ phone: session.phone, code });
     // the prior code becomes invalid immediately; the attempt count carries forward (3.3)

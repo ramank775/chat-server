@@ -165,6 +165,43 @@ describe('auth/otp', () => {
     assert.equal(fresh.statusCode, 200);
   });
 
+  test('resend spends the SMS budgets and refuses a locked session', async () => {
+    const phone = '+919000000009';
+    const challenge = JSON.parse((await send({ phone, deviceId: 'd1' })).payload);
+    const resend = () =>
+      app.inject({
+        method: 'POST',
+        url: '/auth/otp/resend',
+        payload: { sessionId: challenge.sessionId }
+      });
+    const openWindow = () =>
+      app.db
+        .collection('otp_sessions')
+        .updateOne(
+          { sessionId: challenge.sessionId },
+          { $set: { resendAfter: new Date(Date.now() - 1000) } }
+        );
+    // the send spent one of the phone's 5 an hour; 4 resends spend the rest
+    for (let i = 0; i < 4; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await openWindow();
+      // eslint-disable-next-line no-await-in-loop
+      assert.equal((await resend()).statusCode, 200);
+    }
+    await openWindow();
+    const limited = await resend();
+    assert.equal(limited.statusCode, 429);
+    assert.equal(JSON.parse(limited.payload).error.code, 'OTP_RATE_LIMITED');
+
+    await app.db
+      .collection('otp_sessions')
+      .updateOne({ sessionId: challenge.sessionId }, { $set: { attempts: 5 } });
+    const sends = app.sms.sends.length;
+    const locked = await resend();
+    assert.equal(locked.statusCode, 423);
+    assert.equal(app.sms.sends.length, sends, 'no SMS for a locked session');
+  });
+
   test('an expired session is 410 SESSION_EXPIRED', async () => {
     const phone = '+919000000008';
     const challenge = JSON.parse((await send({ phone, deviceId: 'd1' })).payload);

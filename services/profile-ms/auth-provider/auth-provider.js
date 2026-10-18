@@ -51,10 +51,12 @@ class IAuthProvider {
   /**
    * Re-send the code of an existing challenge
    * @param {string} _sessionId
+   * @param {(phone: string) => Promise<void>} [_beforeSend] runs only when an
+   *   SMS is about to go out; throwing stops it (the SMS budgets)
    * @returns {Promise<OtpChallenge>}
    */
   // eslint-disable-next-line no-unused-vars
-  async resendOtp(_sessionId) {
+  async resendOtp(_sessionId, _beforeSend) {
     throw new Error('Method not implemented');
   }
 

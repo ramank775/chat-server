@@ -472,8 +472,12 @@ class ProfileMs extends HttpServiceBase {
   }
 
   async otpResend(req, res) {
+    // a resend is an SMS like any other: same budgets as /otp/send
     const challenge = await this.sendOtp(
-      () => this.authProvider.resendOtp(req.payload.sessionId),
+      () =>
+        this.authProvider.resendOtp(req.payload.sessionId, (phone) =>
+          this.otpRateLimits(phone, clientIp(req))
+        ),
       res
     );
     if (!challenge.sessionId) return challenge;
