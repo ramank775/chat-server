@@ -16,6 +16,7 @@ const { SmsGatewayError, SmsGatewayUnavailableError } = require('./auth-provider
 const { HttpClient } = require('../../libs/http-client');
 const { EnvelopeEvent, SERVER_EVENT_MARKER, serverNow } = require('../../libs/v3-envelope');
 const { validateUsername } = require('./username');
+const { bundleSchema, publicBundle, publishKeys, claimKeys } = require('./device-keys');
 const { uuidv4, hashSecret, verifySecret, sha256, errorEnvelope } = require('../../helper');
 
 const asMain = require.main === module;
@@ -278,9 +279,7 @@ class ProfileMs extends HttpServiceBase {
       { validate: { payload: Joi.object({ refreshToken: Joi.string() }).default({}) } }
     );
 
-    // ponytail: the OTP code is only ever stored as a scrypt hash, so a local
-    // end to end run has no way back to it. This reads the mock sender's
-    // in-memory log and nothing else. Never on without --expose-dev-otp.
+    // Dev runs read the mock sender's log. Never on without --expose-dev-otp.
     if (this.options.exposeDevOtp && this.context.smsSender.lastCode) {
       this.addRoute(
         '/auth/dev/otp',
@@ -296,6 +295,21 @@ class ProfileMs extends HttpServiceBase {
     }
 
     this.addRoute('/users/me', 'GET', this.guard(this.getMe), { pre: [this.authPre(false)] });
+
+    this.addRoute('/keys/me', 'PUT', this.guard(this.putKeys), {
+      pre: [this.authPre()], validate: { payload: bundleSchema }
+    });
+    this.addRoute('/keys/{userId}', 'GET', this.guard(this.getKeys), {
+      pre: [this.authPre()],
+      validate: { params: Joi.object({ userId: Joi.string().pattern(/^[0-9a-f]{9}$/).required() }) }
+    });
+    this.addRoute('/keys/{userId}/claim', 'POST', this.guard(this.claimDeviceKeys), {
+      pre: [this.authPre()],
+      validate: {
+        params: Joi.object({ userId: Joi.string().pattern(/^[0-9a-f]{9}$/).required() }),
+        payload: Joi.object({ deviceId: Joi.string().max(256).required(), generation: Joi.string().uuid().required() }).required()
+      }
+    });
 
     this.addRoute('/users/me', 'PATCH', this.guard(this.patchMe), {
       pre: [this.authPre(false)],
@@ -512,6 +526,37 @@ class ProfileMs extends HttpServiceBase {
   async sessionRefresh(req) {
     const { refreshToken, deviceId } = req.payload;
     return this.authProvider.refreshSession(refreshToken, deviceId);
+  }
+
+  async putKeys(req) {
+    const { session, user } = req.pre.auth;
+    await this.rateLimit(`keys:write:${user.user_id}:h`, 60, 3600, 'user');
+    const result = await publishKeys(this.context.authDB, user.user_id, session.deviceId, req.payload);
+    // An in-flight registration cannot survive a concurrent account deletion.
+    if (!(await this.profileDB.getByUserId(user.user_id))) {
+      await this.context.authDB.deleteDeviceKeys(user.user_id);
+      throw new AuthError(401, 'INVALID_ACCESSKEY', 'The account was deleted');
+    }
+    return result;
+  }
+
+  async keyLookupBudget(req) {
+    await this.rateLimit(`keys:read:${req.pre.auth.user.user_id}:h`, 1000, 3600, 'user');
+    await this.rateLimit(`keys:read:ip:${clientIp(req)}:h`, 2000, 3600, 'ip');
+    if (!(await this.profileDB.getByUserId(req.params.userId))) {
+      throw new AuthError(404, 'KEYS_NOT_FOUND', 'The account is unavailable');
+    }
+  }
+
+  async getKeys(req) {
+    await this.keyLookupBudget(req);
+    const records = await this.context.authDB.listDeviceKeys(req.params.userId);
+    return { devices: records.map(publicBundle) };
+  }
+
+  async claimDeviceKeys(req) {
+    await this.keyLookupBudget(req);
+    return claimKeys(this.context.authDB, req.params.userId, req.payload.deviceId, req.payload.generation);
   }
 
   async sessionRevoke(req) {
@@ -872,6 +917,7 @@ class ProfileMs extends HttpServiceBase {
     }
     await this.profileDB.updateUser(user.user_id, { deletedAt: new Date() });
     await this.authProvider.revokeAll(user.user_id);
+    await this.context.authDB.deleteDeviceKeys(user.user_id);
     await this.revokeGatewaySessions(user.user_id, 'revoked');
     // 8.2 step 4: every device's push endpoint goes with the account
     await this.revokePushTopics(user.user_id);

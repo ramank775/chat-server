@@ -92,6 +92,52 @@ components:
     UserId:
       type: string
       pattern: '^[0-9a-f]{9}$'
+    KeyRegistration:
+      type: object
+      additionalProperties: false
+      required: [identityKey, registrationId, signedPreKey, preKeys]
+      properties:
+        identityKey:
+          type: string
+          description: Canonical base64 of a 33-byte Signal public key, starting with 0x05
+        registrationId:
+          type: integer
+          minimum: 1
+          maximum: 16383
+        signedPreKey:
+          type: object
+          additionalProperties: false
+          required: [id, publicKey, signature]
+          properties:
+            id:
+              type: integer
+              minimum: 0
+              maximum: 16777215
+            publicKey:
+              type: string
+              description: Canonical base64 of a 33-byte Signal public key, starting with 0x05
+            signature:
+              type: string
+              description: Canonical padded base64 of a 64-byte signature, verified by clients
+        preKeys:
+          type: array
+          maxItems: 200
+          description: >-
+            Distinct ids, monotonically increasing across uploads. Ids at or
+            below the previously uploaded maximum are ignored on retry, even
+            after consumption; at most 200 unclaimed keys may be stored.
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, publicKey]
+            properties:
+              id:
+                type: integer
+                minimum: 0
+                maximum: 16777215
+              publicKey:
+                type: string
+                description: Canonical base64 of a 33-byte Signal public key, starting with 0x05
   responses:
     AuthError:
       description: >-
@@ -167,6 +213,115 @@ tags:
       `Envelope.delivery_sequence` (22) and `Ack.delivery_sequence` (6) are
       retired and reserved (decision 127).
 paths:
+  /v3.0/keys/me:
+    put:
+      summary: Register or replenish this authenticated device's public E2EE keys
+      description: >-
+        AUTH_CONTRACT 17. Server foundation only; client encryption is pending.
+        Owner account/device come from the session. The first upload or changed
+        identity creates a new UUID generation. Same-identity retries preserve
+        the generation and never restore consumed prekey ids. A registration id
+        stays stable per identity; signed prekey ids cannot be overwritten or
+        rolled back. 60 publications per account per hour.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KeyRegistration'
+      responses:
+        '200':
+          description: Public device bundle (deviceId, generation, identityKey, registrationId, signedPreKey) plus preKeyCount
+        '400':
+          description: Invalid key shape, duplicate prekey ids, private or unknown fields
+        '401':
+          $ref: '#/components/responses/AuthError'
+        '403':
+          $ref: '#/components/responses/AuthError'
+        '409':
+          description: KEY_CONFLICT or PREKEY_CAPACITY
+        '429':
+          description: RATE_LIMITED
+        '503':
+          description: KEYS_BUSY; retry with backoff
+  /v3.0/keys/{userId}:
+    get:
+      summary: List an account's registered public device bundles
+      description: >-
+        AUTH_CONTRACT 17.2. No one-time keys, internal revisions or counters
+        are returned. An existing account with no keys has an empty device
+        list. Reads and claims share 1000 requests/account/hour and
+        2000 requests/IP/hour. Logout retains keys; account deletion purges them.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema:
+            $ref: '#/components/schemas/UserId'
+      responses:
+        '200':
+          description: '{devices:[{deviceId,generation,identityKey,registrationId,signedPreKey}]}'
+        '400':
+          description: Invalid account id
+        '401':
+          $ref: '#/components/responses/AuthError'
+        '403':
+          $ref: '#/components/responses/AuthError'
+        '404':
+          description: KEYS_NOT_FOUND (unknown or deleted account)
+        '429':
+          description: RATE_LIMITED
+  /v3.0/keys/{userId}/claim:
+    post:
+      summary: Atomically claim one one-time prekey from a device generation
+      description: >-
+        AUTH_CONTRACT 17.3. Returns the public bundle and preKey:{id,publicKey},
+        or preKey:null when exhausted. Clients verify signatures and identity
+        trust; they never fall back to plaintext. A stale generation requires
+        refetching the directory and applying the identity-trust policy.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema:
+            $ref: '#/components/schemas/UserId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [deviceId, generation]
+              properties:
+                deviceId:
+                  type: string
+                  minLength: 1
+                  maxLength: 256
+                generation:
+                  type: string
+                  format: uuid
+      responses:
+        '200':
+          description: Public device bundle plus preKey (object or null)
+        '400':
+          description: Invalid account id, device id or generation
+        '401':
+          $ref: '#/components/responses/AuthError'
+        '403':
+          $ref: '#/components/responses/AuthError'
+        '404':
+          description: KEYS_NOT_FOUND (unknown account, device or generation)
+        '429':
+          description: RATE_LIMITED
+        '503':
+          description: KEYS_BUSY; retry with backoff
   /v3.0/channels:
     get:
       tags:

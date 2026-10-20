@@ -40,6 +40,12 @@ const OTP = selectList(OTP_FIELDS);
 const SESSION = selectList(SESSION_FIELDS);
 
 const SCHEMA = `
+  CREATE TABLE IF NOT EXISTS device_keys (
+    user_id text NOT NULL,
+    device_id text NOT NULL,
+    record jsonb NOT NULL,
+    PRIMARY KEY (user_id, device_id)
+  );
   CREATE TABLE IF NOT EXISTS otp_sessions (
     session_id text PRIMARY KEY,
     phone text,
@@ -186,6 +192,37 @@ class PgAuthDB extends IAuthDB {
       [userIds, revokedSince]
     );
     return rows;
+  }
+
+  async getDeviceKeys(userId, deviceId) {
+    const row = await this.#one(
+      'SELECT record FROM device_keys WHERE user_id = $1 AND device_id = $2',
+      [userId, deviceId]
+    );
+    return row?.record || null;
+  }
+
+  async saveDeviceKeys(record, expectedRevision) {
+    const params = [record.user_id, record.deviceId, JSON.stringify(record)];
+    const result = expectedRevision === null
+      ? await this.#pool.query(
+        'INSERT INTO device_keys (user_id, device_id, record) VALUES ($1, $2, $3::jsonb) ON CONFLICT DO NOTHING', params
+      )
+      : await this.#pool.query(
+        `UPDATE device_keys SET record = $3::jsonb
+         WHERE user_id = $1 AND device_id = $2 AND record->>'revision' = $4`,
+        [...params, expectedRevision]
+      );
+    return result.rowCount === 1;
+  }
+
+  async listDeviceKeys(userId) {
+    const { rows } = await this.#pool.query('SELECT record FROM device_keys WHERE user_id = $1', [userId]);
+    return rows.map((row) => row.record);
+  }
+
+  async deleteDeviceKeys(userId) {
+    await this.#pool.query('DELETE FROM device_keys WHERE user_id = $1', [userId]);
   }
 
   /**

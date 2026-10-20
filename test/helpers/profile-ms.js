@@ -54,6 +54,8 @@ async function openStore(dbName) {
  */
 async function startProfileMs(dbName) {
   if (TEST_DB === 'pg') await freshPgDatabase(dbName);
+  // Drop the test database before init creates the unique indexes used by atomic writes.
+  const store = await openStore(dbName);
   const options = parseOptions([
     'node',
     'profile-ms',
@@ -82,7 +84,6 @@ async function startProfileMs(dbName) {
   await service.init();
   await service.server.ready();
 
-  const store = await openStore(dbName);
   const { db } = store;
 
   // rate limit counters outlive a test run (1h TTL), so drop the ones this

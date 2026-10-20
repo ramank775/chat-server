@@ -42,6 +42,24 @@ class IAuthDB {
     }
   }
 
+  /** Public E2EE bundle and remaining prekeys, or null. Never contains private keys. */
+  async getDeviceKeys(_userId, _deviceId) {
+    throw new Error('Method not implemented');
+  }
+
+  /** Atomically replace only the expected revision; null means insert if absent. */
+  async saveDeviceKeys(_record, _expectedRevision) {
+    throw new Error('Method not implemented');
+  }
+
+  async listDeviceKeys(_userId) {
+    throw new Error('Method not implemented');
+  }
+
+  async deleteDeviceKeys(_userId) {
+    throw new Error('Method not implemented');
+  }
+
   /**
    * @abstract
    * @param {OtpSession} _session

@@ -14,6 +14,8 @@ class MongoAuthDB extends IAuthDB {
   /** @type { import('mongodb').Collection } */
   #sessions;
 
+  #deviceKeys;
+
   /**
    * Auth Database interface
    * @param {*} context
@@ -113,11 +115,41 @@ class MongoAuthDB extends IAuthDB {
       .toArray();
   }
 
+  async getDeviceKeys(userId, deviceId) {
+    return this.#deviceKeys.findOne({ user_id: userId, deviceId }, PROJECTION);
+  }
+
+  async saveDeviceKeys(record, expectedRevision) {
+    if (expectedRevision === null) {
+      try {
+        await this.#deviceKeys.insertOne({ ...record });
+        return true;
+      } catch (error) {
+        if (error.code === 11000) return false;
+        throw error;
+      }
+    }
+    const result = await this.#deviceKeys.replaceOne({
+      user_id: record.user_id, deviceId: record.deviceId, revision: expectedRevision
+    }, record);
+    return result.matchedCount === 1;
+  }
+
+  async listDeviceKeys(userId) {
+    return this.#deviceKeys.find({ user_id: userId }, PROJECTION).toArray();
+  }
+
+  async deleteDeviceKeys(userId) {
+    await this.#deviceKeys.deleteMany({ user_id: userId });
+  }
+
   async init() {
     await this.#client.connect();
     const db = this.#client.db();
     this.#otpSessions = db.collection('otp_sessions');
     this.#sessions = db.collection('sessions');
+    this.#deviceKeys = db.collection('device_keys');
+    await this.#deviceKeys.createIndex({ user_id: 1, deviceId: 1 }, { unique: true });
     await this.#otpSessions.createIndex({ sessionId: 1 }, { unique: true });
     await this.#otpSessions.createIndex({ phone: 1, deviceId: 1 });
     await this.#otpSessions.createIndex(
