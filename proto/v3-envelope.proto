@@ -150,6 +150,10 @@ message Envelope {
   // Retired: the per-channel sequence the server used to stamp on fanout.
   reserved 22;
   reserved "delivery_sequence";
+
+  // Authenticated sending installation, overwritten from the session.
+  // Empty on server-authored events. Selects the sender's E2EE device keys.
+  string sender_device_id = 23;
 }
 
 

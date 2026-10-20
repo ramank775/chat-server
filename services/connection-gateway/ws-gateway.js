@@ -447,6 +447,7 @@ class Gateway extends HttpServiceBase {
       await this.publishEnvelope({
         ...envelope,
         senderUserId: userId,
+        senderDeviceId: ws.deviceId,
         serverTimestampMs: serverNow()
       }, recipients, ws.deviceId);
       return null;
@@ -460,6 +461,7 @@ class Gateway extends HttpServiceBase {
       await this.publishEnvelope({
         ...envelope,
         senderUserId: userId,
+        senderDeviceId: ws.deviceId,
         serverTimestampMs
       }, recipients, ws.deviceId);
     } catch (e) {

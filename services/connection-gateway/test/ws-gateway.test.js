@@ -59,11 +59,11 @@ test('echoes the accesskey subprotocol on the 101', async () => {
   });
 });
 
-test('binds the socket to x-user and stamps sender_user_id', async () => {
+test('binds the socket to the authenticated user and device', async () => {
   await withGateway(async ({ uri, publishedEnvelopes }) => {
     const client = connect(uri, ALICE);
     await client.opened;
-    client.send(opFrame([envelope(ALICE, 1)]));
+    client.send(opFrame([envelope(ALICE, 1, { senderUserId: BOB, senderDeviceId: 'forged' })]));
     const frame = await client.next();
 
     assert.strictEqual(frame.type, WS_TYPE.WS_ACK);
@@ -74,6 +74,7 @@ test('binds the socket to x-user and stamps sender_user_id', async () => {
     const [published] = publishedEnvelopes();
     assert.strictEqual(published.key, CHANNEL);
     assert.strictEqual(published.args.envelope.senderUserId, ALICE);
+    assert.strictEqual(published.args.envelope.senderDeviceId, 'device-1');
     assert.strictEqual(
       published.args.envelope.serverTimestampMs, frame.acks.acks[0].serverTimestampMs
     );
