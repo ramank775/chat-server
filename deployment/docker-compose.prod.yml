@@ -36,6 +36,8 @@ services:
   # No published port: the per-IP OTP limits trust the last X-Forwarded-For
   # hop, which only Caddy may write.
   app:
+    environment:
+      OTP_ENCRYPTION_KEY: ${OTP_ENCRYPTION_KEY:?set OTP_ENCRYPTION_KEY in .env}
     image: ramank775/chatserver:${CHAT_SERVER_TAG:?set CHAT_SERVER_TAG in .env}
     restart: unless-stopped
     depends_on:

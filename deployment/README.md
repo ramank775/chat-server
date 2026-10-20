@@ -37,6 +37,11 @@ and the helm chart does not render.
 3. **Settings.** `cp .env.prod.tmpl .env` and fill in every value. Compose
    refuses to start while a required one is empty.
    - `MONGO_PASSWORD`: `openssl rand -hex 24`.
+   - `OTP_ENCRYPTION_KEY`: `openssl rand -hex 32`. Keep this outside Mongo,
+     stable across restarts and shared by profile-service instances. It encrypts
+     the OTP copy used by Resend; verification still checks the hash. Changing
+     it prevents resending pending codes for up to 10 minutes; their original
+     codes can still verify. This fresh release expects a new database schema.
    - VAPID keys: generate once and keep them. A new pair silences push on every installed phone until it re-registers.
      ```bash
      docker run --rm --entrypoint npx ramank775/chatserver:<tag> web-push generate-vapid-keys

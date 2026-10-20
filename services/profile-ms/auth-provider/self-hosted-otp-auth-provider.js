@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { Option } = require('commander');
 const { uuidv4, hashSecret, verifySecret, sha256 } = require('../../../helper');
 const { IAuthProvider, AuthError } = require('./auth-provider');
 
@@ -26,10 +27,22 @@ class SelfHostedOtpAuthProvider extends IAuthProvider {
   /** @type {import('./sms-sender/sms-sender').ISmsSender} */
   #sms;
 
+  #otpKey;
+
   constructor(context) {
     super(context);
     this.#db = context.authDB;
     this.#sms = context.smsSender;
+    const { otpEncryptionKey, smsSender } = context.options;
+    if (!otpEncryptionKey && smsSender === 'mock') {
+      // shortcut: mock SMS uses a process-local key; set a stable key to test restarts.
+      this.#otpKey = crypto.randomBytes(32);
+    } else {
+      if (!/^[0-9a-f]{64}$/i.test(otpEncryptionKey || '')) {
+        throw new Error('OTP_ENCRYPTION_KEY must be 64 hex characters (openssl rand -hex 32)');
+      }
+      this.#otpKey = Buffer.from(otpEncryptionKey, 'hex');
+    }
   }
 
   async startOtp({ phone, deviceId, userId = null }) {
@@ -48,6 +61,12 @@ class SelfHostedOtpAuthProvider extends IAuthProvider {
     }
     const sessionId = uuidv4();
     const code = sixDigitCode();
+    const nonce = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv('aes-256-gcm', this.#otpKey, nonce);
+    cipher.setAAD(Buffer.from(sessionId));
+    const encryptedCode = Buffer.concat([
+      nonce, cipher.update(code, 'utf8'), cipher.final(), cipher.getAuthTag()
+    ]).toString('base64');
     // send before the insert so a gateway failure leaves no phantom session (12)
     await this.#sms.send({ phone, code });
     await this.#db.createOtpSession({
@@ -56,6 +75,7 @@ class SelfHostedOtpAuthProvider extends IAuthProvider {
       deviceId,
       userId,
       codeHash: await hashSecret(code),
+      encryptedCode,
       attempts: 0,
       consumed: false,
       resendAfter: new Date(now.getTime() + OTP_RESEND_AFTER_SEC * 1000),
@@ -85,12 +105,17 @@ class SelfHostedOtpAuthProvider extends IAuthProvider {
         phone: session.phone
       };
     }
+    const sealed = Buffer.from(session.encryptedCode, 'base64');
+    const decipher = crypto.createDecipheriv('aes-256-gcm', this.#otpKey, sealed.subarray(0, 12), {
+      authTagLength: 16
+    });
+    decipher.setAAD(Buffer.from(sessionId));
+    decipher.setAuthTag(sealed.subarray(-16));
+    const code = Buffer.concat([decipher.update(sealed.subarray(12, -16)), decipher.final()])
+      .toString('utf8');
     await beforeSend(session.phone);
-    const code = sixDigitCode();
     await this.#sms.send({ phone: session.phone, code });
-    // the prior code becomes invalid immediately; the attempt count carries forward (3.3)
     await this.#db.updateOtpSession(sessionId, {
-      codeHash: await hashSecret(code),
       resendAfter: new Date(now.getTime() + OTP_RESEND_AFTER_SEC * 1000)
     });
     return {
@@ -224,7 +249,10 @@ class SelfHostedOtpAuthProvider extends IAuthProvider {
 }
 
 function addOptions(cmd) {
-  return cmd;
+  return cmd.addOption(new Option(
+    '--otp-encryption-key <hex>',
+    '32-byte hex key for same-code OTP resend; required for real SMS'
+  ).env('OTP_ENCRYPTION_KEY'));
 }
 
 module.exports = {

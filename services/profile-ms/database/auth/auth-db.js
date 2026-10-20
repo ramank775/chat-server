@@ -6,6 +6,7 @@
  * @property {string} phone E.164
  * @property {string} deviceId
  * @property {string} codeHash
+ * @property {string} encryptedCode base64 AES-256-GCM nonce + ciphertext + tag, bound to sessionId
  * @property {number} attempts wrong code counter, locked at 5 (AUTH_CONTRACT 10.3)
  * @property {boolean} consumed
  * @property {Date} resendAfter

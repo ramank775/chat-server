@@ -124,7 +124,7 @@ describe('auth/otp', () => {
     assert.equal(right.statusCode, 423);
   });
 
-  test('resend reuses the session, replaces the code and is throttled', async () => {
+  test('resend reuses the session and code and is throttled', async () => {
     const phone = '+919000000007';
     const challenge = JSON.parse((await send({ phone, deviceId: 'd1' })).payload);
     const firstCode = app.sms.lastCode(phone);
@@ -154,12 +154,11 @@ describe('auth/otp', () => {
     assert.ok(body.expiresInSec <= 600, 'resend does not extend the session lifetime');
     assert.equal(app.sms.sends.length, sends + 1);
 
-    const stale = await verify({ sessionId: challenge.sessionId, code: firstCode, deviceId: 'd1' });
-    assert.equal(stale.statusCode, 401, 'the previous code is invalid immediately');
+    assert.equal(app.sms.lastCode(phone), firstCode, 'late SMS messages still contain a valid code');
 
     const fresh = await verify({
       sessionId: challenge.sessionId,
-      code: app.sms.lastCode(phone),
+      code: firstCode,
       deviceId: 'd1'
     });
     assert.equal(fresh.statusCode, 200);
