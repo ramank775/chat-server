@@ -128,7 +128,6 @@ A chat server based on the microservice architecture to ensure high availability
 | helper | Common utility functions |
 | libs | Project specific libs like base class for microservice, resource configuration and initialization |
 | services | Microservice |
-| www | Web based testing interface |
 | .env.tmpl | Environment template file |
 | LICENSE | Project License file (MIT) |
 | package.json | Node project configuration file |
