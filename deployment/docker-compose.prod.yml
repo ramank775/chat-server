@@ -64,7 +64,6 @@ services:
       --s3-secret-access-key=${S3_SECRET_ACCESS_KEY:?set S3_SECRET_ACCESS_KEY in .env}
       --base-upload-dir=media --url-expire-time=3600 --max-upload-size=26214400
       --new-message-topic=new-message --offline-message-topic=offline-message
-      --new-login-topic=new-login --offline-msg-initial=persistence-message
       --gateway-name=monolith-gateway
 
   mongo:

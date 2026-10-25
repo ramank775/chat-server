@@ -69,7 +69,6 @@ async function startProfileMs(dbName) {
     // the conformance suite against the live stack.
     '--cache-type=local',
     '--event-store=memory',
-    '--new-login-topic=new-login',
     '--new-message-topic=new-message',
     // no service is listening: `stubChannels` / `revokes` / `pushTopicDeletes` replace all three clients
     '--channel-ms-endpoint=http://channel-ms.invalid',

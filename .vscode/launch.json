@@ -13,7 +13,6 @@
         "--debug",
         "--gateway-name=ws-gateway-1",
         "--event-store=${EVENT_STORE}",
-        "--client-ack-topic=${TOPIC_CLIENT_ACK_MESSAGE}",
         "--new-message-topic=${TOPIC_NEW_MESSAGE}",
         "--offline-message-topic=${TOPIC_OFFLINE_MESSAGE}",
         "--redis-endpoint=127.0.0.1:6379",
@@ -108,7 +107,6 @@
         "--kafka-security-protocol=${KAFKA_SECURITY_PROTOCOL}",
         "--kafka-sasl-username=${KAFKA_SASL_USERNAME}",
         "--kafka-sasl-password=${KAFKA_SASL_PASSWORD}",
-        "--new-login-topic=${TOPIC_NEW_LOGIN}",
         "--nats-server-list=${NATS_SERVER_LIST}",
       ],
       "envFile": "${workspaceFolder}/.env",
@@ -132,9 +130,7 @@
         "--kafka-consumer-group=notification-ms",
         "--nats-server-list=${NATS_SERVER_LIST}",
         "--nats-consumer-group=notification-ms",
-        "--new-login-topic=${TOPIC_NEW_LOGIN}",
-        "--offline-message-topic=${TOPIC_OFFLINE_MESSAGE}",
-        "--db-app-initial=${PERSISTENCE_MESSAGE_MS_INITIAL}"
+        "--offline-message-topic=${TOPIC_OFFLINE_MESSAGE}"
       ],
       "envFile": "${workspaceFolder}/.env",
       "autoAttachChildProcesses": true
