@@ -17,10 +17,6 @@ class LocalCache {
     return this._cache[key];
   }
 
-  async getAll(keys) {
-    return keys.map((key) => this._cache[key]);
-  }
-
   async set(key, value) {
     this._cache[key] = value;
   }
