@@ -1,5 +1,4 @@
 const crypto = require('crypto');
-const path = require('path');
 const schemas = require('./schema');
 
 function uuidv4() {
@@ -13,24 +12,6 @@ function shortuuid() {
 
 function extractInfoFromRequest(req, key = 'x-user', defaultValue = null) {
   return req.headers[key] || (req.state && req.state[key]) || defaultValue;
-}
-
-function getUTCTime() {
-  const now = new Date();
-  const utc = now.getTime() + (now.getTimezoneOffset() * 60 * 1000);
-  return utc;
-}
-
-function getUTCEpoch() {
-  const utcMilllisecondsSinceEpoch = getUTCTime();
-  const utcSecondsSinceEpoch = Math.round(utcMilllisecondsSinceEpoch / 1000);
-  return utcSecondsSinceEpoch;
-}
-
-function getFilename(file) {
-  const ext = path.extname(file);
-  const filename = path.basename(file, ext);
-  return `${filename}.${uuidv4()}${ext}`;
 }
 
 /**
@@ -74,10 +55,6 @@ function sha256(value) {
   return crypto.createHash('sha256').update(value).digest('hex');
 }
 
-function base64ToProtoBuffer(base64) {
-  return new Uint8Array(Buffer.from(base64, 'base64'));
-}
-
 /**
  * AUTH_CONTRACT 11.1 error envelope, shared by every http service so a 4xx
  * body is `{error: {code, message}}` regardless of which service answered.
@@ -92,14 +69,10 @@ function errorEnvelope(code, message, extra = {}) {
 module.exports = {
   uuidv4,
   extractInfoFromRequest,
-  getUTCEpoch,
-  getUTCTime,
   shortuuid,
-  getFilename,
   hashSecret,
   verifySecret,
   sha256,
-  base64ToProtoBuffer,
   errorEnvelope,
   schemas
 };
