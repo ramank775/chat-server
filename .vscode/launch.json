@@ -60,8 +60,6 @@
         "--app-name=message-ms",
         "--debug",
         "--port=4003",
-        "--cache-type=redis",
-        "--redis-endpoint=127.0.0.1:6379",
       ],
       "envFile": "${workspaceFolder}/.env",
       "autoAttachChildProcesses": true
