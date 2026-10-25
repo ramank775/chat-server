@@ -20,7 +20,7 @@
   /**
    * @abstract
    * Get Signed URL
-   * @param {{fileId: string; category: string; contentType: string, operation: 'upload'|'download'}} payload
+   * @param {{fileId: string; category: string; contentType: string, contentMd5?: string, operation: 'upload'|'download'}} payload
    * @returns {Promise<string>}
    */
    // eslint-disable-next-line no-unused-vars
@@ -30,12 +30,12 @@
 
   /**
    * @abstract
-   * SHA-256 (hex) of a stored object, or null when there is none.
+   * Whether the object was stored.
    * @param {{fileId: string; category: string}} _payload
-   * @returns {Promise<string|null>}
+   * @returns {Promise<boolean>}
    */
   // eslint-disable-next-line no-unused-vars
-  async sha256(_payload) {
+  async exists(_payload) {
     throw new Error('Method not implemented')
   }
 
