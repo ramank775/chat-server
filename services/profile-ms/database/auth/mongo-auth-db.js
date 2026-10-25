@@ -96,9 +96,9 @@ class MongoAuthDB extends IAuthDB {
     );
   }
 
-  async revokeAllSessions(userId) {
+  async revokeAllSessions(userId, exceptDeviceId) {
     await this.#sessions.updateMany(
-      { user_id: userId, revokedAt: null },
+      { user_id: userId, revokedAt: null, ...(exceptDeviceId ? { deviceId: { $ne: exceptDeviceId } } : {}) },
       { $set: { revokedAt: new Date() } }
     );
   }
@@ -139,8 +139,12 @@ class MongoAuthDB extends IAuthDB {
     return this.#deviceKeys.find({ user_id: userId }, PROJECTION).toArray();
   }
 
-  async deleteDeviceKeys(userId) {
-    await this.#deviceKeys.deleteMany({ user_id: userId });
+  async deleteDeviceKeys(userId, { deviceId, exceptDeviceId } = {}) {
+    await this.#deviceKeys.deleteMany({
+      user_id: userId,
+      ...(deviceId ? { deviceId } : {}),
+      ...(exceptDeviceId ? { deviceId: { $ne: exceptDeviceId } } : {})
+    });
   }
 
   async init() {

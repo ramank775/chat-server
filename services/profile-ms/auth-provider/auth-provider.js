@@ -116,12 +116,14 @@ class IAuthProvider {
   }
 
   /**
-   * Revoke every session of a user (account delete, AUTH_CONTRACT 8.2).
+   * Revoke every session of a user (account delete, AUTH_CONTRACT 8.2), or
+   * every one but `_exceptDeviceId`'s.
    * @param {string} _userId
+   * @param {string} [_exceptDeviceId]
    * @returns {Promise<void>}
    */
   // eslint-disable-next-line no-unused-vars
-  async revokeAll(_userId) {
+  async revokeAll(_userId, _exceptDeviceId) {
     throw new Error('Method not implemented');
   }
 

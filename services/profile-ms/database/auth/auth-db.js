@@ -56,7 +56,8 @@ class IAuthDB {
     throw new Error('Method not implemented');
   }
 
-  async deleteDeviceKeys(_userId) {
+  /** Every device's keys, only `deviceId`'s, or all but `exceptDeviceId`'s. */
+  async deleteDeviceKeys(_userId, _which = {}) {
     throw new Error('Method not implemented');
   }
 
@@ -178,12 +179,14 @@ class IAuthDB {
 
   /**
    * @abstract
-   * Revoke every live session of a user (AUTH_CONTRACT 8.2 step 3).
+   * Revoke every live session of a user (AUTH_CONTRACT 8.2 step 3), or every
+   * one but `_exceptDeviceId`'s (a login retiring the other phones).
    * @param {string} _userId
+   * @param {string} [_exceptDeviceId]
    * @returns {Promise<void>}
    */
   // eslint-disable-next-line no-unused-vars
-  async revokeAllSessions(_userId) {
+  async revokeAllSessions(_userId, _exceptDeviceId) {
     throw new Error('Method not implemented');
   }
 

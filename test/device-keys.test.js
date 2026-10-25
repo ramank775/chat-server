@@ -27,8 +27,11 @@ function memoryKeys() {
       return true;
     },
     listDeviceKeys: async (userId) => structuredClone([...rows.values()].filter((r) => r.user_id === userId)),
-    deleteDeviceKeys: async (userId) => {
-      rows.forEach((r, id) => { if (r.user_id === userId) rows.delete(id); });
+    deleteDeviceKeys: async (userId, { deviceId, exceptDeviceId } = {}) => {
+      rows.forEach((r, id) => {
+        if (r.user_id === userId && (!deviceId || r.deviceId === deviceId)
+          && r.deviceId !== exceptDeviceId) rows.delete(id);
+      });
     }
   };
 }
@@ -175,6 +178,20 @@ test('account deletion removes every published device; racing registration clean
   };
   assert.equal((await inject('PUT', '/keys/me', bundle(1), BOB)).statusCode, 401);
   assert.deepEqual(await db.listDeviceKeys(BOB), []);
+});
+
+test('an upload racing the login that signed its phone out withdraws itself (183)', async (t) => {
+  const { service, db, inject } = await serviceHarness(t);
+  const save = db.saveDeviceKeys;
+  db.saveDeviceKeys = async (...args) => {
+    const saved = await save(...args);
+    service.authProvider.verifyAccessKey = async () => {
+      throw new AuthError(401, 'INVALID_ACCESSKEY', 'Signed out');
+    };
+    return saved;
+  };
+  assert.equal((await inject('PUT', '/keys/me', bundle(1))).statusCode, 401);
+  assert.deepEqual(await db.listDeviceKeys(ALICE), []);
 });
 
 test('key publications enforce rate limits', async (t) => {

@@ -513,6 +513,7 @@ class ProfileMs extends HttpServiceBase {
       user = await this.createUser(verified.phone);
     }
     const issued = await this.authProvider.issueSession(user.user_id, deviceId);
+    if (!isNew) await this.retireOtherDevices(user.user_id, deviceId);
     return {
       status: true,
       user_id: user.user_id,
@@ -521,6 +522,25 @@ class ProfileMs extends HttpServiceBase {
       ...issued,
       isNew
     };
+  }
+
+  /**
+   * Decision 183: one active phone per account this release. A login signs
+   * every other phone out and withdraws its keys and push endpoint. Sessions,
+   * keys, push and fanout all stay keyed by device, so allowing more phones
+   * means dropping this call and adding device approval, not a redesign.
+   * @param {string} userId
+   * @param {string} deviceId the phone that just signed in
+   */
+  async retireOtherDevices(userId, deviceId) {
+    const others = new Set((await this.context.authDB.devicesOf([userId], new Date()))
+      .map((session) => session.deviceId).filter((other) => other !== deviceId));
+    await this.authProvider.revokeAll(userId, deviceId);
+    await this.context.authDB.deleteDeviceKeys(userId, { exceptDeviceId: deviceId });
+    await Promise.all([...others].map(async (other) => {
+      await this.revokeGatewaySessions(userId, 'revoked', other);
+      await this.revokePushTopics(userId, other);
+    }));
   }
 
   async sessionRefresh(req) {
@@ -532,10 +552,12 @@ class ProfileMs extends HttpServiceBase {
     const { session, user } = req.pre.auth;
     await this.rateLimit(`keys:write:${user.user_id}:h`, 60, 3600, 'user');
     const result = await publishKeys(this.context.authDB, user.user_id, session.deviceId, req.payload);
-    // An in-flight registration cannot survive a concurrent account deletion.
-    if (!(await this.profileDB.getByUserId(user.user_id))) {
-      await this.context.authDB.deleteDeviceKeys(user.user_id);
-      throw new AuthError(401, 'INVALID_ACCESSKEY', 'The account was deleted');
+    // An in-flight registration cannot outlive a concurrent account deletion
+    // or a newer login that signed this phone out (decision 183).
+    const live = await this.authProvider.verifyAccessKey(extractAccesskey(req)).catch(() => null);
+    if (!live || !(await this.profileDB.getByUserId(user.user_id))) {
+      await this.context.authDB.deleteDeviceKeys(user.user_id, { deviceId: session.deviceId });
+      throw new AuthError(401, 'INVALID_ACCESSKEY', 'This phone was signed out');
     }
     return result;
   }

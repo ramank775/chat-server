@@ -178,10 +178,11 @@ class PgAuthDB extends IAuthDB {
     );
   }
 
-  async revokeAllSessions(userId) {
+  async revokeAllSessions(userId, exceptDeviceId) {
     await this.#pool.query(
-      'UPDATE sessions SET revoked_at = $2 WHERE user_id = $1 AND revoked_at IS NULL',
-      [userId, new Date()]
+      `UPDATE sessions SET revoked_at = $2 WHERE user_id = $1 AND revoked_at IS NULL
+       AND device_id IS DISTINCT FROM $3`,
+      [userId, new Date(), exceptDeviceId || null]
     );
   }
 
@@ -221,8 +222,12 @@ class PgAuthDB extends IAuthDB {
     return rows.map((row) => row.record);
   }
 
-  async deleteDeviceKeys(userId) {
-    await this.#pool.query('DELETE FROM device_keys WHERE user_id = $1', [userId]);
+  async deleteDeviceKeys(userId, { deviceId, exceptDeviceId } = {}) {
+    await this.#pool.query(
+      `DELETE FROM device_keys WHERE user_id = $1
+       AND ($2::text IS NULL OR device_id = $2) AND device_id IS DISTINCT FROM $3`,
+      [userId, deviceId || null, exceptDeviceId || null]
+    );
   }
 
   /**
