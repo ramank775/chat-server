@@ -4,4 +4,3 @@ deployment
 docs
 .env*
 **.md
-discovery_service.json
