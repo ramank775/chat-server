@@ -141,7 +141,6 @@ A chat server based on the microservice architecture to ensure high availability
 - [Apache Kafka](https://kafka.apache.org/) / [Nats](https://nats.io/)
 - Mongodb
 - Nginx
-- Firebase project 
 - Redis
 
 ### Steps

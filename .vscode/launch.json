@@ -124,7 +124,6 @@
         "--debug",
         "--mongo-url=${MONGO_URL}",
         "--pn-service=${PN_SERVICE}",
-        "--firebase-admin-credential-json-path=${workspaceFolder}/${FIREBASE_ADMIN_CRED_JSON_PATH}",
         "--event-store=${EVENT_STORE}",
         "--kafka-broker-list=${BROKER_LIST}",
         "--kafka-security-protocol=${KAFKA_SECURITY_PROTOCOL}",
