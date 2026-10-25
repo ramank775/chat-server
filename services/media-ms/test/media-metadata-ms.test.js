@@ -173,6 +173,54 @@ test('file status update stays scoped to the owner', async () => {
   assert.strictEqual(JSON.parse(res.payload).error.code, 'NOT_FOUND');
 });
 
+const HASH = 'ab'.repeat(32);
+
+test('a convergent upload reuses a verified copy instead of uploading again (190)', async () => {
+  const db = stubDb(null);
+  db.findBySha256 = async (sha256, category) => (sha256 === HASH && category === 'message'
+    ? { _id: 'aaaaaaaaaaaaaaaaaaaaaaaa', status: true } : null);
+  const storage = stubStorage();
+  const service = await buildService(db, storage);
+  const presign = (sha256) => service.server.inject({
+    method: 'GET',
+    url: `/upload/presigned_url?ext=bin&category=message&size=99&sha256=${sha256}`,
+    headers: authHeaders(OTHER)
+  });
+
+  const hit = await presign(HASH);
+  assert.strictEqual(hit.statusCode, 200);
+  assert.deepStrictEqual(JSON.parse(hit.payload), { fileId: 'aaaaaaaaaaaaaaaaaaaaaaaa', existing: true });
+  assert.deepStrictEqual(storage.signed, [], 'nothing to upload');
+
+  const miss = await presign('cd'.repeat(32));
+  assert.strictEqual(JSON.parse(miss.payload).fileId, FILE_ID);
+  assert.strictEqual(db.created[0].sha256, 'cd'.repeat(32), 'recorded for the check at completion');
+  assert.strictEqual((await presign('not-a-hash')).statusCode, 400);
+});
+
+test('completion checks the stored bytes against the declared hash (190)', async () => {
+  const record = { owner: OWNER, category: 'message', contentType: 'application/octet-stream', sha256: HASH };
+  const db = stubDb(record);
+  const marked = [];
+  db.updateFileStatus = async (fileId, status) => { marked.push(status); };
+  const storage = stubStorage();
+  let stored = 'ff'.repeat(32);
+  storage.sha256 = async () => stored;
+  const service = await buildService(db, storage);
+  const complete = () => service.server.inject({
+    method: 'PUT', url: `/${FILE_ID}/status`, headers: authHeaders(OWNER), payload: { status: true }
+  });
+
+  const bad = await complete();
+  assert.strictEqual(bad.statusCode, 409);
+  assert.strictEqual(JSON.parse(bad.payload).error.code, 'HASH_MISMATCH');
+  assert.deepStrictEqual(marked, [], 'junk is never indexed');
+
+  stored = HASH;
+  assert.strictEqual((await complete()).statusCode, 200);
+  assert.deepStrictEqual(marked, [true]);
+});
+
 test('content type lookup resolves every extension a record names', async () => {
   // ".jpeg, .jpg" is one mapping record naming two extensions, and callers
   // pass the extension with or without the leading dot.

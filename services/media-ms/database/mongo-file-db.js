@@ -33,6 +33,7 @@ class MongoFileStore extends IMediaMetadataDB {
       category: payload.category,
       owner: payload.owner,
       contentType: payload.contentType,
+      ...(payload.sha256 ? { sha256: payload.sha256 } : {}),
       createdAt: new Date()
     }
     const record = await this.#collection.insertOne(fileRecord);
@@ -49,6 +50,10 @@ class MongoFileStore extends IMediaMetadataDB {
       _id: ObjectId.createFromHexString(fileId)
     })
     return file
+  }
+
+  async findBySha256(sha256, category) {
+    return this.#collection.findOne({ sha256, category, status: true });
   }
 
   /**
@@ -70,6 +75,7 @@ class MongoFileStore extends IMediaMetadataDB {
     await this.#client.connect();
     const db = this.#client.db();
     this.#collection = db.collection('file_store');
+    await this.#collection.createIndex({ sha256: 1 }, { sparse: true });
   }
 
   /**

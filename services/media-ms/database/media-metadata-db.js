@@ -20,7 +20,7 @@
   /**
    * @abstract
    * Create new File record
-   * @param {{category: string; owner: string; contentType: string;}} payload
+   * @param {{category: string; owner: string; contentType: string; sha256?: string}} payload
    * @returns {Promise<string>}
    */
   // eslint-disable-next-line no-unused-vars
@@ -34,6 +34,18 @@
    */
   // eslint-disable-next-line no-unused-vars
   async getRecord(fileId) {
+    throw new Error('Method not implemented')
+  }
+
+  /**
+   * @abstract
+   * A completed file whose stored bytes were checked to hash to [sha256]
+   * (hex), in [category]: what a convergent upload can reuse. Null if none.
+   * @param {string} _sha256
+   * @param {string} _category
+   */
+  // eslint-disable-next-line no-unused-vars
+  async findBySha256(_sha256, _category) {
     throw new Error('Method not implemented')
   }
 
