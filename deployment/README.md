@@ -5,9 +5,11 @@ one process), MongoDB, and Caddy in front for TLS. Photos, voice notes and files
 live in a Cloudflare R2 bucket: the server only signs upload and download links,
 and phones talk to R2 directly. Mongo is the only state on the server.
 
-`docker-compose.monolith.yml` (with `.env.tmpl`) is the local development stack. The other compose files
-and `helm/` are the old microservice layout. They are not maintained for 3.0,
-and the helm chart does not render.
+`docker-compose.monolith.yml` (with `.env.tmpl`) is the local development stack. The
+microservice layout (`docker-compose.infra.yml` plus `docker-compose.yml`, and
+`helm/`) stays supported but has not caught up with 3.0 yet: the compose stack
+gives profile-ms no `OTP_ENCRYPTION_KEY`, and the helm chart is still v2 and does
+not render. Deploy 3.0 as the monolith.
 
 ## What you need
 
