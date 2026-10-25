@@ -5,7 +5,12 @@ const {
   initDefaultResources,
   resolveEnvVariables
 } = require('../../libs/service-base');
-const { addHttpOptions, initHttpResource, HttpServiceBase } = require('../../libs/http-service-base');
+const {
+  addHttpOptions,
+  appBuildVerify,
+  initHttpResource,
+  HttpServiceBase
+} = require('../../libs/http-service-base');
 const EventStore = require('../../libs/event-store');
 const MemCache = require('../../libs/cache');
 const ChannelServiceClient = require('../../libs/channel-service-client');
@@ -183,8 +188,9 @@ class Gateway extends HttpServiceBase {
       // only upgrades on our own prefix are ours, and the authentication
       // nginx did ahead of us is a hook the runner supplies (the upgrade
       // never reaches fastify, so the global auth hook cannot see it).
+      // An outdated app is refused before either (decision 192).
       path: this.mount ? this.mount.prefix : undefined,
-      verifyClient: this.context.wsVerify,
+      verifyClient: appBuildVerify(this.options.minAppBuild, this.context.wsVerify),
       // AUTH_CONTRACT.md §6.2 step 3 — echo the accesskey subprotocol on the
       // 101 so the client's handshake completes.
       handleProtocols: (protocols) =>

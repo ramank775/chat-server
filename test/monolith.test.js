@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { HttpServiceBase } = require('../libs/http-service-base');
+const { HttpServiceBase, appBuildVerify } = require('../libs/http-service-base');
 const { AuthError } = require('../services/profile-ms/auth-provider');
 const { Monolith } = require('../services/monolith');
 
@@ -41,10 +41,10 @@ class ToyService extends HttpServiceBase {
  * The runner, with two services mounted the way profile-ms and channel-ms are
  * and a stub for the in-process session check.
  */
-async function startMonolith() {
+async function startMonolith(extraOptions = {}) {
   const internalRoutes = [];
   const mount = (prefix) => ({ mount: { prefix, internal: internalRoutes } });
-  const base = { options, log, statsClient };
+  const base = { options: { ...options, ...extraOptions }, log, statsClient };
 
   const profileLike = new ToyService(
     { ...base, ...mount('/v3.0') },
@@ -224,5 +224,76 @@ describe('the in-process auth hook', () => {
   it('never runs on the internal routes or on /alive', async () => {
     assert.equal((await inject({ method: 'GET', url: '/alive' })).statusCode, 200);
     assert.equal((await inject({ method: 'GET', url: '/_internal/echo' })).statusCode, 200);
+  });
+});
+
+describe('the app version check (decision 192)', () => {
+  /** @type {Monolith} */ let monolith;
+  const inject = (request) => monolith.server.inject(request);
+  const me = (build) => inject({
+    method: 'GET',
+    url: '/v3.0/users/me',
+    headers: { authorization: 'Bearer good', ...(build && { 'x-app-build': build }) }
+  });
+
+  before(async () => { monolith = await startMonolith({ minAppBuild: 80, latestAppBuild: 82 }); });
+  after(async () => { await monolith.server.close(); });
+
+  it('refuses a build below the minimum with 426, ahead of auth', async () => {
+    const old = await inject({ method: 'GET', url: '/v3.0/users/me', headers: { 'x-app-build': '79' } });
+    assert.equal(old.statusCode, 426);
+    assert.deepEqual(old.json(), {
+      error: {
+        code: 'UPGRADE_REQUIRED',
+        message: 'This version of the app is no longer supported',
+        minBuild: 80
+      }
+    });
+  });
+
+  it('serves the minimum and newer, and tells them the latest build', async () => {
+    const atMin = await me('80');
+    assert.equal(atMin.statusCode, 200);
+    assert.equal(atMin.headers['x-latest-app-build'], '82');
+    assert.equal((await me('82')).statusCode, 200);
+  });
+
+  it('lets a request without the header through', async () => {
+    assert.equal((await me()).statusCode, 200);
+    assert.equal((await inject({ method: 'GET', url: '/_internal/echo' })).statusCode, 200);
+  });
+
+  it('is off by default', async () => {
+    const plain = await startMonolith();
+    const response = await plain.server.inject({
+      method: 'GET',
+      url: '/v3.0/users/me',
+      headers: { authorization: 'Bearer good', 'x-app-build': '1' }
+    });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.headers['x-latest-app-build'], undefined);
+    await plain.server.close();
+  });
+
+  it('refuses an outdated socket upgrade before the runner\'s check', async () => {
+    const calls = [];
+    const verify = appBuildVerify(80, (_info, cb) => { calls.push('auth'); cb(true); });
+    const upgrade = (headers) => new Promise((resolve) => {
+      verify({ req: { headers } }, (...args) => resolve(args));
+    });
+
+    const [ok, code, body] = await upgrade({ 'x-app-build': '79' });
+    assert.deepEqual([ok, code, JSON.parse(body).error.code], [false, 426, 'UPGRADE_REQUIRED']);
+    assert.deepEqual(calls, []);
+
+    assert.deepEqual(await upgrade({ 'x-app-build': '80' }), [true]);
+    assert.deepEqual(await upgrade({}), [true]);
+    assert.deepEqual(calls, ['auth', 'auth']);
+
+    // standalone gateway: nothing behind it
+    const alone = await new Promise((resolve) => {
+      appBuildVerify(0, undefined)({ req: { headers: {} } }, (...args) => resolve(args));
+    });
+    assert.deepEqual(alone, [true]);
   });
 });

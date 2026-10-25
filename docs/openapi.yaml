@@ -20,6 +20,12 @@ info:
     user= # Authenticated username
 
     ```
+
+
+    Phones send `x-app-build: <versionCode>` on every request and on the
+    `/wss` upgrade (decision 192). Below the server's minimum build every
+    request answers 426 `UPGRADE_REQUIRED`, and responses carry
+    `x-latest-app-build` while a newer build is out.
   version: 1.0.0
 servers:
   - url: https://{{baseurl}}

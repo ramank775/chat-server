@@ -12,8 +12,44 @@ function addHttpOptions(cmd) {
     .option('--host <host>', 'Http Server Host (default 127.0.0.1)', '127.0.0.1')
     .option('--ssl-cert <ssl-cert>', 'SSL public certificate')
     .option('--ssl-key <ssl-key>', 'SSL private key')
-    .option('--base-route <base-route>', 'Base route for http service', '');
+    .option('--base-route <base-route>', 'Base route for http service', '')
+    .option('--min-app-build <build>', 'Refuse apps below this build with 426 (0 = off)', (c) => Number(c), 0)
+    .option('--latest-app-build <build>', 'Tell apps below this build an update exists (0 = off)', (c) => Number(c), 0);
   return cmd;
+}
+
+/**
+ * Decision 192: phones send their build number (Android versionCode) as
+ * `x-app-build`. Below `--min-app-build` the server refuses them and the app
+ * shows its update screen. A request without the header (curl, tests,
+ * internal calls) passes.
+ */
+function belowMinAppBuild(headers, minAppBuild) {
+  const build = Number.parseInt(headers['x-app-build'], 10);
+  return minAppBuild > 0 && build < minAppBuild;
+}
+
+const upgradeRequired = (minAppBuild) =>
+  errorEnvelope('UPGRADE_REQUIRED', 'This version of the app is no longer supported', {
+    minBuild: minAppBuild
+  });
+
+/**
+ * The same check for a ws upgrade, which never reaches fastify, ahead of
+ * `next` (the runner's auth, when it has one).
+ */
+function appBuildVerify(minAppBuild, next) {
+  return (info, cb) => {
+    if (belowMinAppBuild(info.req.headers, minAppBuild)) {
+      cb(false, 426, JSON.stringify(upgradeRequired(minAppBuild)), {
+        'Content-Type': 'application/json'
+      });
+    } else if (next) {
+      next(info, cb);
+    } else {
+      cb(true);
+    }
+  };
 }
 
 async function initHttpResource(context) {
@@ -135,6 +171,16 @@ class HttpServiceBase extends ServiceBase {
       this.server.decorateRequest('internal', false);
       this.server.decorateRequest('pre', null);
       this.server.decorateRequest('startTime', null);
+
+      const { minAppBuild = 0, latestAppBuild = 0 } = this.options;
+      this.server.addHook('onRequest', (req, reply, done) => {
+        if (latestAppBuild > 0) reply.header('x-latest-app-build', String(latestAppBuild));
+        if (belowMinAppBuild(req.headers, minAppBuild)) {
+          reply.code(426).send(upgradeRequired(minAppBuild));
+          return;
+        }
+        done();
+      });
     }
 
     // Everything below is fastify-encapsulated, so when mounted it covers this
@@ -267,6 +313,7 @@ class HttpServiceBase extends ServiceBase {
 
 module.exports = {
   addHttpOptions,
+  appBuildVerify,
   initHttpResource,
   HttpServiceBase
 };

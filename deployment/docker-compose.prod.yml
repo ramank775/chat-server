@@ -65,6 +65,7 @@ services:
       --base-upload-dir=media --url-expire-time=3600 --max-upload-size=26214400
       --new-message-topic=new-message --offline-message-topic=offline-message
       --gateway-name=monolith-gateway
+      --min-app-build=${MIN_APP_BUILD:-0} --latest-app-build=${LATEST_APP_BUILD:-0}
 
   mongo:
     image: mongo:7.0

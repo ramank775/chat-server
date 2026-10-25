@@ -69,6 +69,21 @@ docker compose -f docker-compose.prod.yml up -d
 Phones reconnect by themselves. Nothing is lost while the server is down: senders keep messages
 queued, and what the server already acknowledged is in Mongo.
 
+## Forcing an app update
+
+Two `.env` values steer old apps (decision 192). Both are Android
+versionCodes, the number after `+` in the app's `pubspec.yaml` version
+(3.0.0+80 is 80). 0 turns each off.
+
+- `LATEST_APP_BUILD`: apps below it show a dismissible "New version
+  available" bar above the chat list.
+- `MIN_APP_BUILD`: apps below it are refused (HTTP 426) and show only a
+  "no longer supported" screen with an Update button. Raise it only once
+  the new build is live on Play and on GitHub, or those users are stuck.
+
+The Update button opens Play for Play installs and the GitHub release
+otherwise. After editing `.env`, `docker compose -f docker-compose.prod.yml up -d`.
+
 ## Backups
 
 Media is in R2. Everything else (accounts, groups, the 30-day message
