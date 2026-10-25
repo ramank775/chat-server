@@ -240,7 +240,6 @@ module.exports = {
   eventually,
   legacyWire,
   mintOpId,
-  opFrame,
   pushTopic,
   signup,
   signupWithUsername,

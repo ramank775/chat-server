@@ -18,6 +18,5 @@ function getProtoDefination(type) {
 }
 
 module.exports = {
-  loadProtoDefination,
   getProtoDefination
 }

@@ -1,8 +1,5 @@
-const { ConnectionStateEvent, CONNECTION_STATE } = require('./connection-state');
-const { loadProtoDefination } = require('./util');
+const { ConnectionStateEvent } = require('./connection-state');
 
 module.exports = {
-  CONNECTION_STATE,
-  ConnectionStateEvent,
-  loadProtoDefination
+  ConnectionStateEvent
 }

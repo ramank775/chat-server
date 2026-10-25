@@ -74,6 +74,5 @@ class ConnectionStateEvent extends IEventArg {
 }
 
 module.exports = {
-  CONNECTION_STATE,
   ConnectionStateEvent
 }

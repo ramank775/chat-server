@@ -175,6 +175,5 @@ class PgUndeliveredQueue {
 
 module.exports = {
   PgUndeliveredQueue,
-  APPEND,
   partitionName
 };

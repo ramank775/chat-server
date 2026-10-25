@@ -630,5 +630,4 @@ module.exports = {
   parseOptions,
   initResources,
   prepareListEvent,
-  EVENT_TYPE,
 };

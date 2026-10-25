@@ -244,6 +244,5 @@ module.exports = {
   Implementation: WebPushNotificationService,
   isPublicAddress,
   isAcceptableEndpoint,
-  isValidPushKeys,
-  WAKE
+  isValidPushKeys
 };

@@ -5,7 +5,6 @@ const pgProfileDb = require('../../services/profile-ms/database/profile/pg-profi
 const pgAuthDb = require('../../services/profile-ms/database/auth/pg-auth-db');
 const {
   TEST_DB,
-  MONGO_URL,
   mongoUrlFor,
   pgUrlFor,
   freshPgDatabase,
@@ -13,8 +12,6 @@ const {
   dbFlags,
   pgDb
 } = require('./db');
-
-const REDIS_ENDPOINT = process.env.REDIS_ENDPOINT || 'localhost:6379';
 
 /**
  * The tests' own handle on the stores (`db.collection(...)`), on this run's
@@ -191,8 +188,6 @@ function bearer(accesskey) {
 }
 
 module.exports = {
-  MONGO_URL,
-  REDIS_ENDPOINT,
   startProfileMs,
   signup,
   signupWithUsername,

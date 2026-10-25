@@ -82,7 +82,6 @@ function pgDb(pool, tables) {
 module.exports = {
   TEST_DB,
   MONGO_URL,
-  PG_URL,
   mongoUrlFor,
   pgUrlFor,
   freshPgDatabase,

@@ -286,7 +286,6 @@ function init(context) {
 
 module.exports = {
   DeliveryManager,
-  LocalRegistry,
   addOptions,
   init
 }

@@ -4,7 +4,6 @@ const { serverEventPayload } = require('../server-event');
 const { ChannelMs, parseOptions, initResource } = require('../channel-ms');
 const {
   TEST_DB,
-  MONGO_URL,
   mongoUrlFor,
   freshPgDatabase,
   dropPgDatabase,
@@ -138,7 +137,6 @@ function headers(userId, deviceId = 'device-1') {
 }
 
 module.exports = {
-  MONGO_URL,
   startChannelMs,
   mintOpId,
   decodeServerEvent,

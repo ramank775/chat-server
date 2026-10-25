@@ -142,7 +142,6 @@ async function initialize(context, options) {
 module.exports = {
   code: 'memory',
   MemoryEventBus,
-  MemoryEventStore,
   initOptions,
   initialize
 };
