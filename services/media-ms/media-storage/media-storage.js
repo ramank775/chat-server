@@ -30,6 +30,17 @@
 
   /**
    * @abstract
+   * SHA-256 (hex) of a stored object, or null when there is none.
+   * @param {{fileId: string; category: string}} _payload
+   * @returns {Promise<string|null>}
+   */
+  // eslint-disable-next-line no-unused-vars
+  async sha256(_payload) {
+    throw new Error('Method not implemented')
+  }
+
+  /**
+   * @abstract
    * Initialize the database instance
    */
   async init() {

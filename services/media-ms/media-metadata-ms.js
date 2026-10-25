@@ -58,7 +58,9 @@ class MediaMetadataMS extends HttpServiceBase {
           query: Joi.object({
             ext: Joi.string().required(),
             category: Joi.string().required(),
-            size: Joi.number().integer().min(1).max(this.options.maxUploadSize).required()
+            size: Joi.number().integer().min(1).max(this.options.maxUploadSize).required(),
+            // Decision 190: the hash of a convergently encrypted upload.
+            sha256: Joi.string().pattern(/^[0-9a-f]{64}$/)
           })
         }
       }
@@ -106,6 +108,14 @@ class MediaMetadataMS extends HttpServiceBase {
     if (file.status === true) {
       return h.response(errorEnvelope('ALREADY_MARKED', 'file status is already set')).code(400);
     }
+    // Decision 190: a hash someone will reuse is only indexed once the
+    // stored bytes are checked, so a bad upload cannot claim a real file.
+    if (status && file.sha256) {
+      const stored = await this.storage.sha256({ fileId, category: file.category });
+      if (stored !== file.sha256) {
+        return h.response(errorEnvelope('HASH_MISMATCH', 'the stored bytes do not match the declared sha256')).code(409);
+      }
+    }
     await this.db.updateFileStatus(fileId, !!status);
     return h.response().code(200);
   }
@@ -133,11 +143,17 @@ class MediaMetadataMS extends HttpServiceBase {
 
   async getUploadURL(req) {
     const owner = extractInfoFromRequest(req, 'x-user');
-    const { ext, category, size } = req.query;
-    return await this.getUploadPreSignedUrl(ext, category, owner, size);
+    const { ext, category, size, sha256 } = req.query;
+    // Decision 190: the same encrypted file is stored once; the caller
+    // reuses it instead of uploading.
+    if (sha256) {
+      const existing = await this.db.findBySha256(sha256, category);
+      if (existing) return { fileId: String(existing._id), existing: true };
+    }
+    return await this.getUploadPreSignedUrl(ext, category, owner, size, sha256);
   }
 
-  async getUploadPreSignedUrl(ext, category, owner, contentLength) {
+  async getUploadPreSignedUrl(ext, category, owner, contentLength, sha256) {
     const contentType = getContentTypeByExt(ext);
     const payload = {
       contentType,
@@ -148,6 +164,7 @@ class MediaMetadataMS extends HttpServiceBase {
       category,
       owner,
       contentType,
+      ...(sha256 ? { sha256 } : {}),
     };
     payload.fileId = await this.db.createRecord(fileRecord);
     const preSignedURL = await this.getSignedURL(payload, 'upload');

@@ -12,6 +12,8 @@ const SCHEMA = `
     created_at timestamptz,
     status boolean
   );
+  ALTER TABLE file_store ADD COLUMN IF NOT EXISTS sha256 text;
+  CREATE INDEX IF NOT EXISTS file_store_sha256 ON file_store (sha256) WHERE sha256 IS NOT NULL;
 `;
 
 class PgFileStore extends IMediaMetadataDB {
@@ -26,9 +28,10 @@ class PgFileStore extends IMediaMetadataDB {
   async createRecord(payload) {
     const fileId = crypto.randomBytes(12).toString('hex');
     await this.#pool.query(
-      `INSERT INTO file_store (id, category, owner, content_type, created_at)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [fileId, payload.category, payload.owner, payload.contentType, new Date()]
+      `INSERT INTO file_store (id, category, owner, content_type, created_at, sha256)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [fileId, payload.category, payload.owner, payload.contentType, new Date(),
+        payload.sha256 || null]
     );
     return fileId;
   }
@@ -36,9 +39,19 @@ class PgFileStore extends IMediaMetadataDB {
   async getRecord(fileId) {
     const { rows } = await this.#pool.query(
       `SELECT id AS "_id", category, owner, content_type AS "contentType",
-         created_at AS "createdAt", status
+         created_at AS "createdAt", status, sha256
        FROM file_store WHERE id = $1`,
       [fileId]
+    );
+    return rows[0] || null;
+  }
+
+  async findBySha256(sha256, category) {
+    const { rows } = await this.#pool.query(
+      `SELECT id AS "_id", category, owner, content_type AS "contentType",
+         created_at AS "createdAt", status, sha256
+       FROM file_store WHERE sha256 = $1 AND category = $2 AND status LIMIT 1`,
+      [sha256, category]
     );
     return rows[0] || null;
   }

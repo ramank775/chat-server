@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const { S3Client, PutObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3')
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner')
 const { IMediaStorage } = require('./media-storage');
@@ -63,6 +64,28 @@ class S3Storage extends IMediaStorage {
       signableHeaders,
     });
     return url;
+  }
+
+  /**
+   * SHA-256 (hex) of a stored object, streamed; null when there is none.
+   * @param {{fileId: string; category: string}} payload
+   * @returns {Promise<string|null>}
+   */
+  async sha256(payload) {
+    let response;
+    try {
+      response = await this.#client.send(new GetObjectCommand({
+        Bucket: this.#options.bucketName,
+        Key: `${this.#options.baseDir}/${payload.category}/${payload.fileId}`
+      }));
+    } catch (error) {
+      if (error.name === 'NoSuchKey' || error.$metadata?.httpStatusCode === 404) return null;
+      throw error;
+    }
+    const hash = crypto.createHash('sha256');
+    // eslint-disable-next-line no-restricted-syntax
+    for await (const chunk of response.Body) hash.update(chunk);
+    return hash.digest('hex');
   }
 
   /**
