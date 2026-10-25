@@ -1,6 +1,5 @@
 # Chat Server
 [![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](code_of_conduct.md)
-[![Gitpod Ready-to-Code](https://img.shields.io/badge/Gitpod-Ready--to--Code-blue?logo=gitpod)](https://gitpod.io/#https://github.com/ramank775/chat-server) 
 
 A chat server based on the microservice architecture to ensure high availability, high throughput, horizontal scalability.
 
@@ -123,7 +122,6 @@ A chat server based on the microservice architecture to ensure high availability
 | Name |  Description |
 | ---- |  ----------- |
 | .github | Configuration files related to github like workflows, funding |
-| .gipod | Configuration files for gitpod dev enviroment setup |
 | .husky | git hooks configuration via [husky](https://typicode.github.io/husky) |
 | deployment | Deployment scripts |
 | docs | Docs related to the project |
@@ -132,17 +130,11 @@ A chat server based on the microservice architecture to ensure high availability
 | services | Microservice |
 | www | Web based testing interface |
 | .env.tmpl | Environment template file |
-| .gitpod.yml | Gitpod configuration file |
 | LICENSE | Project License file (MIT) |
 | package.json | Node project configuration file |
 | README.md | Project description and other details |
 
 ## How to setup
-
-### Use Gitpod as development environment
-Click on the Gitpod badge it will start the fully setup development environment.
-
- [![Gitpod Ready-to-Code](https://img.shields.io/badge/Gitpod-Ready--to--Code-blue?logo=gitpod)](https://gitpod.io/#https://github.com/ramank775/chat-server) 
 
 ### Development environment on local machine
 
