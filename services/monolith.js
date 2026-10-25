@@ -340,7 +340,5 @@ if (asMain) {
 module.exports = {
   Monolith,
   parseOptions,
-  initResources,
-  authHook,
-  wsVerify
+  initResources
 };

@@ -1,6 +1,5 @@
 /* eslint-disable max-classes-per-file -- the registry is the redis-shaped half of the manager */
 const { Redis } = require('ioredis');
-const { MessageEvent } = require('../event-args');
 
 /**
  * TRIM_4_12_CONTRACT §7 — delivery is keyed per `(user_id, device_id)`. The
@@ -63,10 +62,10 @@ class DeliveryManager {
   /** @type {number} */
   maxRetry;
 
-  /** @type {(msg: MessageEvent) => Promise<void> } */
+  /** @type {(msg: import('../v3-envelope').EnvelopeEvent) => Promise<void> } */
   offlineMessageHandler;
 
-  /** @type {(msg: MessageEvent) => Promise<string[]> } */
+  /** @type {(msg: import('../v3-envelope').EnvelopeEvent) => Promise<string[]> } */
   messageHandler;
 
   /**
@@ -76,12 +75,11 @@ class DeliveryManager {
   deviceDirectory;
 
   /**
-   * Codec for the pubsub payload. v2 carries `MessageEvent`; the v3 sync
-   * wire sets this to `EnvelopeEvent` (libs/v3-envelope.js) so a fanout
-   * envelope travels between gateways without a v2 `Message` round trip.
-   * @type {{ fromBinary: (payload: Buffer) => MessageEvent }}
+   * Codec for the pubsub payload. The v3 sync wire sets this to
+   * `EnvelopeEvent` (libs/v3-envelope.js).
+   * @type {{ fromBinary: (payload: Buffer) => import('../v3-envelope').EnvelopeEvent }}
    */
-  eventArg = MessageEvent;
+  eventArg;
 
 
   async _onMessage(msg, retry = 0) {
@@ -241,7 +239,7 @@ class DeliveryManager {
 
   /**
    * 
-   * @param {import('../event-args').MessageEvent} message 
+   * @param {import('../v3-envelope').EnvelopeEvent} message 
    */
   async dispatch(message) {
     await this._send(message, message.recipients)
@@ -288,7 +286,6 @@ function init(context) {
 
 module.exports = {
   DeliveryManager,
-  LocalRegistry,
   addOptions,
   init
 }

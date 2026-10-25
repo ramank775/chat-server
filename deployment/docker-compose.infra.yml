@@ -28,7 +28,7 @@ services:
       - -c
       - |
         until nats --server nats://nats:4222 stream ls >/dev/null 2>&1; do sleep 1; done
-        for topic in ${TOPIC_NEW_MESSAGE} ${TOPIC_OFFLINE_MESSAGE} ${TOPIC_NEW_LOGIN} ${TOPIC_CLIENT_ACK_MESSAGE}; do
+        for topic in ${TOPIC_NEW_MESSAGE} ${TOPIC_OFFLINE_MESSAGE}; do
           nats --server nats://nats:4222 stream add "$$topic" --subjects "$$topic.>" --storage file --replicas 1 \
             --retention limits --discard old --max-msgs=-1 --max-msgs-per-subject=-1 --max-bytes=-1 \
             --max-age=-1 --max-msg-size=-1 --dupe-window 2m --allow-rollup --no-deny-delete --no-deny-purge \

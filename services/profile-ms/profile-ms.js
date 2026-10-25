@@ -59,10 +59,6 @@ function parseOptions(argv) {
   cmd = addMemCacheOptions(cmd);
   cmd = eventStore.addEventStoreOptions(cmd);
   cmd.option(
-    '--new-login-topic <new-login-topic>',
-    'New login topic used to produce new login events'
-  );
-  cmd.option(
     '--new-message-topic <new-message-topic>',
     'Topic the REST-write fanout envelopes are published to (SYNC_PROTOCOL 10.2)'
   );
@@ -206,7 +202,6 @@ class ProfileMs extends HttpServiceBase {
     /** @type {import('../../libs/event-store/iEventStore').IEventStore} */
     this.eventStore = context.eventStore;
     this.memCache = context.memCache;
-    this.newLoginTopic = this.options.newLoginTopic;
     this.newMessageTopic = this.options.newMessageTopic;
     // ponytail: channel-ms exposes no "channels of a user" internal route and
     // libs/channel-service-client only answers `isMember`, so the fanout reads

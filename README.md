@@ -1,6 +1,5 @@
 # Chat Server
 [![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](code_of_conduct.md)
-[![Gitpod Ready-to-Code](https://img.shields.io/badge/Gitpod-Ready--to--Code-blue?logo=gitpod)](https://gitpod.io/#https://github.com/ramank775/chat-server) 
 
 A chat server based on the microservice architecture to ensure high availability, high throughput, horizontal scalability.
 
@@ -49,100 +48,23 @@ A chat server based on the microservice architecture to ensure high availability
     - Responsibility
         - Deliver message to offline user
 
-### Message Format
-
-```json
-{
-    "_v": 2.1,
-    "id": "string",
-    "head" : {
-        "type": "chat|group|channel|bot|notification",
-        "to": "username|group_id|channel_id|bot_id",
-        "from": "username",
-        "chatid": "chatid", // to be deperciated, added for backward comptibility only,
-        "ephemeral": "true/false",
-        "category": "user|system",
-        "contentType": "json|text|video|audio|location|form",
-        "action": "message|ack|subscribe|unsubscribe|join|leave|create|add-member|remove-member"
-    },
-    "meta": {
-        "hash": "md5:hash",
-        "content_hash": "md5:hash",
-        "generate_ts": 123455667890
-    },
-    "body": {
-        "text": "Hello this a text message",
-        "ts":123455667890
-    }
-}
-```
-
-```json
-{
-    "_v": 2.0,
-    "id": "string",
-    "head" : {
-        "type": "chat|group|channel|bot|notification",
-        "to": "username|group_id|channel_id|bot_id",
-        "from": "username",
-        "chatid": "chatid", // to be deperciated, added for backward comptibility only
-        "contentType": "json|text|video|audio|location|form",
-        "action": "message|ack|subscribe|unsubscribe|join|leave|create|add-member|remove-member"
-    },
-    "meta": {
-        "hash": "md5:hash",
-        "content_hash": "md5:hash",
-        "generate_ts": 123455667890
-    },
-    "body": {
-        "text": "Hello this a text message",
-        "ts":123455667890
-    }
-}
-```
-
-#### Mapping with previous Message format
-
-```json
-{
-    "msgId": "id",
-    "from": "head.from",
-    "type": "head.content_type",
-    "to": "head.to",
-    "chatId": "head.to",
-    "text": "body.text",
-    "state": "n/a",
-    "module": "head.type",
-    "action": "head.action",
-    "chatType": "head.type"
-}
-```
-
 ## Directory Structure
 
 | Name |  Description |
 | ---- |  ----------- |
 | .github | Configuration files related to github like workflows, funding |
-| .gipod | Configuration files for gitpod dev enviroment setup |
 | .husky | git hooks configuration via [husky](https://typicode.github.io/husky) |
 | deployment | Deployment scripts |
 | docs | Docs related to the project |
 | helper | Common utility functions |
 | libs | Project specific libs like base class for microservice, resource configuration and initialization |
 | services | Microservice |
-| www | Web based testing interface |
 | .env.tmpl | Environment template file |
-| .gitpod.yml | Gitpod configuration file |
 | LICENSE | Project License file (MIT) |
 | package.json | Node project configuration file |
 | README.md | Project description and other details |
 
 ## How to setup
-
-### Use Gitpod as development environment
-Click on the Gitpod badge it will start the fully setup development environment.
-
- [![Gitpod Ready-to-Code](https://img.shields.io/badge/Gitpod-Ready--to--Code-blue?logo=gitpod)](https://gitpod.io/#https://github.com/ramank775/chat-server) 
 
 ### Development environment on local machine
 
@@ -150,7 +72,6 @@ Click on the Gitpod badge it will start the fully setup development environment.
 - [Apache Kafka](https://kafka.apache.org/) / [Nats](https://nats.io/)
 - Mongodb
 - Nginx
-- Firebase project 
 - Redis
 
 ### Steps

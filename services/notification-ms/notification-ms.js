@@ -54,11 +54,6 @@ function parseOptions(argv) {
     '--offline-message-topic <offline-message-topic>',
     'Used by producer to produce new message to send the push notification'
   );
-  cmd.option(
-    '--offline-msg-initial <offline-msg-initial>',
-    'Initial for saved messages',
-    'persistence-message'
-  );
   return cmd.parse(argv).opts();
 }
 

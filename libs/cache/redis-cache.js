@@ -64,10 +64,6 @@ class RedisCache {
     return await this._redis.get(key)
   }
 
-  async getAll(keys) {
-    return await this._redis.mget(keys);
-  }
-
   async set(key, value) {
     await this._redis.set(key, value);
   }

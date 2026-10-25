@@ -1,11 +1,6 @@
-.theia
 .vscode
 node_modules
 deployment
-!deployment/config/load.nginx.conf
 docs
-www
 .env*
 **.md
-discovery_service.json
-.gitpod.*

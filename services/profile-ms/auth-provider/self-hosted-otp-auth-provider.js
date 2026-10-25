@@ -265,8 +265,5 @@ function addOptions(cmd) {
 module.exports = {
   code: 'self-hosted-otp',
   addOptions,
-  Implementation: SelfHostedOtpAuthProvider,
-  OTP_EXPIRES_IN_SEC,
-  OTP_RESEND_AFTER_SEC,
-  OTP_MAX_ATTEMPTS
+  Implementation: SelfHostedOtpAuthProvider
 };

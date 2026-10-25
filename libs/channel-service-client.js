@@ -56,11 +56,6 @@ class ChannelServiceClient {
   async isMember(channelId, userId) {
     return (await this.members(channelId)).has(userId);
   }
-
-  /** Drop the cached membership for a channel (channel-ms fanout tells us it changed). */
-  invalidate(channelId) {
-    this._membership.delete(channelId);
-  }
 }
 
 function addChannelServiceClientOptions(cmd) {

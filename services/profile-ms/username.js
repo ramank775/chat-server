@@ -41,7 +41,5 @@ function validateUsername(username) {
 }
 
 module.exports = {
-  USERNAME_REGEX,
-  RESERVED,
   validateUsername
 };

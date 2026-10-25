@@ -184,12 +184,10 @@ const eachSeries = (items, fn) => items.reduce(
 );
 
 module.exports = {
-  FakeRedis,
   envelopeEvent,
   startWorker,
   settle,
   eachSeries,
-  OFFLINE_TOPIC,
   DB,
   mongoUrlFor,
   emptyQueue,

@@ -29,14 +29,6 @@ class IEventArg {
   static fromBinary(_payload) {
     throw new Error("Not Implemented Exception")
   }
-
-  /**
-   * Static helper function to deserialize event data from plain text format.
-   * @return {IEventArg}
-  */
-  static fromString(_payload) {
-    throw new Error("Not Implemented Exception")
-  }
 }
 
 module.exports = {
