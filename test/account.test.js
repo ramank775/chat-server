@@ -73,12 +73,13 @@ describe('account delete and phone rebind (AUTH_CONTRACT 8 and 9)', () => {
     });
     const revokedBefore = app.revokes.length;
 
-    const res = await deleteMe(session.accesskey, 'DELETE gone_soon');
+    // device-b's login already signed device-a out (decision 183)
+    const res = await deleteMe(second.accesskey, 'DELETE gone_soon');
     assert.equal(res.statusCode, 200);
     assert.deepEqual(JSON.parse(res.payload), { status: true });
 
-    assert.equal((await me(session.accesskey)).statusCode, 401, 'this session is revoked');
-    assert.equal((await me(second.accesskey)).statusCode, 401, 'so is the other device');
+    assert.equal((await me(second.accesskey)).statusCode, 401, 'this session is revoked');
+    assert.equal((await me(session.accesskey)).statusCode, 401, 'so is the phone it replaced');
     assert.deepEqual(app.revokes.slice(revokedBefore), [
       { user_id: session.user_id, reason: 'revoked' }
     ]);

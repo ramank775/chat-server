@@ -105,14 +105,21 @@ class SelfHostedOtpAuthProvider extends IAuthProvider {
         phone: session.phone
       };
     }
-    const sealed = Buffer.from(session.encryptedCode, 'base64');
-    const decipher = crypto.createDecipheriv('aes-256-gcm', this.#otpKey, sealed.subarray(0, 12), {
-      authTagLength: 16
-    });
-    decipher.setAAD(Buffer.from(sessionId));
-    decipher.setAuthTag(sealed.subarray(-16));
-    const code = Buffer.concat([decipher.update(sealed.subarray(12, -16)), decipher.final()])
-      .toString('utf8');
+    let code;
+    try {
+      const sealed = Buffer.from(session.encryptedCode, 'base64');
+      const decipher = crypto.createDecipheriv('aes-256-gcm', this.#otpKey, sealed.subarray(0, 12), {
+        authTagLength: 16
+      });
+      decipher.setAAD(Buffer.from(sessionId));
+      decipher.setAuthTag(sealed.subarray(-16));
+      code = Buffer.concat([decipher.update(sealed.subarray(12, -16)), decipher.final()])
+        .toString('utf8');
+    } catch {
+      // a changed OTP_ENCRYPTION_KEY (or a mock restart): 410 sends the app
+      // to /otp/send for a fresh code; the old one still verifies.
+      throw new AuthError(410, 'RESEND_UNAVAILABLE', 'Request a new code');
+    }
     await beforeSend(session.phone);
     await this.#sms.send({ phone: session.phone, code });
     await this.#db.updateOtpSession(sessionId, {
@@ -216,8 +223,8 @@ class SelfHostedOtpAuthProvider extends IAuthProvider {
     await this.#db.revokeSessionByAccesskey(accesskey);
   }
 
-  async revokeAll(userId) {
-    await this.#db.revokeAllSessions(userId);
+  async revokeAll(userId, exceptDeviceId) {
+    await this.#db.revokeAllSessions(userId, exceptDeviceId);
   }
 
   async #liveOtpSession(sessionId, now, deviceId) {

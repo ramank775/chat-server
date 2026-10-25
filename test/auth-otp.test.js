@@ -1,6 +1,7 @@
 const { test, before, after, describe } = require('node:test');
 const assert = require('node:assert/strict');
-const { startProfileMs, signup } = require('./helpers/profile-ms');
+const crypto = require('node:crypto');
+const { startProfileMs, signup, bearer } = require('./helpers/profile-ms');
 
 describe('auth/otp', () => {
   /** @type {Awaited<ReturnType<typeof startProfileMs>>} */
@@ -57,6 +58,40 @@ describe('auth/otp', () => {
     assert.equal(second.isNew, false);
     assert.equal(second.user_id, first.user_id);
     assert.notEqual(second.accesskey, first.accesskey);
+  });
+
+  test('a login on another phone signs the first one out and withdraws its keys (183)', async () => {
+    const phone = '+919000000012';
+    const first = await signup(app, { phone, deviceId: 'phone-1' });
+    await app.inject({
+      method: 'PATCH', url: '/users/me', headers: bearer(first.accesskey), payload: { username: 'one_phone' }
+    });
+    const key = () => Buffer.concat([Buffer.from([5]), crypto.randomBytes(32)]).toString('base64');
+    const keys = {
+      identityKey: key(), registrationId: 9,
+      signedPreKey: { id: 1, publicKey: key(), signature: crypto.randomBytes(64).toString('base64') },
+      preKeys: [{ id: 1, publicKey: key() }]
+    };
+    const put = (accesskey) => app.inject({ method: 'PUT', url: '/keys/me', headers: bearer(accesskey), payload: keys });
+    assert.equal((await put(first.accesskey)).statusCode, 200);
+    app.revokes.length = 0;
+    app.pushTopicDeletes.length = 0;
+
+    const second = await signup(app, { phone, deviceId: 'phone-2' });
+    assert.equal(second.user_id, first.user_id);
+    const me = (accesskey) => app.inject({ method: 'GET', url: '/users/me', headers: bearer(accesskey) });
+    assert.equal((await me(first.accesskey)).statusCode, 401, 'the old phone is signed out');
+    assert.equal((await me(second.accesskey)).statusCode, 200);
+    assert.deepEqual(app.revokes, [{ user_id: first.user_id, reason: 'revoked', deviceId: 'phone-1' }]);
+    assert.deepEqual(app.pushTopicDeletes, [{ user_id: first.user_id, deviceId: 'phone-1' }]);
+    assert.deepEqual(await app.server.context.authDB.listDeviceKeys(first.user_id), []);
+
+    assert.equal((await put(second.accesskey)).statusCode, 200);
+    const listed = await app.inject({ method: 'GET', url: `/keys/${first.user_id}`, headers: bearer(second.accesskey) });
+    assert.deepEqual(listed.json().devices.map((device) => device.deviceId), ['phone-2']);
+    // signing in again on the same phone retires nothing
+    await signup(app, { phone, deviceId: 'phone-2' });
+    assert.equal((await app.server.context.authDB.listDeviceKeys(first.user_id)).length, 1);
   });
 
   test('send is idempotent inside the resend window', async () => {

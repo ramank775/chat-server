@@ -96,7 +96,8 @@ test('a wrong encryption key cannot resend but does not break hash verification'
   session.resendAfter = new Date(0);
   context.options.otpEncryptionKey = crypto.randomBytes(32).toString('hex');
   const changedKey = new OtpProvider(context);
-  await assert.rejects(changedKey.resendOtp(sessionId));
+  // 410 is what sends the app back to /otp/send for a fresh code
+  await assert.rejects(changedKey.resendOtp(sessionId), { status: 410, code: 'RESEND_UNAVAILABLE' });
   assert.equal(sends.length, 1);
   await changedKey.verifyOtp({ sessionId, code: sends[0].code, deviceId: 'd1' });
 });

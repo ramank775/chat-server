@@ -222,7 +222,9 @@ paths:
         identity creates a new UUID generation. Same-identity retries preserve
         the generation and never restore consumed prekey ids. A registration id
         stays stable per identity; signed prekey ids cannot be overwritten or
-        rolled back. 60 publications per account per hour.
+        rolled back. 60 publications per account per hour. One active phone per
+        account (decision 183): a login on another phone deletes this device's
+        keys, and an upload racing that login is withdrawn with a 401.
       security:
         - bearerAuth: []
       requestBody:
