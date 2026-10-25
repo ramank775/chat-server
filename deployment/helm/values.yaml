@@ -125,9 +125,6 @@ groupMs:
   enabled: true
   dbType: mongo
 
-messageRouter:
-  enabled: true
-
 notificationMs:
   enabled: true
   dbType: mongo
