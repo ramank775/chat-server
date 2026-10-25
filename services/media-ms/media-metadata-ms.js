@@ -59,8 +59,8 @@ class MediaMetadataMS extends HttpServiceBase {
             ext: Joi.string().required(),
             category: Joi.string().required(),
             size: Joi.number().integer().min(1).max(this.options.maxUploadSize).required(),
-            // Decision 190: the hash of a convergently encrypted upload.
-            sha256: Joi.string().pattern(/^[0-9a-f]{64}$/)
+            // Decision 190: the MD5 (hex) of a convergently encrypted upload.
+            md5: Joi.string().pattern(/^[0-9a-f]{32}$/)
           })
         }
       }
@@ -108,13 +108,11 @@ class MediaMetadataMS extends HttpServiceBase {
     if (file.status === true) {
       return h.response(errorEnvelope('ALREADY_MARKED', 'file status is already set')).code(400);
     }
-    // Decision 190: a hash someone will reuse is only indexed once the
-    // stored bytes are checked, so a bad upload cannot claim a real file.
-    if (status && file.sha256) {
-      const stored = await this.storage.sha256({ fileId, category: file.category });
-      if (stored !== file.sha256) {
-        return h.response(errorEnvelope('HASH_MISMATCH', 'the stored bytes do not match the declared sha256')).code(409);
-      }
+    // Decision 190: the signed Content-MD5 made the store refuse any other
+    // bytes, so a file someone will reuse only needs to exist: marking it
+    // complete without uploading cannot claim a real file's hash.
+    if (status && file.md5 && !(await this.storage.exists({ fileId, category: file.category }))) {
+      return h.response(errorEnvelope('NOT_UPLOADED', 'nothing was stored for this file')).code(409);
     }
     await this.db.updateFileStatus(fileId, !!status);
     return h.response().code(200);
@@ -143,17 +141,17 @@ class MediaMetadataMS extends HttpServiceBase {
 
   async getUploadURL(req) {
     const owner = extractInfoFromRequest(req, 'x-user');
-    const { ext, category, size, sha256 } = req.query;
-    // Decision 190: the same encrypted file is stored once; the caller
-    // reuses it instead of uploading.
-    if (sha256) {
-      const existing = await this.db.findBySha256(sha256, category);
+    const { ext, category, size, md5 } = req.query;
+    // Decision 190: the same encrypted file is stored once. A copy already
+    // there gets no url and no record: the caller reuses it.
+    if (md5) {
+      const existing = await this.db.findByMd5(md5, category);
       if (existing) return { fileId: String(existing._id), existing: true };
     }
-    return await this.getUploadPreSignedUrl(ext, category, owner, size, sha256);
+    return await this.getUploadPreSignedUrl(ext, category, owner, size, md5);
   }
 
-  async getUploadPreSignedUrl(ext, category, owner, contentLength, sha256) {
+  async getUploadPreSignedUrl(ext, category, owner, contentLength, md5) {
     const contentType = getContentTypeByExt(ext);
     const payload = {
       contentType,
@@ -164,9 +162,10 @@ class MediaMetadataMS extends HttpServiceBase {
       category,
       owner,
       contentType,
-      ...(sha256 ? { sha256 } : {}),
+      ...(md5 ? { md5 } : {}),
     };
     payload.fileId = await this.db.createRecord(fileRecord);
+    if (md5) payload.contentMd5 = Buffer.from(md5, 'hex').toString('base64');
     const preSignedURL = await this.getSignedURL(payload, 'upload');
     // The PUT must carry exactly the content-type signed into the url;
     // say which, so clients don't need their own copy of this mapping.
@@ -184,6 +183,7 @@ class MediaMetadataMS extends HttpServiceBase {
       category: payload.category,
       contentType: payload.contentType,
       contentLength: payload.contentLength,
+      contentMd5: payload.contentMd5,
     })
     return preSignedURL;
   }

@@ -173,50 +173,52 @@ test('file status update stays scoped to the owner', async () => {
   assert.strictEqual(JSON.parse(res.payload).error.code, 'NOT_FOUND');
 });
 
-const HASH = 'ab'.repeat(32);
+const MD5 = 'ab'.repeat(16);
 
-test('a convergent upload reuses a verified copy instead of uploading again (190)', async () => {
+test('a convergent upload reuses a stored copy: no url, no record (190)', async () => {
   const db = stubDb(null);
-  db.findBySha256 = async (sha256, category) => (sha256 === HASH && category === 'message'
+  db.findByMd5 = async (md5, category) => (md5 === MD5 && category === 'message'
     ? { _id: 'aaaaaaaaaaaaaaaaaaaaaaaa', status: true } : null);
   const storage = stubStorage();
   const service = await buildService(db, storage);
-  const presign = (sha256) => service.server.inject({
+  const presign = (md5) => service.server.inject({
     method: 'GET',
-    url: `/upload/presigned_url?ext=bin&category=message&size=99&sha256=${sha256}`,
+    url: `/upload/presigned_url?ext=bin&category=message&size=99&md5=${md5}`,
     headers: authHeaders(OTHER)
   });
 
-  const hit = await presign(HASH);
+  const hit = await presign(MD5);
   assert.strictEqual(hit.statusCode, 200);
   assert.deepStrictEqual(JSON.parse(hit.payload), { fileId: 'aaaaaaaaaaaaaaaaaaaaaaaa', existing: true });
-  assert.deepStrictEqual(storage.signed, [], 'nothing to upload');
+  assert.deepStrictEqual([db.created, storage.signed], [[], []], 'nothing created or signed');
 
-  const miss = await presign('cd'.repeat(32));
+  const miss = await presign('cd'.repeat(16));
   assert.strictEqual(JSON.parse(miss.payload).fileId, FILE_ID);
-  assert.strictEqual(db.created[0].sha256, 'cd'.repeat(32), 'recorded for the check at completion');
+  assert.strictEqual(db.created[0].md5, 'cd'.repeat(16));
+  assert.strictEqual(storage.signed[0].contentMd5, Buffer.from('cd'.repeat(16), 'hex').toString('base64'),
+    'the store will check the bytes against it');
   assert.strictEqual((await presign('not-a-hash')).statusCode, 400);
 });
 
-test('completion checks the stored bytes against the declared hash (190)', async () => {
-  const record = { owner: OWNER, category: 'message', contentType: 'application/octet-stream', sha256: HASH };
+test('a file someone may reuse is only complete once it was stored (190)', async () => {
+  const record = { owner: OWNER, category: 'message', contentType: 'application/octet-stream', md5: MD5 };
   const db = stubDb(record);
   const marked = [];
   db.updateFileStatus = async (fileId, status) => { marked.push(status); };
   const storage = stubStorage();
-  let stored = 'ff'.repeat(32);
-  storage.sha256 = async () => stored;
+  let stored = false;
+  storage.exists = async () => stored;
   const service = await buildService(db, storage);
   const complete = () => service.server.inject({
     method: 'PUT', url: `/${FILE_ID}/status`, headers: authHeaders(OWNER), payload: { status: true }
   });
 
-  const bad = await complete();
-  assert.strictEqual(bad.statusCode, 409);
-  assert.strictEqual(JSON.parse(bad.payload).error.code, 'HASH_MISMATCH');
-  assert.deepStrictEqual(marked, [], 'junk is never indexed');
+  const early = await complete();
+  assert.strictEqual(early.statusCode, 409);
+  assert.strictEqual(JSON.parse(early.payload).error.code, 'NOT_UPLOADED');
+  assert.deepStrictEqual(marked, [], 'never indexed without the object');
 
-  stored = HASH;
+  stored = true;
   assert.strictEqual((await complete()).statusCode, 200);
   assert.deepStrictEqual(marked, [true]);
 });
@@ -270,4 +272,29 @@ test('s3 upload url is bucket scoped and signs content type and length', async (
   // A checksum signed before the bytes exist is the empty body's: S3 rejects the upload.
   const checksums = [...parsed.searchParams.keys()].filter((k) => /checksum/i.test(k));
   assert.deepStrictEqual(checksums, []);
+});
+
+test('s3 upload url signs a given Content-MD5 (190)', async () => {
+  const storage = new s3.Implementation({
+    options: {
+      baseUploadDir: 'uploads',
+      s3AccessKeyId: 'access_key',
+      s3SecretAccessKey: 'secret_access_key',
+      s3Region: 'us-east-1',
+      urlExpireTime: 600,
+      s3BucketName: 'vartalap',
+      s3Endpoint: 'http://localhost:9000',
+      s3ForcePathStyle: true
+    }
+  });
+  await storage.init();
+  const url = new URL(await storage.getSignedUrl({
+    operation: 'upload',
+    fileId: FILE_ID,
+    category: 'message',
+    contentType: 'application/octet-stream',
+    contentLength: 99,
+    contentMd5: Buffer.from(MD5, 'hex').toString('base64')
+  }));
+  assert.ok(url.searchParams.get('X-Amz-SignedHeaders').split(';').includes('content-md5'));
 });

@@ -20,7 +20,7 @@
   /**
    * @abstract
    * Create new File record
-   * @param {{category: string; owner: string; contentType: string; sha256?: string}} payload
+   * @param {{category: string; owner: string; contentType: string; md5?: string}} payload
    * @returns {Promise<string>}
    */
   // eslint-disable-next-line no-unused-vars
@@ -39,13 +39,13 @@
 
   /**
    * @abstract
-   * A completed file whose stored bytes were checked to hash to [sha256]
-   * (hex), in [category]: what a convergent upload can reuse. Null if none.
-   * @param {string} _sha256
+   * A completed file stored under a signed Content-MD5 of [md5] (hex), in
+   * [category]: what a convergent upload can reuse. Null if none.
+   * @param {string} _md5
    * @param {string} _category
    */
   // eslint-disable-next-line no-unused-vars
-  async findBySha256(_sha256, _category) {
+  async findByMd5(_md5, _category) {
     throw new Error('Method not implemented')
   }
 

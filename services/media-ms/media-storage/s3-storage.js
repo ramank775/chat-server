@@ -1,5 +1,6 @@
-const crypto = require('crypto');
-const { S3Client, PutObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3')
+const {
+  S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand
+} = require('@aws-sdk/client-s3')
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner')
 const { IMediaStorage } = require('./media-storage');
 
@@ -36,7 +37,7 @@ class S3Storage extends IMediaStorage {
 
   /**
    * Get Signed URL
-   * @param {{fileId: string; category: string; contentType: string; contentLength?: number; operation: 'upload'|'download'}} payload
+   * @param {{fileId: string; category: string; contentType: string; contentLength?: number; contentMd5?: string; operation: 'upload'|'download'}} payload
    * @returns {Promise<string>}
    */
   async getSignedUrl(payload) {
@@ -58,6 +59,12 @@ class S3Storage extends IMediaStorage {
         params.ContentLength = Number(payload.contentLength);
         signableHeaders.add('content-length');
       }
+      // Decision 190: the store itself rejects a body whose MD5 differs
+      // (S3, R2 and MinIO all check a signed Content-MD5 on PutObject).
+      if (payload.contentMd5) {
+        params.ContentMD5 = payload.contentMd5;
+        signableHeaders.add('content-md5');
+      }
       command = new PutObjectCommand(params);
     } else {
       command = new GetObjectCommand(params);
@@ -71,25 +78,21 @@ class S3Storage extends IMediaStorage {
   }
 
   /**
-   * SHA-256 (hex) of a stored object, streamed; null when there is none.
+   * Whether the object was stored: a HEAD, no body read.
    * @param {{fileId: string; category: string}} payload
-   * @returns {Promise<string|null>}
+   * @returns {Promise<boolean>}
    */
-  async sha256(payload) {
-    let response;
+  async exists(payload) {
     try {
-      response = await this.#reader.send(new GetObjectCommand({
+      await this.#reader.send(new HeadObjectCommand({
         Bucket: this.#options.bucketName,
         Key: `${this.#options.baseDir}/${payload.category}/${payload.fileId}`
       }));
+      return true;
     } catch (error) {
-      if (error.name === 'NoSuchKey' || error.$metadata?.httpStatusCode === 404) return null;
+      if (error.name === 'NotFound' || error.$metadata?.httpStatusCode === 404) return false;
       throw error;
     }
-    const hash = crypto.createHash('sha256');
-    // eslint-disable-next-line no-restricted-syntax
-    for await (const chunk of response.Body) hash.update(chunk);
-    return hash.digest('hex');
   }
 
   /**

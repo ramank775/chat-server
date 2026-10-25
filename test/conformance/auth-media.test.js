@@ -268,37 +268,43 @@ describe('conformance: sessions, push and media', { skip: BASE ? false : 'CONFOR
 
   // -- 12b. convergent uploads are stored once (decision 190) ---------------
 
-  it('stores the same encrypted file once, and only bytes that match their hash', async () => {
+  it('stores the same encrypted file once; the store refuses other bytes', async () => {
     const blob = crypto.randomBytes(512);
-    const sha256 = crypto.createHash('sha256').update(blob).digest('hex');
+    const md5 = crypto.createHash('md5').update(blob).digest();
     const presign = (who) => api(
       'GET',
-      `/v3.0/assets/upload/presigned_url?ext=bin&category=message&size=${blob.length}&sha256=${sha256}`,
+      `/v3.0/assets/upload/presigned_url?ext=bin&category=message&size=${blob.length}&md5=${md5.toString('hex')}`,
       { token: who.accesskey }
     );
-    const upload = async (url, bytes) => fetch(url, {
+    const upload = (url, bytes) => fetch(url, {
       method: 'PUT',
-      headers: { 'content-type': 'application/octet-stream', 'content-length': String(bytes.length) },
+      headers: {
+        'content-type': 'application/octet-stream',
+        'content-length': String(bytes.length),
+        'content-md5': md5.toString('base64')
+      },
       body: bytes
     });
     const complete = (id) => api('PUT', `/v3.0/assets/${id}/status`, {
       token: user.accesskey, body: { status: true }
     });
 
-    // Junk under the hash is never indexed.
     const first = await presign(user);
     assert.equal(first.status, 200);
-    assert.equal((await upload(first.body.url, crypto.randomBytes(512))).status, 200);
-    const junk = await complete(first.body.fileId);
-    assert.equal(junk.status, 409);
-    assert.equal(junk.body.error.code, 'HASH_MISMATCH');
+    // Other bytes under the signed MD5: the object store says no.
+    const junk = await upload(first.body.url, crypto.randomBytes(512));
+    assert.equal(junk.status, 400, await junk.text());
+    // And without an object the file cannot be marked complete.
+    const early = await complete(first.body.fileId);
+    assert.equal(early.status, 409);
+    assert.equal(early.body.error.code, 'NOT_UPLOADED');
     assert.ok((await presign(peer)).body.url, 'still nothing to reuse');
 
     const second = await presign(user);
     assert.equal((await upload(second.body.url, blob)).status, 200);
     assert.equal((await complete(second.body.fileId)).status, 200);
 
-    // Anyone uploading the same bytes now gets that copy, and no upload url.
+    // The same bytes again, by anyone: that copy, no url, nothing uploaded.
     const again = await presign(peer);
     assert.equal(again.status, 200);
     assert.deepEqual(again.body, { fileId: second.body.fileId, existing: true });
