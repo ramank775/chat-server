@@ -84,6 +84,32 @@ versionCodes, the number after `+` in the app's `pubspec.yaml` version
 The Update button opens Play for Play installs and the GitHub release
 otherwise. After editing `.env`, `docker compose -f docker-compose.prod.yml up -d`.
 
+## Deleting an account by email
+
+People who can't use the app ask at vartalap@one9x.org (decision 197). Do
+it within 30 days of the email:
+
+1. The email must give the @username and the phone number with its
+   country code.
+2. Text a 6-digit code (`shuf -i 100000-999999 -n 1`) to that number from
+   the sms-gate phone's messaging app.
+3. Go on only when the reply carries that code. Someone who no longer has
+   the number must get it back from their carrier first.
+4. Run this with the number and username from the email (`null`, unquoted,
+   for an account that never picked a username):
+
+```bash
+docker compose -f docker-compose.prod.yml exec app wget -qO- \
+  --header 'content-type: application/json' \
+  --post-data '{"phone":"+919876543210","username":"asha_k"}' \
+  http://127.0.0.1:8000/_internal/users/delete
+```
+
+`{"status":true,"user_id":"..."}` means it's done, exactly like the in-app
+delete. `server returned error: HTTP/1.1 404` means no account has that
+number and username: check both against the email. Then reply that it's
+done. The `/_internal` routes answer only inside the container.
+
 ## Backups
 
 Media is in R2: the server deletes a message file 30 days after it was

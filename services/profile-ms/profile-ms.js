@@ -352,6 +352,17 @@ class ProfileMs extends HttpServiceBase {
       validate: { payload: Joi.object({ confirmation: Joi.string().required() }).required() }
     });
 
+    // runbook "Deleting an account by email": the operator, after the SMS check.
+    // The username must match too, so a typo in the phone deletes nobody.
+    this.addInternalRoute('/users/delete', 'POST', this.guard(this.deleteByPhone), {
+      validate: {
+        payload: Joi.object({
+          phone: Joi.string().pattern(E164).required(),
+          username: Joi.string().allow(null).required()
+        }).required()
+      }
+    });
+
     this.addRoute('/users/by-username/{username}', 'GET', this.guard(this.getUserByUsername), {
       pre: [this.authPre()],
       validate: {
@@ -939,12 +950,6 @@ class ProfileMs extends HttpServiceBase {
     };
   }
 
-  /**
-   * AUTH_CONTRACT 8.2 — tombstone the account. The row keeps `user_id` and
-   * `usernameLower` (both stay reserved by their unique indexes) and leaves
-   * the partial phone index, which is what releases the number for a fresh
-   * signup.
-   */
   async deleteMe(req, res) {
     const { user } = req.pre.auth;
     if (req.payload.confirmation !== `DELETE ${user.username}`) {
@@ -952,6 +957,30 @@ class ProfileMs extends HttpServiceBase {
         .response(errorEnvelope('INVALID_CONFIRMATION', 'confirmation must be "DELETE <username>"'))
         .code(400);
     }
+    await this.eraseAccount(user);
+    return { status: true };
+  }
+
+  /** The in-app delete, run by the operator for an email request (decision 197). */
+  async deleteByPhone(req, res) {
+    const { phone, username } = req.payload;
+    const user = await this.profileDB.getByPhone(phone);
+    if (!user || (user.username || '').toLowerCase() !== (username || '').toLowerCase()) {
+      return res
+        .response(errorEnvelope('USER_NOT_FOUND', 'no account with that phone and username'))
+        .code(404);
+    }
+    await this.eraseAccount(user);
+    return { status: true, user_id: user.user_id };
+  }
+
+  /**
+   * AUTH_CONTRACT 8.2 — tombstone the account. The row keeps `user_id` and
+   * `usernameLower` (both stay reserved by their unique indexes) and leaves
+   * the partial phone index, which is what releases the number for a fresh
+   * signup.
+   */
+  async eraseAccount(user) {
     // 8.2 steps 1-2: the row stays as the tombstone, only user_id and username
     await this.profileDB.updateUser(user.user_id, { ...ERASED, deletedAt: new Date() });
     await this.authProvider.revokeAll(user.user_id);
@@ -961,7 +990,6 @@ class ProfileMs extends HttpServiceBase {
     await this.revokePushTopics(user.user_id);
     await this.leaveAllGroups(user.user_id);
     await this.deleteProfilePhoto(user.user_id, user.avatarUrl);
-    return { status: true };
   }
 
   /** AUTH_CONTRACT 8.2 step 5 — channel-ms owns membership. Best effort, like the two above. */

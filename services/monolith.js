@@ -34,6 +34,9 @@ const asMain = require.main === module;
 /** The `/v3.0` prefix nginx strips, kept here because there is no nginx. */
 const API = '/v3.0';
 
+/** Where the in-process internal calls come from (`selfUrl` is loopback). */
+const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+
 /**
  * deployment/config/nginx/nginx.docker.conf `location ~* ^/auth/`: the only
  * prefix below `/v3.0` nginx proxies without the `/auth` subrequest. Everything
@@ -65,7 +68,7 @@ function parseOptions(argv) {
     .option('--cache-type <cache-type>', 'Type of cache service (local, redis)', 'local')
     .option(
       '--self-url <self-url>',
-      'Base url the services use to reach each other over http (decision 71)'
+      'Base url the services use to reach each other over http (decision 71); must be loopback'
     );
   const options = parsers.reduce(
     (merged, parse) => Object.assign(merged, parse(argv)),
@@ -219,6 +222,13 @@ class Monolith extends HttpServiceBase {
     // registered last, so every service has contributed its internal routes by
     // the time this plugin boots: they stay at the root, off the api prefix
     this.server.register(async (app) => {
+      // the proxy forwards every path, so a caller from outside the container
+      // must find nothing here. The socket, not req.ip, which trusts X-Forwarded-For.
+      app.addHook('onRequest', async (req, reply) => {
+        if (LOOPBACK.has(req.socket.remoteAddress)) return undefined;
+        reply.callNotFound();
+        return reply;
+      });
       this.internalRoutes.forEach((route) => app.route(route));
     });
 

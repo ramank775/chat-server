@@ -127,6 +127,10 @@ describe('monolith mounting', () => {
     assert.equal(internal.statusCode, 200);
     // no auth hook ran, so the caller's own x-user survives
     assert.equal(internal.json().user, 'f00ba4321');
+
+    // what the proxy forwards from the internet finds nothing
+    const outside = await inject({ method: 'GET', url: '/_internal/echo', remoteAddress: '172.18.0.5' });
+    assert.equal(outside.statusCode, 404);
   });
 
   it('answers /alive and gives each service its own 404 envelope', async () => {

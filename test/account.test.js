@@ -133,6 +133,31 @@ describe('account delete and phone rebind (AUTH_CONTRACT 8 and 9)', () => {
     assert.deepEqual(app.fileDeletes.at(-1), { fileId: second, owner: session.user_id });
   });
 
+  test('the operator deletes by phone, only when the username matches too', async () => {
+    const session = await signupWithUsername(app, {
+      phone: '+919400000020',
+      username: 'by_email'
+    });
+    const unnamed = await signup(app, { phone: '+919400000021' });
+    const operator = (payload) =>
+      app.inject({ method: 'POST', url: '/_internal/users/delete', payload });
+
+    const typo = await operator({ phone: '+919400000020', username: 'by_emial' });
+    assert.equal(typo.statusCode, 404);
+    assert.equal((await me(session.accesskey)).statusCode, 200, 'a mismatch deletes nothing');
+
+    const res = await operator({ phone: '+919400000020', username: 'By_Email' });
+    assert.deepEqual(JSON.parse(res.payload), { status: true, user_id: session.user_id });
+    assert.equal((await me(session.accesskey)).statusCode, 401);
+    const row = await app.db.collection('users').findOne({ user_id: session.user_id });
+    assert.equal(row.phone ?? null, null, 'erased like the in-app delete');
+    assert.deepEqual(app.groupRemovals.at(-1), { user_id: session.user_id });
+
+    // an account that never picked a username is named by null
+    assert.equal((await operator({ phone: '+919400000021', username: null })).statusCode, 200);
+    assert.equal((await me(unnamed.accesskey)).statusCode, 401);
+  });
+
   test('the phone comes back, the user_id and username do not', async () => {
     const gone = await signupWithUsername(app, {
       phone: '+919400000005',
