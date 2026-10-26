@@ -87,6 +87,10 @@ describe('account delete and phone rebind (AUTH_CONTRACT 8 and 9)', () => {
     const row = await app.db.collection('users').findOne({ user_id: session.user_id });
     assert.ok(row.deletedAt instanceof Date, 'the row is tombstoned, not removed');
     assert.equal(row.usernameLower, 'gone_soon', 'the handle stays reserved');
+    // 8.2: the tombstone is user_id and username, nothing personal
+    ['phone', 'phoneHash', 'displayName', 'avatarUrl', 'statusText', 'createdAt'].forEach((field) =>
+      assert.equal(row[field] ?? null, null, `${field} is erased`));
+    assert.deepEqual(app.groupRemovals.at(-1), { user_id: session.user_id }, 'it leaves every group');
 
     const fetched = await app.inject({
       method: 'GET',
@@ -102,6 +106,31 @@ describe('account delete and phone rebind (AUTH_CONTRACT 8 and 9)', () => {
       headers: bearer(reader.accesskey)
     });
     assert.equal(handle.statusCode, 404, 'a tombstoned handle resolves to nobody');
+  });
+
+  test('a replaced profile photo is deleted, and so is the last one with the account', async () => {
+    const session = await signupWithUsername(app, {
+      phone: '+919400000019',
+      username: 'photo_owner'
+    });
+    const setPhoto = (avatarUrl) =>
+      app.inject({
+        method: 'PATCH',
+        url: '/users/me',
+        headers: bearer(session.accesskey),
+        payload: { avatarUrl }
+      });
+    const first = '6acd11791e6a9406d1798701';
+    const second = '6acd11791e6a9406d1798702';
+    const start = app.fileDeletes.length;
+
+    await setPhoto(first);
+    assert.equal(app.fileDeletes.length, start, 'nothing to replace yet');
+    await setPhoto(second);
+    assert.deepEqual(app.fileDeletes.slice(start), [{ fileId: first, owner: session.user_id }]);
+
+    await deleteMe(session.accesskey, 'DELETE photo_owner');
+    assert.deepEqual(app.fileDeletes.at(-1), { fileId: second, owner: session.user_id });
   });
 
   test('the phone comes back, the user_id and username do not', async () => {

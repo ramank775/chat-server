@@ -12,6 +12,10 @@ const { getContentTypeByExt } = require('../../libs/content-type-utils');
 
 const asMain = require.main === module;
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+const SWEEP_EVERY_MS = 60 * 60 * 1000;
+const SWEEP_BATCH = 100;
+
 function parseOptions(argv) {
   let cmd = initDefaultOptions();
   cmd = addHttpOptions(cmd);
@@ -22,6 +26,12 @@ function parseOptions(argv) {
     'Maximum size in bytes of a single upload (default 25MB)',
     (c) => Number(c),
     25 * 1024 * 1024
+  );
+  cmd.option(
+    '--media-ttl-days <days>',
+    'Delete a message file this many days after it was last sent (0 = keep forever)',
+    (c) => Number(c),
+    30
   );
   return cmd.parse(argv).opts();
 }
@@ -95,6 +105,46 @@ class MediaMetadataMS extends HttpServiceBase {
         }
       }
     );
+
+    // profile-ms, on a new profile photo or a deleted account: the old photo goes
+    this.addInternalRoute('/files/delete', 'POST', this.deleteOwnFile.bind(this), {
+      validate: {
+        payload: Joi.object({ fileId: Joi.string().required(), owner: Joi.string().required() })
+      }
+    });
+
+    if (this.options.mediaTtlDays > 0) {
+      this.sweepTimer = setInterval(() => {
+        this.sweepExpired().catch((error) => this.log.error(`Media sweep failed: ${error.message}`));
+      }, SWEEP_EVERY_MS).unref();
+    }
+  }
+
+  /** Only [owner]'s own file: a profile can name any fileId. */
+  async deleteOwnFile(req) {
+    const { fileId, owner } = req.payload;
+    const file = await this.db.getRecord(fileId);
+    if (!file || file.owner !== owner) return { deleted: false };
+    await this.deleteFile(fileId, file.category);
+    return { deleted: true };
+  }
+
+  /** Object first: a record without its object would be reused as if it were there. */
+  async deleteFile(fileId, category) {
+    await this.storage.delete({ fileId, category });
+    await this.db.removeRecord(fileId);
+  }
+
+  /**
+   * A message file is deleted --media-ttl-days after anyone last sent it
+   * (reuse restarts the clock). Profile and group photos never expire. A
+   * failed delete stays marked and is retried by the next sweep.
+   */
+  async sweepExpired(now = Date.now()) {
+    const cutoff = new Date(now - this.options.mediaTtlDays * DAY_MS);
+    const batch = await this.db.markExpired('message', cutoff, SWEEP_BATCH);
+    await Promise.all(batch.map((file) => this.deleteFile(String(file._id), file.category)));
+    if (batch.length === SWEEP_BATCH) await this.sweepExpired(now);
   }
 
   async updateFileUploadStatus(req, h) {
@@ -145,7 +195,7 @@ class MediaMetadataMS extends HttpServiceBase {
     // Decision 190: the same encrypted file is stored once. A copy already
     // there gets no url and no record: the caller reuses it.
     if (md5) {
-      const existing = await this.db.findByMd5(md5, category);
+      const existing = await this.db.reuseByMd5(md5, category);
       if (existing) return { fileId: String(existing._id), existing: true };
     }
     return await this.getUploadPreSignedUrl(ext, category, owner, size, md5);
@@ -189,6 +239,7 @@ class MediaMetadataMS extends HttpServiceBase {
   }
 
   async shutdown() {
+    clearInterval(this.sweepTimer);
     await super.shutdown();
     await this.db.dispose();
   }

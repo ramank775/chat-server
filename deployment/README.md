@@ -86,17 +86,22 @@ otherwise. After editing `.env`, `docker compose -f docker-compose.prod.yml up -
 
 ## Backups
 
-Media is in R2. Everything else (accounts, groups, the 30-day message
-timeline) is in Mongo. Dump it daily, e.g. from cron in this directory:
+Media is in R2: the server deletes a message file 30 days after it was
+last sent; profile and group photos stay until replaced or the account is
+deleted. Everything else (accounts, groups, the 30-day message timeline) is
+in Mongo. Dump it daily, e.g. from cron in this directory, and keep 7 days:
 
 ```bash
 docker compose -f docker-compose.prod.yml exec -T mongo sh -c \
   'mongodump -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --db chat --archive --gzip' \
   > backups/chat-$(date +%F).archive.gz
+find backups -name 'chat-*.archive.gz' -mtime +7 -delete
 ```
 
-Keep copies off the server too (e.g. `rclone copy backups r2:vartalap-backups`, a
-second bucket). Restore into a running stack with:
+Keep copies off the server too, with `sync` so old dumps go there as well
+(e.g. `rclone sync backups r2:vartalap-backups`, a second bucket). The
+privacy policy promises 7 days: deleted accounts live on in a dump until it
+ages out. Restore into a running stack with:
 
 ```bash
 docker compose -f docker-compose.prod.yml exec -T mongo sh -c \

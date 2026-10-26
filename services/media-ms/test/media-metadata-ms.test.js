@@ -177,7 +177,7 @@ const MD5 = 'ab'.repeat(16);
 
 test('a convergent upload reuses a stored copy: no url, no record (190)', async () => {
   const db = stubDb(null);
-  db.findByMd5 = async (md5, category) => (md5 === MD5 && category === 'message'
+  db.reuseByMd5 = async (md5, category) => (md5 === MD5 && category === 'message'
     ? { _id: 'aaaaaaaaaaaaaaaaaaaaaaaa', status: true } : null);
   const storage = stubStorage();
   const service = await buildService(db, storage);

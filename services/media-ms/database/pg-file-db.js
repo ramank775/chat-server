@@ -14,7 +14,13 @@ const SCHEMA = `
   );
   ALTER TABLE file_store ADD COLUMN IF NOT EXISTS md5 text;
   CREATE INDEX IF NOT EXISTS file_store_md5 ON file_store (md5) WHERE md5 IS NOT NULL;
+  ALTER TABLE file_store ADD COLUMN IF NOT EXISTS last_shared_at timestamptz;
+  ALTER TABLE file_store ADD COLUMN IF NOT EXISTS expiring boolean;
+  CREATE INDEX IF NOT EXISTS file_store_last_shared ON file_store (category, last_shared_at);
 `;
+
+const RECORD = `id AS "_id", category, owner, content_type AS "contentType",
+  created_at AS "createdAt", status, md5, last_shared_at AS "lastSharedAt"`;
 
 class PgFileStore extends IMediaMetadataDB {
   /** @type {import('pg').Pool} */
@@ -28,8 +34,8 @@ class PgFileStore extends IMediaMetadataDB {
   async createRecord(payload) {
     const fileId = crypto.randomBytes(12).toString('hex');
     await this.#pool.query(
-      `INSERT INTO file_store (id, category, owner, content_type, created_at, md5)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
+      `INSERT INTO file_store (id, category, owner, content_type, created_at, md5, last_shared_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $5)`,
       [fileId, payload.category, payload.owner, payload.contentType, new Date(),
         payload.md5 || null]
     );
@@ -37,23 +43,37 @@ class PgFileStore extends IMediaMetadataDB {
   }
 
   async getRecord(fileId) {
+    const { rows } = await this.#pool.query(`SELECT ${RECORD} FROM file_store WHERE id = $1`, [fileId]);
+    return rows[0] || null;
+  }
+
+  async reuseByMd5(md5, category) {
     const { rows } = await this.#pool.query(
-      `SELECT id AS "_id", category, owner, content_type AS "contentType",
-         created_at AS "createdAt", status, md5
-       FROM file_store WHERE id = $1`,
-      [fileId]
+      `UPDATE file_store SET last_shared_at = $3
+       WHERE id = (SELECT id FROM file_store
+         WHERE md5 = $1 AND category = $2 AND status AND expiring IS NOT TRUE LIMIT 1)
+       RETURNING ${RECORD}`,
+      [md5, category, new Date()]
     );
     return rows[0] || null;
   }
 
-  async findByMd5(md5, category) {
+  async markExpired(category, cutoff, limit) {
+    // the outer condition is re-checked on a row a reuse just updated, so a
+    // file shared since the inner select is left alone
+    const due = '(last_shared_at < $2 OR expiring)';
     const { rows } = await this.#pool.query(
-      `SELECT id AS "_id", category, owner, content_type AS "contentType",
-         created_at AS "createdAt", status, md5
-       FROM file_store WHERE md5 = $1 AND category = $2 AND status LIMIT 1`,
-      [md5, category]
+      `UPDATE file_store SET expiring = true
+       WHERE id IN (SELECT id FROM file_store WHERE category = $1 AND ${due} LIMIT $3)
+         AND ${due}
+       RETURNING id AS "_id", category`,
+      [category, cutoff, limit]
     );
-    return rows[0] || null;
+    return rows;
+  }
+
+  async removeRecord(fileId) {
+    await this.#pool.query('DELETE FROM file_store WHERE id = $1', [fileId]);
   }
 
   async updateFileStatus(fileId, status) {

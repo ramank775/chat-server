@@ -41,6 +41,16 @@
 
   /**
    * @abstract
+   * Delete the object; a missing one is not an error.
+   * @param {{fileId: string; category: string}} _payload
+   */
+  // eslint-disable-next-line no-unused-vars
+  async delete(_payload) {
+    throw new Error('Method not implemented')
+  }
+
+  /**
+   * @abstract
    * Initialize the database instance
    */
   async init() {

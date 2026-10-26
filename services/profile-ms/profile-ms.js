@@ -19,6 +19,21 @@ const { validateUsername } = require('./username');
 const { bundleSchema, publicBundle, publishKeys, claimKeys } = require('./device-keys');
 const { uuidv4, hashSecret, verifySecret, sha256, errorEnvelope } = require('../../helper');
 
+/**
+ * AUTH_CONTRACT 8.2 — every field a deleted account loses. The tombstone
+ * keeps user_id and username, both reserved forever (8.3).
+ */
+const ERASED = {
+  phone: null,
+  phoneHash: null,
+  usernameKeyHash: null,
+  usernameChangedAt: null,
+  displayName: null,
+  avatarUrl: null,
+  statusText: null,
+  createdAt: null
+};
+
 const asMain = require.main === module;
 
 const E164 = /^\+\d{8,15}$/;
@@ -70,6 +85,7 @@ function parseOptions(argv) {
   cmd.option('--channel-ms-endpoint <channel-ms-endpoint>', 'Base url for channel service');
   cmd.option('--gateway-endpoint <gateway-endpoint>', 'Base url for connection gateway');
   cmd.option('--notification-ms-endpoint <notification-ms-endpoint>', 'Base url for notification service');
+  cmd.option('--media-ms-endpoint <media-ms-endpoint>', 'Base url for media service');
   cmd.option('--otp-rate-phone-hour <count>', 'OTP sends per phone per hour', (c) => Number(c), 5);
   cmd.option('--otp-rate-phone-day <count>', 'OTP sends per phone per day', (c) => Number(c), 15);
   cmd.option('--otp-rate-ip-hour <count>', 'OTP sends per ip per hour', (c) => Number(c), 20);
@@ -210,6 +226,7 @@ class ProfileMs extends HttpServiceBase {
     this.channelClient = new HttpClient(this.options.channelMsEndpoint);
     this.gatewayClient = new HttpClient(this.options.gatewayEndpoint);
     this.notificationClient = new HttpClient(this.options.notificationMsEndpoint);
+    this.mediaClient = new HttpClient(this.options.mediaMsEndpoint);
   }
 
   async init() {
@@ -699,6 +716,9 @@ class ProfileMs extends HttpServiceBase {
       }
       throw error;
     }
+    if (has('avatarUrl') && user.avatarUrl !== updated.avatarUrl) {
+      await this.deleteProfilePhoto(user.user_id, user.avatarUrl);
+    }
     await this.fanoutProfileChange(updated, updates, now);
     return selfProfile(updated);
   }
@@ -932,13 +952,38 @@ class ProfileMs extends HttpServiceBase {
         .response(errorEnvelope('INVALID_CONFIRMATION', 'confirmation must be "DELETE <username>"'))
         .code(400);
     }
-    await this.profileDB.updateUser(user.user_id, { deletedAt: new Date() });
+    // 8.2 steps 1-2: the row stays as the tombstone, only user_id and username
+    await this.profileDB.updateUser(user.user_id, { ...ERASED, deletedAt: new Date() });
     await this.authProvider.revokeAll(user.user_id);
     await this.context.authDB.deleteDeviceKeys(user.user_id);
     await this.revokeGatewaySessions(user.user_id, 'revoked');
     // 8.2 step 4: every device's push endpoint goes with the account
     await this.revokePushTopics(user.user_id);
+    await this.leaveAllGroups(user.user_id);
+    await this.deleteProfilePhoto(user.user_id, user.avatarUrl);
     return { status: true };
+  }
+
+  /** AUTH_CONTRACT 8.2 step 5 — channel-ms owns membership. Best effort, like the two above. */
+  async leaveAllGroups(userId) {
+    try {
+      await this.channelClient.post('/_internal/members/remove', { user_id: userId });
+    } catch (error) {
+      this.log.error(`Group removal failed for ${userId}: ${error.message}`);
+    }
+  }
+
+  /** media-ms deletes the photo only if [userId] uploaded it. Best effort. */
+  async deleteProfilePhoto(userId, avatarUrl) {
+    if (!avatarUrl) return;
+    try {
+      await this.mediaClient.post('/_internal/files/delete', {
+        fileId: avatarUrl.split('#')[0],
+        owner: userId
+      });
+    } catch (error) {
+      this.log.error(`Profile photo delete failed for ${userId}: ${error.message}`);
+    }
   }
 
   /**

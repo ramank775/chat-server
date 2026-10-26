@@ -78,6 +78,7 @@ function parseOptions(argv) {
   options.channelMsEndpoint = options.selfUrl;
   options.gatewayEndpoint = options.selfUrl;
   options.notificationMsEndpoint = options.selfUrl;
+  options.mediaMsEndpoint = options.selfUrl;
   options.gatewayName = options.gatewayName || 'monolith-gateway';
   // one process, one gateway: no cross-gateway pubsub to run
   options.singleGateway = true;

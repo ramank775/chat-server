@@ -40,12 +40,38 @@
   /**
    * @abstract
    * A completed file stored under a signed Content-MD5 of [md5] (hex), in
-   * [category]: what a convergent upload can reuse. Null if none.
+   * [category]: what a convergent upload can reuse. Null if none. Reuse is
+   * a share, so it restarts the file's expiry clock (`lastSharedAt`).
    * @param {string} _md5
    * @param {string} _category
    */
   // eslint-disable-next-line no-unused-vars
-  async findByMd5(_md5, _category) {
+  async reuseByMd5(_md5, _category) {
+    throw new Error('Method not implemented')
+  }
+
+  /**
+   * @abstract
+   * Mark up to [limit] files in [category] last shared before [cutoff] as
+   * expiring, so nothing reuses them, and return them with any marked
+   * earlier whose deletion did not finish.
+   * @param {string} _category
+   * @param {Date} _cutoff
+   * @param {number} _limit
+   * @returns {Promise<{_id: string; category: string}[]>}
+   */
+  // eslint-disable-next-line no-unused-vars
+  async markExpired(_category, _cutoff, _limit) {
+    throw new Error('Method not implemented')
+  }
+
+  /**
+   * @abstract
+   * Remove the record of a file whose object is gone.
+   * @param {string} _fileId
+   */
+  // eslint-disable-next-line no-unused-vars
+  async removeRecord(_fileId) {
     throw new Error('Method not implemented')
   }
 

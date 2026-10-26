@@ -210,6 +210,21 @@ class ChannelMs extends HttpServiceBase {
     this.addInternalRoute('/', 'GET', this.getChannels.bind(this), {
       validate: { headers: schemas.authHeaders }
     });
+
+    this.addInternalRoute('/members/remove', 'POST', this.removeEverywhere.bind(this), {
+      validate: { payload: Joi.object({ user_id: USER_ID.required() }) }
+    });
+  }
+
+  /**
+   * AUTH_CONTRACT 8.2 step 5 — profile-ms, on a deleted account: it leaves
+   * every group as if it had left itself, so members rotate the group key.
+   */
+  async removeEverywhere(req) {
+    const { user_id: userId } = req.payload;
+    const channels = await this.db.getMemberChannels(userId);
+    await Promise.all(channels.map((channel) => this.leave(channel, userId, userId)));
+    return { removed: channels.length };
   }
 
   // ---- §11.2 preamble ---------------------------------------------------

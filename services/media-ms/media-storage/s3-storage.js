@@ -1,5 +1,5 @@
 const {
-  S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand
+  S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand, DeleteObjectCommand
 } = require('@aws-sdk/client-s3')
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner')
 const { IMediaStorage } = require('./media-storage');
@@ -93,6 +93,17 @@ class S3Storage extends IMediaStorage {
       if (error.name === 'NotFound' || error.$metadata?.httpStatusCode === 404) return false;
       throw error;
     }
+  }
+
+  /**
+   * Delete the object. S3 answers a missing key with success too.
+   * @param {{fileId: string; category: string}} payload
+   */
+  async delete(payload) {
+    await this.#reader.send(new DeleteObjectCommand({
+      Bucket: this.#options.bucketName,
+      Key: `${this.#options.baseDir}/${payload.category}/${payload.fileId}`
+    }));
   }
 
   /**

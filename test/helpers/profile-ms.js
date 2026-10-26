@@ -71,6 +71,7 @@ async function startProfileMs(dbName) {
     '--channel-ms-endpoint=http://channel-ms.invalid',
     '--gateway-endpoint=http://gateway.invalid',
     '--notification-ms-endpoint=http://notification-ms.invalid',
+    '--media-ms-endpoint=http://media-ms.invalid',
     // every injected request shares one remote address, so the per IP OTP budget
     // would be a cross test file limit. Per phone budgets stay at their defaults.
     '--otp-rate-ip-hour=100000'
@@ -113,6 +114,17 @@ async function startProfileMs(dbName) {
     pushTopicDeletes.push(payload);
     return { status: true };
   };
+  // channel-ms's remove-everywhere and media-ms's file delete (AUTH_CONTRACT 8.2)
+  const groupRemovals = [];
+  const fileDeletes = [];
+  service.channelClient.post = async (_path, payload) => {
+    groupRemovals.push(payload);
+    return { removed: 0 };
+  };
+  service.mediaClient.post = async (_path, payload) => {
+    fileDeletes.push(payload);
+    return { deleted: true };
+  };
 
   return {
     server: service,
@@ -122,6 +134,8 @@ async function startProfileMs(dbName) {
     eventStore: context.eventStore,
     revokes,
     pushTopicDeletes,
+    groupRemovals,
+    fileDeletes,
     /**
      * Stand in for channel-ms's channel list.
      * @param {{channel_id: string, members: string[]}[]} rows channel-ms's view of each

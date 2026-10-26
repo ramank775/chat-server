@@ -29,12 +29,14 @@ class MongoFileStore extends IMediaMetadataDB {
    * @returns {Promise<string>}
    */
   async createRecord(payload) {
+    const now = new Date();
     const fileRecord = {
       category: payload.category,
       owner: payload.owner,
       contentType: payload.contentType,
       ...(payload.md5 ? { md5: payload.md5 } : {}),
-      createdAt: new Date()
+      createdAt: now,
+      lastSharedAt: now
     }
     const record = await this.#collection.insertOne(fileRecord);
     return record.insertedId.toHexString()
@@ -52,8 +54,28 @@ class MongoFileStore extends IMediaMetadataDB {
     return file
   }
 
-  async findByMd5(md5, category) {
-    return this.#collection.findOne({ md5, category, status: true });
+  async reuseByMd5(md5, category) {
+    return this.#collection.findOneAndUpdate(
+      { md5, category, status: true, expiring: { $ne: true } },
+      { $set: { lastSharedAt: new Date() } }
+    );
+  }
+
+  async markExpired(category, cutoff, limit) {
+    const due = { category, $or: [{ lastSharedAt: { $lt: cutoff } }, { expiring: true }] };
+    const found = await this.#collection.find(due, { projection: { _id: 1 } }).limit(limit).toArray();
+    // per record and conditional: a reuse since the find restarted its clock
+    const marked = await Promise.all(found.map(({ _id }) => this.#collection.findOneAndUpdate(
+      { _id, ...due },
+      { $set: { expiring: true } },
+      { projection: { _id: 1, category: 1 } }
+    )));
+    return marked.filter(Boolean).map((r) => ({ _id: r._id.toHexString(), category: r.category }));
+  }
+
+  async removeRecord(fileId) {
+    if (!FILE_ID.test(fileId)) return;
+    await this.#collection.deleteOne({ _id: ObjectId.createFromHexString(fileId) });
   }
 
   /**
@@ -76,6 +98,7 @@ class MongoFileStore extends IMediaMetadataDB {
     const db = this.#client.db();
     this.#collection = db.collection('file_store');
     await this.#collection.createIndex({ md5: 1 }, { sparse: true });
+    await this.#collection.createIndex({ category: 1, lastSharedAt: 1 });
   }
 
   /**
