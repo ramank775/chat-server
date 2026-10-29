@@ -67,6 +67,9 @@ class NotificationMS extends HttpServiceBase {
    */
   #lastWakeAt = new Map();
 
+  /** A wake the window held back, one per subject, sent when it ends. */
+  #trailing = new Map();
+
   constructor(context) {
     super(context);
 
@@ -193,6 +196,19 @@ class NotificationMS extends HttpServiceBase {
     const now = Date.now();
     const lastWakeAt = this.#lastWakeAt.get(subject);
     if (lastWakeAt && now - lastWakeAt < WAKE_DEBOUNCE_MS) {
+      // The phone may have pulled before this frame was queued (a read
+      // receipt wakes it, the reply lands a second later), so the wake is
+      // held to the end of the window, not dropped: one for all of them.
+      if (!this.#trailing.has(subject)) {
+        const timer = setTimeout(() => {
+          this.#trailing.delete(subject);
+          this.pushNotification(null, subject).catch((err) => {
+            this.log.error(`Error while sending push notification ${err}`, err);
+          });
+        }, lastWakeAt + WAKE_DEBOUNCE_MS - now);
+        timer.unref();
+        this.#trailing.set(subject, timer);
+      }
       this.statsClient.increment({
         stat: 'notificaton.delivery.debounced_count',
         tags: { user }
@@ -237,6 +253,7 @@ class NotificationMS extends HttpServiceBase {
   }
 
   async shutdown() {
+    this.#trailing.forEach((timer) => clearTimeout(timer));
     await super.shutdown();
     await this.eventStore.dispose();
     await this.notifDB.dispose();

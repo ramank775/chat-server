@@ -99,7 +99,8 @@ test('wake goes to the registered endpoint and never carries message content', a
   assert.deepStrictEqual(db.calls, []);
 });
 
-test('wake is debounced per (user_id, device_id)', async () => {
+test('wake is debounced per (user_id, device_id), held back not dropped', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000_000 });
   const db = stubDb();
   db.topics = [REGISTRATION];
   const pns = stubPns();
@@ -107,10 +108,15 @@ test('wake is debounced per (user_id, device_id)', async () => {
 
   await service.pushNotification({ type: 'text' }, SUBJECT);
   await service.pushNotification({ type: 'text' }, SUBJECT);
-  assert.strictEqual(pns.pushes.length, 1, 'second wake within 5s is dropped');
+  await service.pushNotification({ type: 'text' }, SUBJECT);
+  assert.strictEqual(pns.pushes.length, 1, 'wakes within 5s wait');
 
   await service.pushNotification({ type: 'text' }, 'f00ba4321:device-1');
   assert.strictEqual(pns.pushes.length, 2, 'another recipient is not debounced');
+
+  t.mock.timers.tick(5000);
+  await new Promise(setImmediate);
+  assert.strictEqual(pns.pushes.length, 3, 'one wake when the window ends, for both held back');
 });
 
 test('a pre Web Push topicUrl row is never woken', async () => {
