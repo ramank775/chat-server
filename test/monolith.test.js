@@ -57,6 +57,11 @@ async function startMonolith(extraOptions = {}) {
     '/channels/echo',
     'not_found'
   );
+  const gatewayLike = new ToyService(
+    { ...base, ...mount('/wss') },
+    [['/ops', 'POST']],
+    '/wss/echo'
+  );
 
   const monolith = new Monolith({
     ...base,
@@ -64,7 +69,8 @@ async function startMonolith(extraOptions = {}) {
     workers: [],
     mounts: [
       { service: profileLike, prefix: '/v3.0' },
-      { service: channelLike, prefix: '/v3.0/channels' }
+      { service: channelLike, prefix: '/v3.0/channels' },
+      { service: gatewayLike, prefix: '/wss' }
     ],
     profileService: {
       async resolveSession(req, gated) {
@@ -223,6 +229,20 @@ describe('the in-process auth hook', () => {
     });
     assert.equal(gated.statusCode, 403);
     assert.equal(gated.json().error.code, 'USERNAME_REQUIRED');
+  });
+
+  it('covers /wss/ops, the socket\'s frames over https, never username gated', async () => {
+    const missing = await inject({ method: 'POST', url: '/wss/ops', headers: { 'x-user': 'deadbeef1' } });
+    assert.equal(missing.statusCode, 401);
+
+    // like the socket handshake (AUTH_CONTRACT 13.3)
+    const ops = await inject({
+      method: 'POST',
+      url: '/wss/ops',
+      headers: { authorization: 'Bearer nousername' }
+    });
+    assert.equal(ops.statusCode, 200);
+    assert.equal(ops.json().user, SESSION.user_id);
   });
 
   it('never runs on the internal routes or on /alive', async () => {

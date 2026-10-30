@@ -11,6 +11,7 @@ const {
   initHttpResource,
   HttpServiceBase
 } = require('../../libs/http-service-base');
+const { extractInfoFromRequest, schemas, errorEnvelope } = require('../../helper');
 const EventStore = require('../../libs/event-store');
 const MemCache = require('../../libs/cache');
 const ChannelServiceClient = require('../../libs/channel-service-client');
@@ -164,6 +165,14 @@ class Gateway extends HttpServiceBase {
           deviceId: Joi.string().optional(),
           reason: Joi.string().valid(...Object.keys(REVOKE_REASON)).required()
         })
+      }
+    });
+    // SYNC_PROTOCOL §5.11 — the socket's frames over https, for a phone
+    // with no socket: a push wake, a send after the app was closed.
+    this.addRoute('/ops', 'POST', this.postOps.bind(this), {
+      validate: {
+        headers: schemas.authHeaders,
+        payload: Joi.object({ frame: Joi.string().base64().required() })
       }
     });
 
@@ -355,42 +364,80 @@ class Gateway extends HttpServiceBase {
 
     const envelopes = (frame.ops && frame.ops.envelopes) || [];
     if (!envelopes.length) return;
+    const acks = await this.processOps(ws, envelopes);
+    // §5.4 — acks for one incoming frame ride back in one WS_ACK.
+    if (acks.length) this.sendAcks(ws, acks);
+  }
 
+  /**
+   * `POST /wss/ops` (§5.11) — one WS_OP frame, base64 in `frame`, from the
+   * session nginx authenticated; the WS_ACK the socket would have sent comes
+   * back the same way. The server owns an op once that ack is out, as on the
+   * socket, and the dedup window is shared, so a frame sent both ways lands once.
+   */
+  async postOps(req, res) {
+    const session = {
+      userId: extractInfoFromRequest(req, 'x-user'),
+      deviceId: extractInfoFromRequest(req, 'x-device', 'default'),
+      remoteIp: (req.headers['x-forwarded-for'] || '').split(',')[0].trim()
+        || req.socket.remoteAddress
+    };
+    this.statsClient.increment({
+      stat: 'message.received.count',
+      tags: { channel: 'https', gateway: this.options.gatewayName, user: session.userId }
+    });
+    let frame;
+    try {
+      frame = decodeWsEnvelope(Buffer.from(req.payload.frame, 'base64'));
+    } catch (e) {
+      return res.response(errorEnvelope('MALFORMED_FRAME', 'WsEnvelope could not be decoded'))
+        .code(400);
+    }
+    if (frame.type !== WS_TYPE.WS_OP) {
+      return res.response(errorEnvelope('VALIDATION_FAILED', `unexpected WsType ${frame.type}`))
+        .code(400);
+    }
+    const acks = await this.processOps(session, (frame.ops && frame.ops.envelopes) || []);
+    return res.response({ frame: ackFrame(acks).toString('base64') }).code(200);
+  }
+
+  /**
+   * One frame's envelopes, socket or https: the acks to send back, in order.
+   * @param {{userId: string, deviceId: string, remoteIp: string}} session
+   */
+  async processOps(session, envelopes) {
     // §5.4 — over the batch cap the whole frame is rejected, one permanent
     // ack per envelope.
     if (envelopes.length > MAX_BATCH) {
-      this.sendAcks(ws, envelopes.map((envelope) => ({
+      return envelopes.map((envelope) => ({
         opId: envelope.opId,
         outcome: ACK_OUTCOME.PERMANENT,
         reason: REASON.VALIDATION_FAILED
-      })));
-      return;
+      }));
     }
-
     const acks = [];
     for (let i = 0; i < envelopes.length; i += 1) {
       // Serial on purpose: acks and fanout keep the frame's envelope order.
       // eslint-disable-next-line no-await-in-loop
-      const ack = await this.processEnvelope(ws, envelopes[i]);
+      const ack = await this.processEnvelope(session, envelopes[i]);
       if (ack) acks.push(ack);
     }
-    // §5.4 — acks for one incoming frame ride back in one WS_ACK.
-    if (acks.length) this.sendAcks(ws, acks);
+    return acks;
   }
 
   /**
    * SYNC_PROTOCOL.md §6a.3. Returns the Ack to send back, or null for an
    * ephemeral envelope (which is never acked).
    */
-  async processEnvelope(ws, envelope) {
-    const { userId } = ws;
+  async processEnvelope(session, envelope) {
+    const { userId } = session;
     const { opId } = envelope;
     const dedupKey = `dedup:${userId}`;
 
     // §14 rate limits. Checked first so a flood cannot burn downstream calls,
     // and never recorded in the dedup window — a transient outcome has to
     // stay retryable.
-    const retryAfterMs = await this.checkRate(ws);
+    const retryAfterMs = await this.checkRate(session);
     if (retryAfterMs) {
       return { opId, outcome: ACK_OUTCOME.TRANSIENT, reason: REASON.RATE_LIMITED, retryAfterMs };
     }
@@ -453,9 +500,9 @@ class Gateway extends HttpServiceBase {
       await this.publishEnvelope({
         ...envelope,
         senderUserId: userId,
-        senderDeviceId: ws.deviceId,
+        senderDeviceId: session.deviceId,
         serverTimestampMs: serverNow()
-      }, recipients, ws.deviceId);
+      }, recipients, session.deviceId);
       return null;
     }
 
@@ -467,9 +514,9 @@ class Gateway extends HttpServiceBase {
       await this.publishEnvelope({
         ...envelope,
         senderUserId: userId,
-        senderDeviceId: ws.deviceId,
+        senderDeviceId: session.deviceId,
         serverTimestampMs
-      }, recipients, ws.deviceId);
+      }, recipients, session.deviceId);
     } catch (e) {
       this.log.error('Failed to publish envelope', { err: e, user: userId, opId });
       return {
@@ -512,13 +559,13 @@ class Gateway extends HttpServiceBase {
   }
 
   /** §14.1 — per-user then per-IP. Returns 0 when the envelope may proceed. */
-  async checkRate(ws) {
+  async checkRate(session) {
     const userWait = await this.memCache.takeToken(
-      `rate:user:${ws.userId}`, RATE_LIMIT.user.capacity, RATE_LIMIT.user.refillPerSec
+      `rate:user:${session.userId}`, RATE_LIMIT.user.capacity, RATE_LIMIT.user.refillPerSec
     );
     if (userWait) return userWait;
     return this.memCache.takeToken(
-      `rate:ip:${ws.remoteIp}`, RATE_LIMIT.ip.capacity, RATE_LIMIT.ip.refillPerSec
+      `rate:ip:${session.remoteIp}`, RATE_LIMIT.ip.capacity, RATE_LIMIT.ip.refillPerSec
     );
   }
 

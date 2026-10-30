@@ -135,8 +135,9 @@ async function serviceContext(shared, steps, eventStoreOptions) {
 function authHook(profile) {
   return async (req, reply) => {
     const path = req.url.split('?')[0];
-    // `/alive`, `/_internal/...` and `/wss` were never behind the subrequest
-    if (!path.startsWith(`${API}/`)) return undefined;
+    // `/alive`, `/_internal/...` and the `/wss` upgrade (`wsVerify`) skip it;
+    // `/wss/ops`, the socket's frames over https, is behind it (nginx `^/wss`)
+    if (!path.startsWith(`${API}/`) && !path.startsWith('/wss/')) return undefined;
     // nginx: `proxy_set_header x-user ""` — a client never supplies its identity
     delete req.headers['x-user'];
     delete req.headers['x-device'];

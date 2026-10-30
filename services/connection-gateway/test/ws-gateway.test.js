@@ -6,6 +6,7 @@ const {
   WS_TYPE,
   EnvelopeEvent,
   encodeWsEnvelope,
+  decodeWsEnvelope,
   opIdUserBits,
   dmChannelId
 } = require('../../../libs/v3-envelope');
@@ -539,6 +540,41 @@ test('an ephemeral envelope is fanned out without an ack', async () => {
     assert.strictEqual(envelopes.length, 2);
     assert.strictEqual(envelopes[0].args.envelope.ephemeral, true);
     client.close();
+  });
+});
+
+test('POST /ops takes a WS_OP frame over https and answers with its WS_ACK', async () => {
+  await withGateway(async ({ uri, publishedEnvelopes }) => {
+    const post = (frame) => fetch(`${uri}/ops`, {
+      method: 'POST',
+      // what nginx sets after the `/auth` subrequest
+      headers: { 'content-type': 'application/json', 'x-user': ALICE, 'x-device': 'device-2' },
+      body: JSON.stringify({ frame: frame.toString('base64') })
+    });
+    const env = envelope(ALICE, 1, { channelId: DM, peer: BOB });
+
+    const response = await post(opFrame([env]));
+    assert.strictEqual(response.status, 200);
+    const reply = decodeWsEnvelope(Buffer.from((await response.json()).frame, 'base64'));
+    assert.strictEqual(reply.type, WS_TYPE.WS_ACK);
+    const [ack] = reply.acks.acks;
+    assert.strictEqual(ack.opId, env.opId);
+    assert.strictEqual(ack.outcome, ACK_OUTCOME.SUCCESS);
+    const [published] = publishedEnvelopes();
+    assert.strictEqual(published.args.envelope.senderUserId, ALICE);
+    assert.strictEqual(published.args.senderDevice, 'device-2');
+
+    // one dedup window with the socket: the same op there is the stored ack
+    const client = connect(uri, ALICE);
+    await client.opened;
+    client.send(opFrame([env]));
+    assert.deepStrictEqual((await client.next()).acks.acks[0], ack);
+    assert.strictEqual(publishedEnvelopes().length, 1);
+    client.close();
+
+    // a frame that is not a WS_OP is refused whole
+    assert.strictEqual((await post(Buffer.from('not a frame'))).status, 400);
+    assert.strictEqual((await post(encodeWsEnvelope({ type: WS_TYPE.WS_ACK }))).status, 400);
   });
 });
 
