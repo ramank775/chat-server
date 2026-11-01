@@ -1,11 +1,11 @@
 # Chat server deployment
 
 **Production (3.0) is `docker-compose.prod.yml`**: the monolith (every service in
-one process) and MongoDB, behind a TLS proxy: the host's own nginx
+one process) and Postgres, behind a TLS proxy: the host's own nginx
 (`config/nginx/vartalap-host.conf`), or the bundled Caddy on a server where
 nothing else owns ports 80 and 443. Photos, voice notes and files
 live in a Cloudflare R2 bucket: the server only signs upload and download links,
-and phones talk to R2 directly. Mongo is the only state on the server.
+and phones talk to R2 directly. Postgres is the only state on the server.
 
 `docker-compose.monolith.yml` (with `.env.tmpl`) is the local development stack. The
 microservice layout (`docker-compose.infra.yml` plus `docker-compose.yml`, and
@@ -43,8 +43,8 @@ not render. Deploy 3.0 as the monolith.
    - No CORS rule is needed: the phones are not browsers.
 3. **Settings.** `cp .env.prod.tmpl .env` and fill in every value. Compose
    refuses to start while a required one is empty.
-   - `MONGO_PASSWORD`: `openssl rand -hex 24`.
-   - `OTP_ENCRYPTION_KEY`: `openssl rand -hex 32`. Keep this outside Mongo,
+   - `PG_PASSWORD`: `openssl rand -hex 24`.
+   - `OTP_ENCRYPTION_KEY`: `openssl rand -hex 32`. Keep this outside the database,
      stable across restarts and shared by profile-service instances. It encrypts
      the OTP copy used by Resend; verification still checks the hash. Changing
      it prevents resending pending codes for up to 10 minutes; their original
@@ -101,7 +101,7 @@ docker compose -f docker-compose.prod.yml up -d
 ```
 
 Phones reconnect by themselves. Nothing is lost while the server is down: senders keep messages
-queued, and what the server already acknowledged is in Mongo.
+queued, and what the server already acknowledged is in Postgres.
 
 ## Forcing an app update
 
@@ -149,13 +149,13 @@ done. The `/_internal` routes answer only inside the container.
 Media is in R2: the server deletes a message file 30 days after it was
 last sent; profile and group photos stay until replaced or the account is
 deleted. Everything else (accounts, groups, the 30-day message timeline) is
-in Mongo. Dump it daily, e.g. from cron in this directory, and keep 7 days:
+in Postgres. Dump it daily, e.g. from cron in this directory, and keep 7 days:
 
 ```bash
-docker compose -f docker-compose.prod.yml exec -T mongo sh -c \
-  'mongodump -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --db chat --archive --gzip' \
-  > backups/chat-$(date +%F).archive.gz
-find backups -name 'chat-*.archive.gz' -mtime +7 -delete
+docker compose -f docker-compose.prod.yml exec -T postgres sh -c \
+  'pg_dump -U "$POSTGRES_USER" -d chat -Fc' \
+  > backups/chat-$(date +%F).dump
+find backups -name 'chat-*.dump' -mtime +7 -delete
 ```
 
 Keep copies off the server too, with `sync` so old dumps go there as well
@@ -164,14 +164,14 @@ privacy policy promises 7 days: deleted accounts live on in a dump until it
 ages out. Restore into a running stack with:
 
 ```bash
-docker compose -f docker-compose.prod.yml exec -T mongo sh -c \
-  'mongorestore -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --archive --gzip --drop' \
-  < backups/chat-<date>.archive.gz
+docker compose -f docker-compose.prod.yml exec -T postgres sh -c \
+  'pg_restore -U "$POSTGRES_USER" -d chat --clean --if-exists' \
+  < backups/chat-<date>.dump
 ```
 
 ## Logs
 
-`docker compose -f docker-compose.prod.yml logs -f app` (or `caddy`, `mongo`).
+`docker compose -f docker-compose.prod.yml logs -f app` (or `caddy`, `postgres`).
 Each container keeps at most 5 × 50 MB.
 
 ## Never in production
