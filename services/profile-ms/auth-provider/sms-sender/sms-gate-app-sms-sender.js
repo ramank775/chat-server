@@ -19,6 +19,9 @@ class SmsGateAppSender extends ISmsSender {
   constructor(context) {
     super();
     const { smsGateUrl, smsGateUser, smsGatePassword } = context.options;
+    if (!smsGateUser || !smsGatePassword) {
+      throw new Error('sms-gate-app needs --sms-gate-user and --sms-gate-password (SMS_GATE_USER, SMS_GATE_PASSWORD)');
+    }
     this.#log = context.log;
     this.#client = axios.create({
       baseURL: smsGateUrl,

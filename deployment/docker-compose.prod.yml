@@ -50,9 +50,9 @@ services:
       --mongo-url=mongodb://mongo:27017/chat?authSource=admin --mongo-auth
       --mongo-user=${MONGO_USER:?set MONGO_USER in .env}
       --mongo-password=${MONGO_PASSWORD:?set MONGO_PASSWORD in .env}
-      --sms-sender=sms-gate-app --sms-gate-url=${SMS_GATE_URL:-https://api.sms-gate.app}
-      --sms-gate-user=${SMS_GATE_USER:?set SMS_GATE_USER in .env}
-      --sms-gate-password=${SMS_GATE_PASSWORD:?set SMS_GATE_PASSWORD in .env}
+      --sms-sender=${SMS_SENDER:-sms-gate-app} --sms-gate-url=${SMS_GATE_URL:-https://api.sms-gate.app}
+      --sms-gate-user=${SMS_GATE_USER:-} --sms-gate-password=${SMS_GATE_PASSWORD:-}
+      --telegram-bot-token=${TELEGRAM_BOT_TOKEN:-} --telegram-chat-id=${TELEGRAM_CHAT_ID:-}
       --pn-service=webpush
       --vapid-public-key=${VAPID_PUBLIC_KEY:?set VAPID_PUBLIC_KEY in .env}
       --vapid-private-key=${VAPID_PRIVATE_KEY:?set VAPID_PRIVATE_KEY in .env}

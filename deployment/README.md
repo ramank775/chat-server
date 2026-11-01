@@ -21,7 +21,8 @@ not render. Deploy 3.0 as the monolith.
   socket). Caddy gets and renews the certificate once DNS resolves.
 - A Cloudflare R2 bucket and an API token for it.
 - An [sms-gate.app](https://sms-gate.app) account: an Android phone with a SIM
-  running the SMS Gateway app in cloud mode. It sends the OTP texts.
+  running the SMS Gateway app in cloud mode. It sends the OTP texts. For
+  testing without a SIM, see "Testing without a SIM".
 - The release image on Docker Hub (see Releasing).
 
 ## First deploy
@@ -56,6 +57,25 @@ not render. Deploy 3.0 as the monolith.
      - sign up with a real number (the OTP SMS arrives);
      - send a photo to a second phone and see it arrive (R2 upload and download);
      - kill the app on the second phone and message it again (push wake).
+
+## Testing without a SIM
+
+`SMS_SENDER=telegram` sends every OTP code to your own Telegram chat
+instead of an SMS (decision 203). You pass it on to the tester. Nothing is
+texted, and the server never logs codes.
+
+1. In Telegram, message @BotFather, send `/newbot`, and keep the token it
+   gives you.
+2. Send any message to your new bot, then open
+   `https://api.telegram.org/bot<token>/getUpdates` and note
+   `"chat":{"id":…}`.
+3. In `.env`: `SMS_SENDER=telegram`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`.
+   The `SMS_GATE_*` values can stay empty.
+4. `docker compose -f docker-compose.prod.yml up -d`. Each sign-in now posts
+   `+91…: 123456` to that chat.
+
+Before launch set `SMS_SENDER=sms-gate-app` with the `SMS_GATE_*` values
+and run `up -d` again.
 
 ## Upgrading
 
@@ -145,6 +165,8 @@ Each container keeps at most 5 × 50 MB.
 - The dev flags `--expose-dev-otp`, `PROFILE_DEV_FLAGS` and
   `--push-allow-private-endpoints`. The production compose file has none of
   them; don't add them.
+- `SMS_SENDER=telegram` once real users sign up: their codes would go to
+  your chat instead of their phones.
 - A published app port. The per-IP OTP limits trust the last
   `X-Forwarded-For` hop, which only Caddy may set.
 - `-dev` image tags.
