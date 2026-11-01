@@ -1,7 +1,9 @@
 # Chat server deployment
 
 **Production (3.0) is `docker-compose.prod.yml`**: the monolith (every service in
-one process), MongoDB, and Caddy in front for TLS. Photos, voice notes and files
+one process) and MongoDB, behind a TLS proxy: the host's own nginx
+(`config/nginx/vartalap-host.conf`), or the bundled Caddy on a server where
+nothing else owns ports 80 and 443. Photos, voice notes and files
 live in a Cloudflare R2 bucket: the server only signs upload and download links,
 and phones talk to R2 directly. Mongo is the only state on the server.
 
@@ -18,7 +20,8 @@ not render. Deploy 3.0 as the monolith.
 - A DNS record (A, and AAAA if the server has IPv6) for the API hostname
   pointing at the server. Release builds of the app use
   `vartalapapp.one9x.org` (`https://` for the API, `wss://…/wss` for the
-  socket). Caddy gets and renews the certificate once DNS resolves.
+  socket). On Cloudflare DNS, set it to "DNS only": proxied, every user
+  arrives from Cloudflare's addresses and shares one per-IP OTP limit.
 - A Cloudflare R2 bucket and an API token for it.
 - An [sms-gate.app](https://sms-gate.app) account: an Android phone with a SIM
   running the SMS Gateway app in cloud mode. It sends the OTP texts. For
@@ -50,7 +53,17 @@ not render. Deploy 3.0 as the monolith.
      docker run --rm --entrypoint npx ramank775/chatserver:<tag> web-push generate-vapid-keys
      ```
    - `VAPID_SUBJECT`: `mailto:` plus an address push services can reach you at.
-4. **Start.** `docker compose -f docker-compose.prod.yml up -d`
+4. **Start.** `docker compose -f docker-compose.prod.yml up -d`. The app
+   listens on `127.0.0.1:8000` only (`APP_PORT`).
+   - **Host nginx** (certbot for TLS):
+     ```bash
+     sudo cp config/nginx/vartalap-host.conf /etc/nginx/sites-available/vartalap
+     sudo ln -s /etc/nginx/sites-available/vartalap /etc/nginx/sites-enabled/
+     sudo nginx -t && sudo systemctl reload nginx
+     sudo certbot --nginx -d vartalapapp.one9x.org
+     ```
+   - **Or Caddy**, when nothing else owns 80/443: `COMPOSE_PROFILES=caddy`
+     in `.env` before `up -d`. It gets and renews the certificate itself.
 5. **Check.**
    - `curl -s -o /dev/null -w '%{http_code}\n' https://<domain>/v3.0/users/me` prints `401`: TLS works and the app answers.
    - Then, on a release build:
@@ -167,8 +180,9 @@ Each container keeps at most 5 × 50 MB.
   them; don't add them.
 - `SMS_SENDER=telegram` once real users sign up: their codes would go to
   your chat instead of their phones.
-- A published app port. The per-IP OTP limits trust the last
-  `X-Forwarded-For` hop, which only Caddy may set.
+- The app port published beyond `127.0.0.1`, or a proxy that passes the
+  client's own `X-Forwarded-For` through. The per-IP OTP limits trust the
+  last hop, which only nginx (`$remote_addr`) or Caddy may set.
 - `-dev` image tags.
 
 ## Releasing

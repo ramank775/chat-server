@@ -1,5 +1,6 @@
-# Production: the monolith (decision 170) behind Caddy, which gets and renews
-# the TLS certificate and is the only thing on the internet. Media lives in a
+# Production: the monolith (decision 170) behind the host's nginx, or behind
+# Caddy (COMPOSE_PROFILES=caddy), which gets and renews the TLS certificate.
+# Either way the proxy is the only thing on the internet. Media lives in a
 # Cloudflare R2 bucket: the server only signs upload/download urls, phones
 # talk to R2 directly. Mongo holds everything else, the timeline included.
 # Settings come from `.env` (copy .env.prod.tmpl); see README.md.
@@ -16,7 +17,10 @@ volumes:
   caddy-config:
 
 services:
+  # Only with COMPOSE_PROFILES=caddy: on a server where nothing else owns
+  # 80/443. Behind the host's own nginx, leave it off (config/nginx/vartalap-host.conf).
   caddy:
+    profiles: ["caddy"]
     image: caddy:2
     restart: unless-stopped
     ports:
@@ -33,9 +37,11 @@ services:
       - app
     logging: *logging
 
-  # No published port: the per-IP OTP limits trust the last X-Forwarded-For
-  # hop, which only Caddy may write.
+  # Published on the host's loopback only, for its nginx: the per-IP OTP
+  # limits trust the last X-Forwarded-For hop, which only the proxy may write.
   app:
+    ports:
+      - "127.0.0.1:${APP_PORT:-8000}:8000"
     environment:
       OTP_ENCRYPTION_KEY: ${OTP_ENCRYPTION_KEY:?set OTP_ENCRYPTION_KEY in .env}
     image: ramank775/chatserver:${CHAT_SERVER_TAG:?set CHAT_SERVER_TAG in .env}
