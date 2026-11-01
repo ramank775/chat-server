@@ -188,12 +188,11 @@ Each container keeps at most 5 × 50 MB.
 
 ## Releasing
 
-There is no image-publishing CI yet. From a clean checkout of the release
-commit:
+Push a `v*` tag and CI publishes `ramank775/chatserver:<tag>` to Docker Hub
+(amd64 and arm64) once lint and tests pass:
 
 ```bash
-docker build -t ramank775/chatserver:v3.0.0 .
-docker push ramank775/chatserver:v3.0.0
+git tag v3.0.0 && git push origin v3.0.0
 ```
 
 ## Local development
