@@ -37,7 +37,7 @@ not render. Deploy 3.0 as the monolith.
    cd chat-server && git sparse-checkout set deployment && cd deployment
    ```
 2. **R2.**
-   - In the Cloudflare dashboard, R2 › Create bucket (e.g. `vartalap-media`). Leave public access off.
+   - In the Cloudflare dashboard, R2 › Create bucket (e.g. `vartalap`). Leave public access off.
    - R2 › Manage API tokens › Create: permission "Object Read & Write", scoped to that bucket. Note the access key id and secret.
    - The endpoint is `https://<account-id>.r2.cloudflarestorage.com` (account id on the R2 overview page).
    - No CORS rule is needed: the phones are not browsers.
