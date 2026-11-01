@@ -19,9 +19,10 @@ not render. Deploy 3.0 as the monolith.
   2 vCPU and 4 GB RAM is plenty to start.
 - A DNS record (A, and AAAA if the server has IPv6) for the API hostname
   pointing at the server. Release builds of the app use
-  `vartalapapp.one9x.org` (`https://` for the API, `wss://…/wss` for the
-  socket). On Cloudflare DNS, set it to "DNS only": proxied, every user
-  arrives from Cloudflare's addresses and shares one per-IP OTP limit.
+  `vartalapapp.one9x.com` (`https://` for the API, `wss://…/wss` for the
+  socket), proxied by Cloudflare (orange cloud) with the Cloudflare origin
+  certificate on the server. The nginx site file takes the client's
+  address from `CF-Connecting-IP`, for the per-IP OTP limits.
 - A Cloudflare R2 bucket and an API token for it.
 - An [sms-gate.app](https://sms-gate.app) account: an Android phone with a SIM
   running the SMS Gateway app in cloud mode. It sends the OTP texts. For
@@ -55,12 +56,12 @@ not render. Deploy 3.0 as the monolith.
    - `VAPID_SUBJECT`: `mailto:` plus an address push services can reach you at.
 4. **Start.** `docker compose -f docker-compose.prod.yml up -d`. The app
    listens on `127.0.0.1:8000` only (`APP_PORT`).
-   - **Host nginx** (certbot for TLS):
+   - **Host nginx** (the certificate at `/etc/nginx/cert/one9x.crt`): first
+     remove any other site with the same `server_name`, then
      ```bash
      sudo cp config/nginx/vartalap-host.conf /etc/nginx/sites-available/vartalap
      sudo ln -s /etc/nginx/sites-available/vartalap /etc/nginx/sites-enabled/
      sudo nginx -t && sudo systemctl reload nginx
-     sudo certbot --nginx -d vartalapapp.one9x.org
      ```
    - **Or Caddy**, when nothing else owns 80/443: `COMPOSE_PROFILES=caddy`
      in `.env` before `up -d`. It gets and renews the certificate itself.
