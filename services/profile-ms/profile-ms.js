@@ -39,7 +39,9 @@ const asMain = require.main === module;
 const E164 = /^\+\d{8,15}$/;
 const USERNAME_CHANGE_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
 const USER_ID_MAX_RETRY = 10;
-const CONTACT_LOOKUP_MAX = 100;
+// decision 208: no daily budget; the app looks up only numbers it doesn't
+// know, each at most once per cooling period
+const CONTACT_LOOKUP_MAX = 5000;
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 /** proto/v3-server-event-payload.proto `ServerEventType` */
 const SERVER_EVENT_TYPE = { PROFILE_EDITED: 6, USERNAME_CHANGED: 7 };
@@ -94,13 +96,6 @@ function parseOptions(argv) {
     'Profile field updates per user per hour',
     (c) => Number(c),
     50
-  );
-  cmd.option('--contact-lookup-day <count>', 'Phone hashes per user per day', (c) => Number(c), 500);
-  cmd.option(
-    '--contact-lookup-ip-day <count>',
-    'Phone hashes per ip per day',
-    (c) => Number(c),
-    5000
   );
   cmd.option(
     '--username-lookup-min <count>',
@@ -922,21 +917,6 @@ class ProfileMs extends HttpServiceBase {
         .response(errorEnvelope('BATCH_TOO_LARGE', `At most ${CONTACT_LOOKUP_MAX} hashes per request`))
         .code(400);
     }
-    // 7.4 budgets are counted in hashes, not requests
-    await this.rateLimit(
-      `lookup:rate:user:${user.user_id}:d`,
-      this.options.contactLookupDay,
-      86400,
-      'user',
-      phoneHashes.length
-    );
-    await this.rateLimit(
-      `lookup:rate:ip:${clientIp(req)}:d`,
-      this.options.contactLookupIpDay,
-      86400,
-      'ip',
-      phoneHashes.length
-    );
     const matches = await this.profileDB.getByPhoneHashes([...new Set(phoneHashes)]);
     return {
       matches: matches
@@ -1149,13 +1129,8 @@ class ProfileMs extends HttpServiceBase {
    * @param {string} scope
    * @param {number} units how much of the budget this request spends
    */
-  async rateLimit(key, limit, windowSec, scope, units = 1) {
-    // ponytail: the cache counts by one, so a 100 hash lookup is 100 (pipelined)
-    // incrs. One INCRBY on libs/cache would do it, when that file is free to touch.
-    const counts = await Promise.all(
-      Array.from({ length: units }, () => this.memCache.incr(key, windowSec))
-    );
-    const count = Math.max(...counts);
+  async rateLimit(key, limit, windowSec, scope) {
+    const count = await this.memCache.incr(key, windowSec);
     if (count > limit) {
       const code = key.startsWith('otp:') ? 'OTP_RATE_LIMITED' : 'RATE_LIMITED';
       throw new AuthError(429, code, 'Too many requests. Try again later.', {

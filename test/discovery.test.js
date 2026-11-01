@@ -158,12 +158,12 @@ describe('contact discovery (AUTH_CONTRACT 7)', () => {
     assert.equal(matches.some((match) => match.phone !== undefined), false);
   });
 
-  test('more than 100 hashes is BATCH_TOO_LARGE, a malformed one is a schema error', async () => {
+  test('more than 5,000 hashes is BATCH_TOO_LARGE, a malformed one is a schema error', async () => {
     const reader = await signupWithUsername(app, {
       phone: '+919300000012',
       username: 'reader_seven'
     });
-    const hashes = Array.from({ length: 101 }, (_, i) => sha256(`+9199000000${i}`));
+    const hashes = Array.from({ length: 5001 }, (_, i) => sha256(`+919900${i}`));
     const tooMany = await lookup(reader.accesskey, hashes);
     assert.equal(tooMany.statusCode, 400);
     assert.equal(JSON.parse(tooMany.payload).error.code, 'BATCH_TOO_LARGE');
@@ -176,21 +176,16 @@ describe('contact discovery (AUTH_CONTRACT 7)', () => {
     assert.equal(empty.statusCode, 400);
   });
 
-  test('the daily contact budget is spent in hashes, not requests', async () => {
+  test('5,000 hashes a request, with no daily budget (decision 208)', async () => {
     const reader = await signupWithUsername(app, {
       phone: '+919300000013',
       username: 'reader_eight'
     });
-    const batch = Array.from({ length: 100 }, (_, i) => sha256(`+9198000000${i}`));
-    for (let i = 0; i < 5; i += 1) {
+    const batch = Array.from({ length: 5000 }, (_, i) => sha256(`+919800${i}`));
+    for (let i = 0; i < 3; i += 1) {
       // eslint-disable-next-line no-await-in-loop
       const res = await lookup(reader.accesskey, batch);
-      assert.equal(res.statusCode, 200, `batch ${i} is within the 500/day budget`);
+      assert.equal(res.statusCode, 200, `lookup ${i}`);
     }
-    const limited = await lookup(reader.accesskey, batch);
-    assert.equal(limited.statusCode, 429);
-    const { error } = JSON.parse(limited.payload);
-    assert.equal(error.code, 'RATE_LIMITED');
-    assert.equal(error.scope, 'user');
   });
 });
