@@ -8,7 +8,7 @@ const { HttpServiceBase, addHttpOptions, initHttpResource } = require('../../lib
 const eventStore = require('../../libs/event-store');
 const { addDatabaseOptions, initializeDatabase } = require('./database');
 const { addPNSOptions, initializePNS } = require('./pns');
-const { isAcceptableEndpoint, isValidPushKeys } = require('./pns/webpush-pn-service');
+const { FCM_PREFIX, isAcceptableEndpoint, isValidPushKeys } = require('./pns/webpush-pn-service');
 const { EnvelopeEvent } = require('../../libs/v3-envelope');
 const { extractInfoFromRequest, schemas, errorEnvelope } = require('../../helper');
 
@@ -120,11 +120,13 @@ class NotificationMS extends HttpServiceBase {
         validate: {
           headers: schemas.authHeaders,
           payload: Joi.object({
-            endpoint: Joi.string().allow(null, '').required(),
+            endpoint: Joi.string().allow(null, ''),
             // shape checked in the handler: a bad key is INVALID_PUSH_KEYS
             p256dh: Joi.any(),
-            auth: Joi.any()
-          })
+            auth: Joi.any(),
+            // decision 209: a Play build's Firebase registration token
+            fcmToken: Joi.string().pattern(/^[A-Za-z0-9_:-]{32,4096}$/)
+          }).xor('endpoint', 'fcmToken')
         }
       }
     );
@@ -163,7 +165,13 @@ class NotificationMS extends HttpServiceBase {
     if (!userId) {
       return h.response(errorEnvelope('UNAUTHORIZED', 'x-user header is required')).code(401);
     }
-    const { endpoint, p256dh, auth } = req.payload;
+    const { endpoint, p256dh, auth, fcmToken } = req.payload;
+    if (fcmToken) {
+      await this.notifDB.upsertTopic(userId, {
+        deviceId, endpoint: `${FCM_PREFIX}${fcmToken}`, p256dh: null, auth: null
+      });
+      return { status: true };
+    }
     if (!endpoint) {
       await this.notifDB.removeTopic(userId, { deviceId });
       return { status: true };

@@ -6,6 +6,7 @@ const net = require('net');
 const { setTimeout: sleep } = require('timers/promises');
 const webpush = require('web-push');
 const { IPushNotificationService } = require('./pn-service');
+const { FcmSender } = require('./fcm-sender');
 
 /** SYNC_PROTOCOL §12.1: the whole plaintext, never message content. */
 const WAKE = JSON.stringify({ t: 'wake' });
@@ -20,6 +21,8 @@ const RETRY_BASE_MS = 1000;
  * anyway. Upgrade path: a delayed retry queue if wakes go missing.
  */
 const MAX_RETRY_DELAY_MS = 10000;
+/** Decision 209: how a stored registration names an FCM token, not a url. */
+const FCM_PREFIX = 'fcm:';
 
 /**
  * AUTH_CONTRACT §5.1: everything a push endpoint may not resolve to.
@@ -169,6 +172,9 @@ class WebPushNotificationService extends IPushNotificationService {
 
   #logger;
 
+  /** @type {FcmSender | null} */
+  #fcm = null;
+
   constructor(context) {
     super(context);
     this.#options = context.options;
@@ -179,6 +185,8 @@ class WebPushNotificationService extends IPushNotificationService {
     const { vapidSubject, vapidPublicKey, vapidPrivateKey } = this.#options;
     // throws on a missing or malformed VAPID config, so the service never starts without one
     webpush.setVapidDetails(vapidSubject, vapidPublicKey, vapidPrivateKey);
+    const { fcmServiceAccountKey, fcmApiUrl } = this.#options;
+    if (fcmServiceAccountKey) this.#fcm = new FcmSender(fcmServiceAccountKey, fcmApiUrl);
   }
 
   /**
@@ -186,6 +194,7 @@ class WebPushNotificationService extends IPushNotificationService {
    * @returns {Promise<number>} the push service's final status
    */
   async push({ endpoint, p256dh, auth }) {
+    if (endpoint.startsWith(FCM_PREFIX)) return this.#pushFcm(endpoint.slice(FCM_PREFIX.length));
     const allowPrivate = !!this.#options.pushAllowPrivateEndpoints;
     const { origin } = new URL(endpoint);
     // checked again at send time: the host may resolve elsewhere by now, and an
@@ -198,11 +207,24 @@ class WebPushNotificationService extends IPushNotificationService {
       urgency: 'high'
     });
     const status = await this.#deliver(request, allowPrivate);
-    if (status < 200 || status >= 300) {
-      // origin only: the endpoint path is the device's push capability
-      this.#logger.error(`Push to ${origin} answered ${status}`);
-    }
+    // origin only: the endpoint path is the device's push capability
+    this.#logResult(origin, status);
     return status;
+  }
+
+  /** Decision 209: a Play build's wake goes to FCM natively. */
+  async #pushFcm(token) {
+    if (!this.#fcm) {
+      throw new Error('An FCM token is registered but --fcm-service-account-key is not set');
+    }
+    const status = await this.#fcm.send(token);
+    this.#logResult('FCM', status);
+    return status;
+  }
+
+  #logResult(to, status) {
+    if (status >= 200 && status < 300) this.#logger.info(`Push to ${to} answered ${status}`);
+    else this.#logger.error(`Push to ${to} answered ${status}`);
   }
 
   /** 429 / 5xx retry with backoff, honouring Retry-After (AUTH_CONTRACT §5.1). */
@@ -232,6 +254,12 @@ function addOptions(cmd) {
     .option('--vapid-private-key <vapid-private-key>', 'VAPID private key, base64url')
     .option('--vapid-subject <vapid-subject>', 'VAPID subject, a mailto: or https: contact')
     .option(
+      '--fcm-service-account-key <base64>',
+      'Play builds (decision 209): the Firebase service account key file, base64. Unset, FCM tokens get no push',
+      process.env.FCM_SERVICE_ACCOUNT_KEY
+    )
+    .option('--fcm-api-url <url>', 'FCM base url', 'https://fcm.googleapis.com')
+    .option(
       '--push-allow-private-endpoints',
       'DEV ONLY: accept http and private address push endpoints (a local ntfy). Never in a real deployment',
       false
@@ -239,6 +267,7 @@ function addOptions(cmd) {
 }
 
 module.exports = {
+  FCM_PREFIX,
   code: 'webpush',
   addOptions,
   Implementation: WebPushNotificationService,

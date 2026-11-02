@@ -45,6 +45,8 @@ services:
       - "127.0.0.1:${APP_PORT:-8000}:8000"
     environment:
       OTP_ENCRYPTION_KEY: ${OTP_ENCRYPTION_KEY:?set OTP_ENCRYPTION_KEY in .env}
+      # decision 209: Play builds' push; empty = no push for them
+      FCM_SERVICE_ACCOUNT_KEY: ${FCM_SERVICE_ACCOUNT_KEY:-}
     image: ramank775/chatserver:${CHAT_SERVER_TAG:?set CHAT_SERVER_TAG in .env}
     restart: unless-stopped
     depends_on:

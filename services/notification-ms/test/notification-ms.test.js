@@ -170,6 +170,24 @@ test('push topic registration stores endpoint and keys', async () => {
   assert.deepStrictEqual(db.calls, [['upsert', USER, REGISTRATION]]);
 });
 
+test('push topic registration stores an FCM token as an fcm: registration (decision 209)', async () => {
+  const db = stubDb();
+  const service = await buildService(db);
+  const fcmToken = 'dGVzdA:APA91b-token_0123456789abcdefghijklmnop';
+
+  const res = await register(service, { fcmToken });
+
+  assert.strictEqual(res.statusCode, 200);
+  assert.deepStrictEqual(db.calls, [['upsert', USER, {
+    deviceId: 'device-1', endpoint: `fcm:${fcmToken}`, p256dh: null, auth: null
+  }]]);
+  const both = await register(service, { endpoint: ENDPOINT, ...KEYS, fcmToken });
+  assert.strictEqual(both.statusCode, 400);
+  const junk = await register(service, { fcmToken: 'not a token!' });
+  assert.strictEqual(junk.statusCode, 400);
+  assert.strictEqual(db.calls.length, 1);
+});
+
 test('push topic registration rejects a bad endpoint with INVALID_PUSH_ENDPOINT', async () => {
   const db = stubDb();
   const service = await buildService(db);

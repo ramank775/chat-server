@@ -54,6 +54,11 @@ not render. Deploy 3.0 as the monolith.
      docker run --rm --entrypoint npx ramank775/chatserver:<tag> web-push generate-vapid-keys
      ```
    - `VAPID_SUBJECT`: `mailto:` plus an address push services can reach you at.
+   - `FCM_SERVICE_ACCOUNT_KEY`: push for the Play Store build (decision 209).
+     Firebase console › Project settings › Service accounts › Generate new
+     private key, then `base64 -w0 <file>.json` into `.env` and delete the
+     file. Empty means Play installs get no push. Push apps (UnifiedPush)
+     use the VAPID keys above.
 4. **Start.** `docker compose -f docker-compose.prod.yml up -d`. The app
    listens on `127.0.0.1:8000` only (`APP_PORT`).
    - **Host nginx** (the certificate at `/etc/nginx/cert/one9x.crt`): first
