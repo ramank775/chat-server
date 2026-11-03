@@ -2,8 +2,8 @@ name: "ci"
 
 on:
   push:
+    # The working branch (v3.0) runs nothing on push; a v* tag runs it all.
     branches:
-      - "v3.0"
       - "master"
     tags:
       - "v*"
