@@ -198,7 +198,8 @@ class NotificationMS extends HttpServiceBase {
    * @param {string} subject recipient `user_id:device_id`
    */
   async pushNotification(message, subject) {
-    if (!subject || (message && message.ephemeral)) return;
+    // Decision 212: a silent frame waits for the device's next pull.
+    if (!subject || (message && (message.ephemeral || message.silent))) return;
     const [user, device] = subject.split(':');
 
     const now = Date.now();

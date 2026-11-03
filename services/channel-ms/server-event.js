@@ -56,7 +56,9 @@ function channelServerEvent(type, body, { channelId, actor, recipients }) {
       clientTimestampMs: now,
       payload: Buffer.concat([Buffer.from([SERVER_EVENT_MARKER]), bytes]),
       senderUserId: actor,
-      serverTimestampMs: now
+      serverTimestampMs: now,
+      // Decision 212: a group change alone shows no notification.
+      silent: true
     },
     recipients
   );

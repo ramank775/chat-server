@@ -119,6 +119,19 @@ test('wake is debounced per (user_id, device_id), held back not dropped', async 
   assert.strictEqual(pns.pushes.length, 3, 'one wake when the window ends, for both held back');
 });
 
+test('a silent frame never wakes, and leaves the debounce window alone (decision 212)', async () => {
+  const db = stubDb();
+  db.topics = [REGISTRATION];
+  const pns = stubPns();
+  const service = await buildService(db, pns);
+
+  await service.pushNotification({ silent: true }, SUBJECT);
+  assert.strictEqual(pns.pushes.length, 0, 'a receipt does not wake');
+
+  await service.pushNotification({ type: 'text' }, SUBJECT);
+  assert.strictEqual(pns.pushes.length, 1, 'the next message wakes at once');
+});
+
 test('a pre Web Push topicUrl row is never woken', async () => {
   const db = stubDb();
   db.topics = [{ deviceId: 'device-1', topicUrl: 'https://ntfy.sh/old' }];

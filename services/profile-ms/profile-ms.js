@@ -815,7 +815,9 @@ class ProfileMs extends HttpServiceBase {
       clientTimestampMs: nowMs,
       payload: encodeServerEvent(body),
       senderUserId: '', // server authored
-      serverTimestampMs: nowMs
+      serverTimestampMs: nowMs,
+      // Decision 212: a profile change shows no notification.
+      silent: true
     };
     await this.eventStore.emit(
       this.newMessageTopic,

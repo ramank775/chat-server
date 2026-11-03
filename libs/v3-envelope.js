@@ -278,6 +278,11 @@ class EnvelopeEvent extends IEventArg {
     return !!this._envelope.ephemeral;
   }
 
+  /** Queued like any envelope, but never wakes an offline device (proto §silent). */
+  get silent() {
+    return !!this._envelope.silent;
+  }
+
   /** The exact bytes a recipient's socket receives. */
   toPushFrame() {
     return pushFrame(this._envelope);
