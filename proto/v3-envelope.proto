@@ -132,14 +132,15 @@ message Envelope {
   // envelope, which is never kept. Echoed unchanged on fanout.
   uint32 ttl_sec = 8;
 
-  // No push wake for this envelope (decision 212): it is stored and
-  // fanned out as usual, but a recipient that is offline gets it on its
-  // next pull instead of being woken for it. Senders set it on whatever
-  // shows no notification (receipts, edits, deletes, reactions, keys),
-  // so the push service never sees high-priority wakes that end without
-  // one and downgrades the app's real ones. The server sets it on its
-  // own events. Echoed unchanged on fanout.
-  bool silent = 9;
+  // Handling flags, one bit each (decisions 212, 215). Unknown bits are
+  // kept and echoed, so a newer sender's flags survive an older server.
+  // Echoed unchanged on fanout.
+  //   bit 0 (1) SILENT: no push wake. Stored and fanned out as usual, but
+  //         an offline recipient gets it on its next pull instead of
+  //         being woken for it. Senders set it on whatever shows no
+  //         notification (receipts, edits, deletes, reactions, keys); the
+  //         server sets it on its own events.
+  uint32 flags = 9;
 
   // ---------------------------------------------------------------------------
   // Server-stamped fields. Absent on client→server. Populated by the

@@ -92,6 +92,9 @@ function serverNow() {
 /** SYNC_PROTOCOL.md §10.2 / §19 decision 15 — server-authored payload marker. */
 const SERVER_EVENT_MARKER = 0x53;
 
+/** `Envelope.flags` bits (proto §flags). */
+const ENVELOPE_FLAG = Object.freeze({ SILENT: 1 });
+
 /** A 9-lowercase-hex user_id, the only shape `peer` may take (trim 4). */
 const USER_ID = /^[0-9a-f]{9}$/;
 
@@ -278,9 +281,10 @@ class EnvelopeEvent extends IEventArg {
     return !!this._envelope.ephemeral;
   }
 
-  /** Queued like any envelope, but never wakes an offline device (proto §silent). */
+  /** Queued like any envelope, but never wakes an offline device (proto §flags). */
   get silent() {
-    return !!this._envelope.silent;
+    // eslint-disable-next-line no-bitwise -- flags is a bit set
+    return ((this._envelope.flags || 0) & ENVELOPE_FLAG.SILENT) !== 0;
   }
 
   /** The exact bytes a recipient's socket receives. */
@@ -293,6 +297,7 @@ module.exports = {
   WS_TYPE,
   ACK_OUTCOME,
   REASON,
+  ENVELOPE_FLAG,
   SERVER_EVENT_MARKER,
   EnvelopeEvent,
   encodeWsEnvelope,

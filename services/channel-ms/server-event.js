@@ -1,7 +1,7 @@
 const path = require('path');
 const protobufjs = require('protobufjs');
 const { uuidv4 } = require('../../helper');
-const { EnvelopeEvent, SERVER_EVENT_MARKER, serverNow } = require('../../libs/v3-envelope');
+const { EnvelopeEvent, ENVELOPE_FLAG, SERVER_EVENT_MARKER, serverNow } = require('../../libs/v3-envelope');
 
 /**
  * SYNC_PROTOCOL.md §10.2 — the REST→WS bridge. Every channel write fans out
@@ -58,7 +58,7 @@ function channelServerEvent(type, body, { channelId, actor, recipients }) {
       senderUserId: actor,
       serverTimestampMs: now,
       // Decision 212: a group change alone shows no notification.
-      silent: true
+      flags: ENVELOPE_FLAG.SILENT
     },
     recipients
   );

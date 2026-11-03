@@ -543,6 +543,23 @@ test('an ephemeral envelope is fanned out without an ack', async () => {
   });
 });
 
+test('envelope flags reach the fanout as sent, bits the server does not know included', async () => {
+  await withGateway(async ({ uri, publishedEnvelopes }) => {
+    const client = connect(uri, ALICE);
+    await client.opened;
+
+    // 33: SILENT (bit 0) plus bit 5, one a newer client might set (decision 215)
+    client.send(opFrame([envelope(ALICE, 0, { flags: 33 })]));
+    const frame = await client.next();
+
+    assert.strictEqual(frame.acks.acks[0].outcome, ACK_OUTCOME.SUCCESS);
+    const [published] = publishedEnvelopes();
+    assert.strictEqual(published.args.envelope.flags, 33);
+    assert.strictEqual(published.args.silent, true);
+    client.close();
+  });
+});
+
 test('POST /ops takes a WS_OP frame over https and answers with its WS_ACK', async () => {
   await withGateway(async ({ uri, publishedEnvelopes }) => {
     const post = (frame) => fetch(`${uri}/ops`, {

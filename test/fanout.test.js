@@ -37,7 +37,7 @@ describe('REST-write fanout (SYNC_PROTOCOL 10.2)', () => {
       assert.equal(key, envelope.channelId, 'partitioned by channel like a chat envelope');
       assert.equal(envelope.payload[0], SERVER_EVENT_MARKER, 'payload is marked server authored');
       assert.equal(envelope.senderUserId, '', 'no user authored this');
-      assert.equal(envelope.silent, true, 'wakes no one: shows no notification (decision 212)');
+      assert.equal(envelope.flags, 1, 'SILENT: wakes no one, shows no notification (decision 212)');
       return {
         recipients,
         channelId: envelope.channelId,

@@ -14,7 +14,7 @@ const { profileDB } = require('./database');
 const { addAuthProviderOptions, initializeAuthProvider, AuthError } = require('./auth-provider');
 const { SmsGatewayError, SmsGatewayUnavailableError } = require('./auth-provider/sms-sender');
 const { HttpClient } = require('../../libs/http-client');
-const { EnvelopeEvent, SERVER_EVENT_MARKER, serverNow } = require('../../libs/v3-envelope');
+const { EnvelopeEvent, ENVELOPE_FLAG, SERVER_EVENT_MARKER, serverNow } = require('../../libs/v3-envelope');
 const { validateUsername } = require('./username');
 const { bundleSchema, publicBundle, publishKeys, claimKeys } = require('./device-keys');
 const { uuidv4, hashSecret, verifySecret, sha256, errorEnvelope } = require('../../helper');
@@ -817,7 +817,7 @@ class ProfileMs extends HttpServiceBase {
       senderUserId: '', // server authored
       serverTimestampMs: nowMs,
       // Decision 212: a profile change shows no notification.
-      silent: true
+      flags: ENVELOPE_FLAG.SILENT
     };
     await this.eventStore.emit(
       this.newMessageTopic,

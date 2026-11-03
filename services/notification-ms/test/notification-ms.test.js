@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const crypto = require('crypto');
 const { NotificationMS } = require('../notification-ms');
+const { EnvelopeEvent, ENVELOPE_FLAG } = require('../../../libs/v3-envelope');
 
 const USER = 'a1b2c3d4e';
 /** Wakes are keyed per `(user_id, device_id)` — TRIM_4_12_CONTRACT §7. */
@@ -125,7 +126,7 @@ test('a silent frame never wakes, and leaves the debounce window alone (decision
   const pns = stubPns();
   const service = await buildService(db, pns);
 
-  await service.pushNotification({ silent: true }, SUBJECT);
+  await service.pushNotification(EnvelopeEvent.of({ flags: ENVELOPE_FLAG.SILENT }, []), SUBJECT);
   assert.strictEqual(pns.pushes.length, 0, 'a receipt does not wake');
 
   await service.pushNotification({ type: 'text' }, SUBJECT);
