@@ -99,24 +99,28 @@ const SERVER_EVENT_MARKER = 0x53;
 /** `Envelope.flags` bits (proto §flags). */
 const ENVELOPE_FLAG = Object.freeze({ SILENT: 1 });
 
-/** The frame class, `Envelope.flags` bits 1-3 (decision 218, proto §flags). */
+/** The frame class, `Envelope.flags` bits 1-4 (decisions 218, 220; proto §flags). */
 const FRAME_CLASS = Object.freeze({
   MESSAGE: 0, MUTATION: 1, RECEIPT: 2, KEY: 3, RESEND: 4, EVENT: 5
 });
 
 /* eslint-disable no-bitwise -- flags is a bit set */
 /** The class a frame's flags carry; no flags is a MESSAGE. */
-const frameClass = (flags) => ((flags || 0) >> 1) & 7;
+const frameClass = (flags) => ((flags || 0) >> 1) & 15;
 
 /** The flags for a frame of class `cls`, no other bit set. */
 const classFlags = (cls) => cls << 1;
 
 /**
- * Decision 218: wake an offline device only for a new message or a resend
- * request, and never for a SILENT one.
+ * Decision 220: wake an offline device for every stored frame its sender
+ * did not mark SILENT. The sender knows what shows a notification, so a new
+ * kind of frame needs no server change; the class is for storage and,
+ * later, the invite gate.
  */
-const wakes = (flags) => ((flags || 0) & ENVELOPE_FLAG.SILENT) === 0
-  && [FRAME_CLASS.MESSAGE, FRAME_CLASS.RESEND].includes(frameClass(flags));
+const wakes = (flags) => ((flags || 0) & ENVELOPE_FLAG.SILENT) === 0;
+
+/** The flags of a server-authored event: class EVENT, and it shows no notification. */
+const EVENT_FLAGS = classFlags(FRAME_CLASS.EVENT) + ENVELOPE_FLAG.SILENT;
 /* eslint-enable no-bitwise */
 
 /** A 9-lowercase-hex user_id, the only shape `peer` may take (trim 4). */
@@ -457,6 +461,7 @@ module.exports = {
   ACK_OUTCOME,
   REASON,
   ENVELOPE_FLAG,
+  EVENT_FLAGS,
   FRAME_CLASS,
   SERVER_EVENT_MARKER,
   EnvelopeEvent,

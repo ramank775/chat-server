@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { startChannelMs, decodeServerEvent, mintOpId, op, headers } = require('./helper');
 const {
-  FRAME_CLASS, classFlags, decodeWsEnvelope, opIdUserBits, uuidBytes
+  EVENT_FLAGS, decodeWsEnvelope, opIdUserBits, uuidBytes
 } = require('../../../libs/v3-envelope');
 
 const ALICE = 'a3f2e8c5d';
@@ -46,7 +46,7 @@ test('creates a group and fans ChannelCreated to every member', async () => {
   assert.strictEqual(envelope.deliverySequence, undefined, 'no per-channel sequence any more');
   // decision 218: class EVENT, no SILENT bit; on the wire as its recipients
   // get it, the group's id as bytes and no sending device
-  assert.strictEqual(envelope.flags, classFlags(FRAME_CLASS.EVENT));
+  assert.strictEqual(envelope.flags, EVENT_FLAGS);
   const { push } = decodeWsEnvelope(harness.published().at(-1).toPushFrame());
   assert.deepStrictEqual(push.channelId, uuidBytes(CHANNEL));
   assert.strictEqual(push.senderDeviceId.length, 0);

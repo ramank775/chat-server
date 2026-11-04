@@ -1,7 +1,7 @@
 const path = require('path');
 const protobufjs = require('protobufjs');
 const {
-  EnvelopeEvent, FRAME_CLASS, SERVER_EVENT_MARKER, classFlags, opIdFor, serverNow
+  EVENT_FLAGS, EnvelopeEvent, SERVER_EVENT_MARKER, opIdFor, serverNow
 } = require('../../libs/v3-envelope');
 
 /**
@@ -60,7 +60,7 @@ function channelServerEvent(type, body, { channelId, actor, recipients }) {
       senderUserId: actor,
       serverTimestampMs: now,
       // Decision 218: class EVENT, which wakes nobody; no SILENT bit needed.
-      flags: classFlags(FRAME_CLASS.EVENT)
+      flags: EVENT_FLAGS
     },
     recipients
   );

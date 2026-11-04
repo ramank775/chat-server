@@ -3,7 +3,7 @@ const assert = require('node:assert');
 const crypto = require('crypto');
 const { NotificationMS } = require('../notification-ms');
 const {
-  EnvelopeEvent, ENVELOPE_FLAG, FRAME_CLASS, classFlags, wakes
+  EVENT_FLAGS, EnvelopeEvent, ENVELOPE_FLAG, FRAME_CLASS, classFlags, frameClass, wakes
 } = require('../../../libs/v3-envelope');
 
 const USER = 'a1b2c3d4e';
@@ -125,24 +125,19 @@ test('wake is debounced per (user_id, device_id), held back not dropped', async 
   assert.strictEqual(pns.pushes.length, 3, 'one wake when the window ends, for both held back');
 });
 
-test('the wake rule: only MESSAGE and RESEND wake, and never with SILENT (decision 218)', () => {
+test('the wake rule: every class wakes unless the sender set SILENT (decision 220)', () => {
   const { SILENT } = ENVELOPE_FLAG;
-  const table = Object.entries(FRAME_CLASS).map(([name, cls]) => [
-    name, wakes(classFlags(cls)), wakes(classFlags(cls) + SILENT)
-  ]);
-  assert.deepStrictEqual(table, [
-    ['MESSAGE', true, false],
-    ['MUTATION', false, false],
-    ['RECEIPT', false, false],
-    ['KEY', false, false],
-    ['RESEND', true, false],
-    ['EVENT', false, false]
-  ]);
+  Object.entries(FRAME_CLASS).forEach(([name, cls]) => {
+    assert.strictEqual(wakes(classFlags(cls)), true, `${name} wakes`);
+    assert.strictEqual(wakes(classFlags(cls) + SILENT), false, `${name} + SILENT does not`);
+  });
+  // classes 6..15 are free for kinds to come; they need no server change
+  assert.strictEqual(wakes(classFlags(15)), true);
+  assert.strictEqual(frameClass(classFlags(15)), 15, 'the class is 4 bits');
+  assert.strictEqual(frameClass(classFlags(15) + 32), 15, 'bit 5 is past the class');
   assert.strictEqual(wakes(0), true, 'no flags is a MESSAGE');
   assert.strictEqual(wakes(undefined), true);
-  // a bit the server does not know leaves the class alone
-  assert.strictEqual(wakes(classFlags(FRAME_CLASS.RESEND) + 32), true);
-  assert.strictEqual(wakes(classFlags(FRAME_CLASS.RECEIPT) + 32), false);
+  assert.strictEqual(wakes(EVENT_FLAGS), false, 'a server event shows no notification');
 });
 
 test('a frame that does not wake leaves the debounce window alone', async () => {
@@ -152,10 +147,10 @@ test('a frame that does not wake leaves the debounce window alone', async () => 
   const service = await buildService(db, pns);
 
   const quiet = [
-    frame(classFlags(FRAME_CLASS.RECEIPT)),
-    frame(classFlags(FRAME_CLASS.MUTATION)),
-    frame(classFlags(FRAME_CLASS.KEY)),
-    frame(classFlags(FRAME_CLASS.EVENT)),
+    frame(classFlags(FRAME_CLASS.RECEIPT) + ENVELOPE_FLAG.SILENT),
+    frame(classFlags(FRAME_CLASS.MUTATION) + ENVELOPE_FLAG.SILENT),
+    frame(classFlags(FRAME_CLASS.KEY) + ENVELOPE_FLAG.SILENT),
+    frame(EVENT_FLAGS),
     frame(ENVELOPE_FLAG.SILENT),
     frame(classFlags(FRAME_CLASS.RESEND) + ENVELOPE_FLAG.SILENT),
     EnvelopeEvent.of({ ephemeral: true }, [])

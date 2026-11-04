@@ -15,7 +15,7 @@ const { addAuthProviderOptions, initializeAuthProvider, AuthError } = require('.
 const { SmsGatewayError, SmsGatewayUnavailableError } = require('./auth-provider/sms-sender');
 const { HttpClient } = require('../../libs/http-client');
 const {
-  EnvelopeEvent, FRAME_CLASS, SERVER_EVENT_MARKER, classFlags, serverNow
+  EVENT_FLAGS, EnvelopeEvent, SERVER_EVENT_MARKER, serverNow
 } = require('../../libs/v3-envelope');
 const { validateUsername } = require('./username');
 const { bundleSchema, publicBundle, publishKeys, claimKeys } = require('./device-keys');
@@ -818,7 +818,7 @@ class ProfileMs extends HttpServiceBase {
       senderUserId: '', // server authored
       serverTimestampMs: nowMs,
       // Decision 218: class EVENT, which wakes nobody; no SILENT bit needed.
-      flags: classFlags(FRAME_CLASS.EVENT)
+      flags: EVENT_FLAGS
     };
     await this.eventStore.emit(
       this.newMessageTopic,

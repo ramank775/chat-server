@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const { join } = require('path');
 const protobufjs = require('protobufjs');
 const {
-  EnvelopeEvent, FRAME_CLASS, SERVER_EVENT_MARKER, classFlags
+  EVENT_FLAGS, EnvelopeEvent, SERVER_EVENT_MARKER
 } = require('../libs/v3-envelope');
 const { startProfileMs, signupWithUsername, bearer } = require('./helpers/profile-ms');
 
@@ -39,7 +39,7 @@ describe('REST-write fanout (SYNC_PROTOCOL 10.2)', () => {
       assert.equal(key, envelope.channelId, 'partitioned by channel like a chat envelope');
       assert.equal(envelope.payload[0], SERVER_EVENT_MARKER, 'payload is marked server authored');
       assert.equal(envelope.senderUserId, '', 'no user authored this');
-      assert.equal(envelope.flags, classFlags(FRAME_CLASS.EVENT), 'class EVENT: wakes no one (decision 218)');
+      assert.equal(envelope.flags, EVENT_FLAGS, 'class EVENT and SILENT: wakes no one (decisions 218, 220)');
       return {
         recipients,
         channelId: envelope.channelId,

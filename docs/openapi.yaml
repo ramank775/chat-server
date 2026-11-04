@@ -203,9 +203,9 @@ tags:
       retired and reserved (decision 127). Since decision 218 every id on
       the wire is raw bytes (op_id, group channel_id and device ids 16, a
       DM's `peer` 5), a DM sends `peer` and no `channel_id`, and the sender
-      is read from the op_id; `Envelope.flags` bits 1-3 carry the frame
-      class, which decides the push wake (MESSAGE and RESEND only) and a
-      receipt's 7-day retention.
+      is read from the op_id; `Envelope.flags` bit 0 (SILENT, set by the
+      sender) decides the push wake, and bits 1-4 carry the frame class,
+      which sets a receipt's 7-day retention (decision 220).
 paths:
   /v3.0/keys/me:
     put:
