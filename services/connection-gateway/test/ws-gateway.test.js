@@ -12,7 +12,8 @@ const {
   toWire,
   uuidBytes,
   uuidText,
-  userIdBytes
+  userIdBytes,
+  userIdText
 } = require('../../../libs/v3-envelope');
 const {
   ACCESSKEY, DEVICE_1, DEVICE_2, mintOpId, opFrame, legacyWire, onWire, startGateway, connect
@@ -54,6 +55,19 @@ async function withGateway(fn, overrides) {
 test('mintOpId round-trips through the server-side prefix reader', () => {
   assert.strictEqual(opIdUserBits(mintOpId(ALICE)), parseInt(ALICE, 16));
   assert.notStrictEqual(opIdUserBits(mintOpId(BOB)), parseInt(ALICE, 16));
+});
+
+test('the edge helpers take exact lengths only and round-trip the text forms', () => {
+  assert.strictEqual(uuidText(uuidBytes(CHANNEL)), CHANNEL);
+  [0, 15, 17].forEach((n) => assert.strictEqual(uuidText(Buffer.alloc(n)), null, `${n} bytes`));
+  assert.strictEqual(userIdText(userIdBytes(ALICE)), ALICE);
+  assert.deepStrictEqual(userIdBytes(ALICE), Buffer.from('0a3f2e8c5d', 'hex'), 'big-endian, one 0 nibble');
+  [0, 4, 6].forEach((n) => assert.strictEqual(userIdText(Buffer.alloc(n)), null, `${n} bytes`));
+  assert.strictEqual(userIdText(Buffer.from('f000000000', 'hex')), null, 'past 36 bits');
+  // what the server encodes it made itself: anything else is a bug, loudly
+  assert.throws(() => uuidBytes('device-1'), TypeError);
+  assert.throws(() => uuidBytes(CHANNEL.toUpperCase()), TypeError);
+  assert.throws(() => userIdBytes('A3F2E8C5D'), TypeError);
 });
 
 test('echoes the accesskey subprotocol on the 101', async () => {

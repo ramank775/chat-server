@@ -12,7 +12,7 @@ const TTL_SEC = 30 * 24 * 60 * 60;
 /** Decision 218: a receipt is kept a week at most, whatever its ttl_sec. */
 const RECEIPT_TTL_SEC = 7 * 24 * 60 * 60;
 
-/** SYNC_PROTOCOL.md §10.6: frames per pull. */
+/** SYNC_PROTOCOL.md §10.6: envelopes per pull. */
 const PAGE = 500;
 
 const COLLECTION = 'timeline';
