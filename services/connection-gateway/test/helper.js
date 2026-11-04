@@ -1,12 +1,19 @@
+const path = require('path');
 const WebSocket = require('ws');
 const protobufjs = require('protobufjs');
 const { initDefaultResources } = require('../../../libs/service-base');
 const { initHttpResource } = require('../../../libs/http-service-base');
 const { LocalCache } = require('../../../libs/cache/local-cache');
-const { decodeWsEnvelope, encodeWsEnvelope, WS_TYPE } = require('../../../libs/v3-envelope');
+const {
+  decodeWsEnvelope, encodeWsEnvelope, toWire, WS_TYPE
+} = require('../../../libs/v3-envelope');
 const { Gateway } = require('../ws-gateway');
 
 const ACCESSKEY = 'd4f5a1c9-1234-abcd-5678-ef01234abcde';
+
+/** Device ids are UUIDs (decision 218: 16 bytes on the wire). */
+const DEVICE_1 = '00000000-0000-4000-8000-000000000001';
+const DEVICE_2 = '00000000-0000-4000-8000-000000000002';
 
 /**
  * Mint a UUIDv7 `op_id` with the layout the client uses
@@ -37,15 +44,20 @@ function mintOpId(userIdHex, { ms = Date.now(), counter = 0, deviceSlot = 0, ran
 }
 /* eslint-enable no-bitwise */
 
+/**
+ * A WS_OP frame. Envelopes are written as the app writes them (decision
+ * 218): text ids become bytes, a DM names its peer and no channel. One whose
+ * op_id is already bytes goes on the wire exactly as given, for the frames
+ * the app would never send.
+ */
 function opFrame(envelopes) {
-  return encodeWsEnvelope({ type: WS_TYPE.WS_OP, ops: { envelopes } });
+  const wire = envelopes.map((envelope) => (Buffer.isBuffer(envelope.opId) ? envelope : toWire(envelope)));
+  return encodeWsEnvelope({ type: WS_TYPE.WS_OP, ops: { envelopes: wire } });
 }
 
 /**
- * The wire before DECISIONS row 127, with the retired fields still numbered:
- * Envelope.resource_seq = 3, Envelope.delivery_sequence = 22 and
- * Ack.delivery_sequence = 6. Encodes what an older client sends, and reads
- * back whatever the server put on the wire, retired fields included.
+ * The text-era wire, before decision 218: string ids in fields 1, 2 and 7.
+ * Encodes what an older build sends.
  */
 const LEGACY_WS = protobufjs.parse(`
   syntax = "proto3";
@@ -53,31 +65,28 @@ const LEGACY_WS = protobufjs.parse(`
   message Envelope {
     string op_id = 1; string channel_id = 2; uint64 resource_seq = 3;
     uint64 client_timestamp_ms = 4; bytes payload = 5; bool ephemeral = 6;
-    string peer = 7; string sender_user_id = 20; uint64 server_timestamp_ms = 21;
-    uint64 delivery_sequence = 22;
-  }
-  message Ack {
-    string op_id = 1; int32 outcome = 2; string reason = 3; uint64 retry_after_ms = 4;
-    uint64 server_timestamp_ms = 5; uint64 delivery_sequence = 6;
+    string peer = 7;
   }
   message EnvelopeBatch { repeated Envelope envelopes = 1; }
-  message AckBatch { repeated Ack acks = 1; }
-  message WsEnvelope {
-    int32 type = 1; EnvelopeBatch ops = 10; AckBatch acks = 11; Envelope push = 12;
-  }
+  message WsEnvelope { int32 type = 1; EnvelopeBatch ops = 10; }
 `).root.lookupType('legacy.WsEnvelope');
 
 const legacyWire = {
-  /** A WS_OP frame as an older client encodes it, `resourceSeq` and all. */
+  /** A WS_OP frame as an older build encodes it. */
   opFrame(envelopes) {
     const message = LEGACY_WS.fromObject({ type: WS_TYPE.WS_OP, ops: { envelopes } });
     return Buffer.from(LEGACY_WS.encode(message).finish());
-  },
-  /** Decode server bytes; a field that was not on the wire is absent, not 0. */
-  decode(bytes) {
-    return LEGACY_WS.toObject(LEGACY_WS.decode(bytes), { longs: Number, defaults: false });
   }
 };
+
+const WIRE_TYPE = protobufjs
+  .loadSync(path.join(__dirname, '..', '..', '..', 'proto', 'v3-envelope.proto'))
+  .lookupType('vartalap.v3.WsEnvelope');
+
+/** Server bytes decoded with only the fields actually on the wire: absent, not 0. */
+function onWire(bytes) {
+  return WIRE_TYPE.toObject(WIRE_TYPE.decode(bytes), { longs: Number, bytes: Buffer, defaults: false });
+}
 
 /** Start the real Gateway on an ephemeral port with a local cache and stubs. */
 async function startGateway(overrides = {}) {
@@ -134,7 +143,7 @@ async function startGateway(overrides = {}) {
 }
 
 /** Open a client socket the way nginx would proxy it after a successful auth. */
-function connect(uri, userId, deviceId = 'device-1', accesskey = ACCESSKEY, options = {}) {
+function connect(uri, userId, deviceId = DEVICE_1, accesskey = ACCESSKEY, options = {}) {
   const socket = new WebSocket(`${uri.replace('http', 'ws')}/wss`, [`accesskey.${accesskey}`], {
     headers: { 'x-user': userId, 'x-device': deviceId },
     ...options
@@ -147,7 +156,7 @@ function connect(uri, userId, deviceId = 'device-1', accesskey = ACCESSKEY, opti
   };
   socket.on('message', (data, isBinary) => {
     if (!isBinary) return push(data.toString());
-    // the bytes ride along, unenumerated, for `legacyWire.decode`
+    // the bytes ride along, unenumerated, for `onWire`
     return push(Object.defineProperty(decodeWsEnvelope(data), 'raw', { value: data }));
   });
   const closed = new Promise((resolve) => {
@@ -174,4 +183,6 @@ function connect(uri, userId, deviceId = 'device-1', accesskey = ACCESSKEY, opti
   };
 }
 
-module.exports = { ACCESSKEY, mintOpId, opFrame, legacyWire, startGateway, connect };
+module.exports = {
+  ACCESSKEY, DEVICE_1, DEVICE_2, mintOpId, opFrame, legacyWire, onWire, startGateway, connect
+};

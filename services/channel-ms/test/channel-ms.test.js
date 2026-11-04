@@ -1,6 +1,9 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { startChannelMs, decodeServerEvent, mintOpId, op, headers } = require('./helper');
+const {
+  FRAME_CLASS, classFlags, decodeWsEnvelope, uuidBytes
+} = require('../../../libs/v3-envelope');
 
 const ALICE = 'a3f2e8c5d';
 const BOB = 'b1c2d3e4f';
@@ -38,6 +41,13 @@ test('creates a group and fans ChannelCreated to every member', async () => {
   assert.strictEqual(envelope.payload[0], 0x53);
   assert.ok(envelope.serverTimestampMs > 0);
   assert.strictEqual(envelope.deliverySequence, undefined, 'no per-channel sequence any more');
+  // decision 218: class EVENT, no SILENT bit; on the wire as its recipients
+  // get it, the group's id as bytes and no sending device
+  assert.strictEqual(envelope.flags, classFlags(FRAME_CLASS.EVENT));
+  const { push } = decodeWsEnvelope(harness.published().at(-1).toPushFrame());
+  assert.deepStrictEqual(push.channelId, uuidBytes(CHANNEL));
+  assert.strictEqual(push.senderDeviceId.length, 0);
+  assert.strictEqual(push.peer.length, 0);
   assert.strictEqual(event.type, 'CHANNEL_CREATED');
   assert.strictEqual(event.channelCreated.creator, ALICE);
   assert.deepStrictEqual(event.channelCreated.members.sort(), [ALICE, BOB, CARL].sort());

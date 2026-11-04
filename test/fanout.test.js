@@ -2,7 +2,9 @@ const { test, before, after, describe } = require('node:test');
 const assert = require('node:assert/strict');
 const { join } = require('path');
 const protobufjs = require('protobufjs');
-const { EnvelopeEvent, SERVER_EVENT_MARKER } = require('../libs/v3-envelope');
+const {
+  EnvelopeEvent, FRAME_CLASS, SERVER_EVENT_MARKER, classFlags
+} = require('../libs/v3-envelope');
 const { startProfileMs, signupWithUsername, bearer } = require('./helpers/profile-ms');
 
 const ServerEventPayload = protobufjs
@@ -37,7 +39,7 @@ describe('REST-write fanout (SYNC_PROTOCOL 10.2)', () => {
       assert.equal(key, envelope.channelId, 'partitioned by channel like a chat envelope');
       assert.equal(envelope.payload[0], SERVER_EVENT_MARKER, 'payload is marked server authored');
       assert.equal(envelope.senderUserId, '', 'no user authored this');
-      assert.equal(envelope.flags, 1, 'SILENT: wakes no one, shows no notification (decision 212)');
+      assert.equal(envelope.flags, classFlags(FRAME_CLASS.EVENT), 'class EVENT: wakes no one (decision 218)');
       return {
         recipients,
         channelId: envelope.channelId,
@@ -60,11 +62,11 @@ describe('REST-write fanout (SYNC_PROTOCOL 10.2)', () => {
 
     app.stubChannels([
       {
-        channel_id: 'group-0',
+        channel_id: '01efabcd-7000-8000-8abc-000000000000',
         members: [editor.user_id, peer.user_id]
       },
       {
-        channel_id: 'group-1',
+        channel_id: '01efabcd-7000-8000-8abc-000000000001',
         // the same peer in a second channel: still one envelope for them
         members: [
           editor.user_id,
@@ -73,7 +75,7 @@ describe('REST-write fanout (SYNC_PROTOCOL 10.2)', () => {
         ]
       },
       {
-        channel_id: 'group-2',
+        channel_id: '01efabcd-7000-8000-8abc-000000000002',
         members: [peer.user_id, groupMate.user_id]
       }
     ]);
@@ -106,7 +108,7 @@ describe('REST-write fanout (SYNC_PROTOCOL 10.2)', () => {
     const peer = await signupWithUsername(app, { phone: '+919500000006', username: 'peer_two' });
     app.stubChannels([
       {
-        channel_id: 'group-4',
+        channel_id: '01efabcd-7000-8000-8abc-000000000004',
         members: [editor.user_id, peer.user_id]
       }
     ]);
@@ -139,7 +141,7 @@ describe('REST-write fanout (SYNC_PROTOCOL 10.2)', () => {
 
     // a channel the editor shares with nobody
     app.stubChannels([
-      { channel_id: 'solo-1', members: [editor.user_id] }
+      { channel_id: '01efabcd-7000-8000-8abc-0000000000f1', members: [editor.user_id] }
     ]);
     from = app.eventStore.events.length;
     assert.equal((await patch(editor.accesskey, { displayName: 'Still alone' })).statusCode, 200);
@@ -149,7 +151,7 @@ describe('REST-write fanout (SYNC_PROTOCOL 10.2)', () => {
     const peer = await signupWithUsername(app, { phone: '+919500000008', username: 'peer_three' });
     app.stubChannels([
       {
-        channel_id: 'group-5',
+        channel_id: '01efabcd-7000-8000-8abc-000000000005',
         members: [editor.user_id, peer.user_id]
       }
     ]);

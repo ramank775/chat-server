@@ -123,7 +123,8 @@ class MessageDeliveryWorker extends ServiceBase {
     // §10.3 step 2 — on the timeline before any device is pushed to, stored
     // once for all its readers: a push into a socket that died is still there
     // from the device's pointer on, on its next pull (§10.6), until it
-    // expires (its sender's `ttl_sec`, at most and by default 30 days).
+    // expires (its sender's `ttl_sec`, at most and by default 30 days; a
+    // receipt 7, decision 218). Stored as the wire Envelope the push carries.
     // Ephemeral envelopes (typing) are worthless once missed: never stored.
     if (!event.ephemeral && readers.length) {
       const { envelope } = event;
@@ -134,7 +135,7 @@ class MessageDeliveryWorker extends ServiceBase {
         recipients: readers,
         sender: envelope.senderUserId || '',
         senderDevice: event.senderDevice,
-        frame: event.toPushFrame()
+        envelope: event.toEnvelopeBytes()
       });
     }
 

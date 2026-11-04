@@ -4,7 +4,8 @@ const { TTL_SEC } = require('../../../libs/delivery-manager/undelivered-queue');
 const { partitionName } = require('../../../libs/delivery-manager/pg-undelivered-queue');
 const { initPgPool } = require('../../../libs/pg-utils');
 const { TEST_DB, pgUrlFor } = require('../../../test/helpers/db');
-const { emptyQueue, reopenQueue, closeQueues } = require('./helper');
+const { DEVICE_1, DEVICE_2 } = require('../../connection-gateway/test/helper');
+const { idOf, emptyQueue, reopenQueue, closeQueues } = require('./helper');
 
 const DB = 'pg-undelivered-queue-test';
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -32,14 +33,14 @@ describe('pg undelivered queue (DECISIONS row 129)', { skip: TEST_DB !== 'pg' },
     await closeQueues();
   });
 
-  const entry = (opId, ts, recipients) => ({
-    opId,
+  const entry = (name, ts, recipients) => ({
+    opId: idOf(name),
     ts,
     expiresAt: new Date(Date.now() + 60 * 60 * 1000),
     recipients,
     sender: '00000000a',
-    senderDevice: 'd1',
-    frame: Buffer.from(opId)
+    senderDevice: DEVICE_1,
+    envelope: Buffer.from(name)
   });
 
   test('one row per fanout, and a read deletes nothing', async () => {
@@ -47,7 +48,7 @@ describe('pg undelivered queue (DECISIONS row 129)', { skip: TEST_DB !== 'pg' },
     await queue.append(entry('group', 1, ['00000000b', '00000000c', '00000000d']));
     await queue.append(entry('dm', 2, ['00000000b', '00000000a']));
 
-    assert.deepStrictEqual((await queue.pending('00000000b', 'd1', 2)).frames.map(String), ['dm']);
+    assert.deepStrictEqual((await queue.pending('00000000b', DEVICE_1, 2)).envelopes.map(String), ['dm']);
     const { rows } = await pool.query('SELECT count(*)::int AS n FROM undelivered');
     assert.strictEqual(rows[0].n, 2);
   });
@@ -57,9 +58,9 @@ describe('pg undelivered queue (DECISIONS row 129)', { skip: TEST_DB !== 'pg' },
     const old = new Date(Date.now() - (TTL_SEC * 1000 + 10 * DAY_MS));
     await queue.maintain(old);
     await pool.query(
-      `INSERT INTO undelivered (ts, op_id, recipients, sender, sender_device, frame, expires_at, at)
-       VALUES (1, 'stale', $1, '', '', $2, $3, $3)`,
-      [[ALICE], Buffer.from('stale'), old]
+      `INSERT INTO undelivered (ts, op_id, recipients, envelope, expires_at, at)
+       VALUES (1, $1, $2, $3, $4, $4)`,
+      [idOf('stale'), [parseInt(ALICE, 16)], Buffer.from('stale'), old]
     );
     await queue.append(entry('fresh', 2, [ALICE]));
     assert.ok((await partitions()).includes(partitionName(dayOf(old.getTime()))));
@@ -71,7 +72,7 @@ describe('pg undelivered queue (DECISIONS row 129)', { skip: TEST_DB !== 'pg' },
 
     const day = dayOf(Date.now());
     assert.deepStrictEqual(await partitions(), range(4).map((n) => partitionName(day + n * DAY_MS)));
-    assert.deepStrictEqual((await queue.pending(ALICE, 'd2')).frames.map(String), ['fresh']);
+    assert.deepStrictEqual((await queue.pending(ALICE, DEVICE_2)).envelopes.map(String), ['fresh']);
   });
 
   test('a store never fails for want of a partition', async () => {
@@ -80,6 +81,50 @@ describe('pg undelivered queue (DECISIONS row 129)', { skip: TEST_DB !== 'pg' },
     await pool.query(`ALTER TABLE undelivered DETACH PARTITION ${name}; DROP TABLE ${name}`);
 
     await queue.append(entry('after the gap', 1, [ALICE]));
-    assert.deepStrictEqual((await queue.pending(ALICE, 'd2')).frames.map(String), ['after the gap']);
+    assert.deepStrictEqual((await queue.pending(ALICE, DEVICE_2)).envelopes.map(String), ['after the gap']);
+  });
+
+  test('ids are kept in binary types (decision 218)', async () => {
+    await emptyQueue(DB);
+    const { rows } = await pool.query(`
+      SELECT column_name AS name, udt_name AS type FROM information_schema.columns
+      WHERE table_name = 'undelivered' ORDER BY ordinal_position`);
+    assert.deepStrictEqual(Object.fromEntries(rows.map((row) => [row.name, row.type])), {
+      ts: 'int8',
+      op_id: 'uuid',
+      recipients: '_int8',
+      sender: 'int8',
+      sender_device: 'uuid',
+      envelope: 'bytea',
+      expires_at: 'timestamptz',
+      at: 'timestamptz'
+    });
+  });
+
+  test('what this device sent is left out; a device id that is no UUID sent nothing', async () => {
+    const queue = await emptyQueue(DB);
+    await queue.append({ ...entry('mine', 1, [ALICE]), sender: ALICE });
+    await queue.append({ ...entry('event', 2, [ALICE]), sender: '', senderDevice: '' });
+
+    assert.deepStrictEqual((await queue.pending(ALICE, DEVICE_1)).envelopes.map(String), ['event']);
+    assert.deepStrictEqual((await queue.pending(ALICE, DEVICE_2)).envelopes.map(String), ['mine', 'event']);
+    assert.deepStrictEqual((await queue.pending(ALICE, 'default')).envelopes.map(String), ['mine', 'event']);
+  });
+
+  test('a text-id timeline from before decision 218 is dropped at boot, partitions and all', async () => {
+    await emptyQueue(DB);
+    await pool.query(`DROP TABLE undelivered;
+      CREATE TABLE undelivered (ts bigint, op_id text, recipients text[], sender text,
+        sender_device text, frame bytea, expires_at timestamptz, at timestamptz NOT NULL DEFAULT now())
+        PARTITION BY RANGE (at);
+      CREATE TABLE ${partitionName(dayOf(Date.now()))} PARTITION OF undelivered
+        FOR VALUES FROM ('${new Date(dayOf(Date.now())).toISOString()}')
+        TO ('${new Date(dayOf(Date.now()) + DAY_MS).toISOString()}');
+      INSERT INTO undelivered (ts, op_id, recipients, sender, sender_device, frame, expires_at)
+        VALUES (1, 'old', '{00000000b}', '', '', 'x', now() + interval '1 hour')`);
+
+    const queue = await emptyQueue(DB);
+    await queue.append(entry('new', 1, [ALICE]));
+    assert.deepStrictEqual((await queue.pending(ALICE, DEVICE_2)).envelopes.map(String), ['new']);
   });
 });

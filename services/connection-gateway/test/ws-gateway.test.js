@@ -8,16 +8,22 @@ const {
   encodeWsEnvelope,
   decodeWsEnvelope,
   opIdUserBits,
-  dmChannelId
+  dmChannelId,
+  toWire,
+  uuidBytes,
+  uuidText,
+  userIdBytes
 } = require('../../../libs/v3-envelope');
 const {
-  ACCESSKEY, mintOpId, opFrame, legacyWire, startGateway, connect
+  ACCESSKEY, DEVICE_1, DEVICE_2, mintOpId, opFrame, legacyWire, onWire, startGateway, connect
 } = require('./helper');
 
 const ALICE = 'a3f2e8c5d';
 const BOB = 'b1c2d3e4f';
 const CHANNEL = '01efabcd-7000-8000-8abc-000000000001';
 const CARL = 'c2d3e4f5a';
+/** A group nobody here is a member of. */
+const OTHER_CHANNEL = '01efabcd-7000-8000-8abc-0000000000ff';
 /** No row anywhere: a DM id is derived from the pair (TRIM_4_12_CONTRACT §1). */
 const DM = dmChannelId(ALICE, BOB);
 
@@ -29,7 +35,6 @@ function envelope(userId, n, extra = {}) {
   return {
     opId: mintOpId(userId, { counter: n, rand }),
     channelId: CHANNEL,
-    clientTimestampMs: Date.now(),
     payload: payload(),
     ...fields
   };
@@ -64,7 +69,8 @@ test('binds the socket to the authenticated user and device', async () => {
   await withGateway(async ({ uri, publishedEnvelopes }) => {
     const client = connect(uri, ALICE);
     await client.opened;
-    client.send(opFrame([envelope(ALICE, 1, { senderUserId: BOB, senderDeviceId: 'forged' })]));
+    // a sender_device_id from the client is not believed
+    client.send(opFrame([{ ...toWire(envelope(ALICE, 1)), senderDeviceId: uuidBytes(DEVICE_2) }]));
     const frame = await client.next();
 
     assert.strictEqual(frame.type, WS_TYPE.WS_ACK);
@@ -75,7 +81,10 @@ test('binds the socket to the authenticated user and device', async () => {
     const [published] = publishedEnvelopes();
     assert.strictEqual(published.key, CHANNEL);
     assert.strictEqual(published.args.envelope.senderUserId, ALICE);
-    assert.strictEqual(published.args.envelope.senderDeviceId, 'device-1');
+    assert.strictEqual(published.args.senderDevice, DEVICE_1);
+    assert.deepStrictEqual(
+      decodeWsEnvelope(published.args.toPushFrame()).push.senderDeviceId, uuidBytes(DEVICE_1)
+    );
     assert.strictEqual(
       published.args.envelope.serverTimestampMs, frame.acks.acks[0].serverTimestampMs
     );
@@ -114,28 +123,19 @@ test('op_id minted for another user is prefix_mismatch', async () => {
   });
 });
 
-test('resource_seq from an older client is ignored: gaps, repeats and none all land', async () => {
+test('a text-era frame from an older build fails cleanly as validation_failed', async () => {
   await withGateway(async ({ uri, publishedEnvelopes }) => {
     const client = connect(uri, ALICE);
     await client.opened;
+    // decision 218: string op_id/channel_id/peer (fields 1, 2, 7) are reserved
+    client.send(legacyWire.opFrame([{
+      opId: mintOpId(ALICE), channelId: CHANNEL, clientTimestampMs: Date.now(), payload: payload()
+    }]));
 
-    // DECISIONS row 127: the server keeps no per-channel counter, so nothing
-    // an older client puts in field 3 can be out_of_order.
-    const seqs = [7, 3, 3, undefined, 1];
-    // eslint-disable-next-line no-restricted-syntax
-    for (const [n, resourceSeq] of seqs.entries()) {
-      client.send(legacyWire.opFrame([{ ...envelope(ALICE, n + 1), resourceSeq }]));
-      // eslint-disable-next-line no-await-in-loop
-      const [ack] = (await client.next()).acks.acks;
-      assert.strictEqual(ack.outcome, ACK_OUTCOME.SUCCESS, `resource_seq ${resourceSeq}`);
-    }
-
-    const published = publishedEnvelopes();
-    assert.strictEqual(published.length, seqs.length);
-    // and it is not passed on to the recipients either
-    published.forEach(({ args }) => {
-      assert.strictEqual(legacyWire.decode(args.toPushFrame()).push.resourceSeq, undefined);
-    });
+    const [ack] = (await client.next()).acks.acks;
+    assert.strictEqual(ack.outcome, ACK_OUTCOME.PERMANENT);
+    assert.strictEqual(ack.reason, REASON.VALIDATION_FAILED);
+    assert.strictEqual(publishedEnvelopes().length, 0);
     client.close();
   });
 });
@@ -162,7 +162,7 @@ test('a permanent reject replays identically too', async () => {
   await withGateway(async ({ uri }) => {
     const client = connect(uri, ALICE);
     await client.opened;
-    const env = envelope(ALICE, 1, { channelId: 'not-my-channel' });
+    const env = envelope(ALICE, 1, { channelId: OTHER_CHANNEL });
 
     client.send(opFrame([env]));
     const first = (await client.next()).acks.acks[0];
@@ -179,7 +179,7 @@ test('a non-member gets forbidden', async () => {
   await withGateway(async ({ uri, publishedEnvelopes }) => {
     const client = connect(uri, ALICE);
     await client.opened;
-    client.send(opFrame([envelope(ALICE, 1, { channelId: 'someone-elses-channel' })]));
+    client.send(opFrame([envelope(ALICE, 1, { channelId: OTHER_CHANNEL })]));
 
     const [ack] = (await client.next()).acks.acks;
     assert.strictEqual(ack.outcome, ACK_OUTCOME.PERMANENT);
@@ -195,61 +195,103 @@ test('a DM envelope needs no channel row and fans out to the peer', async () => 
   await withGateway(async ({ uri, publishedEnvelopes }) => {
     const client = connect(uri, ALICE);
     await client.opened;
-    client.send(opFrame([envelope(ALICE, 1, { channelId: DM, peer: BOB })]));
+    // the app sends the peer and no channel: toWire drops a DM's channel id
+    client.send(opFrame([envelope(ALICE, 1, { peer: BOB })]));
 
     const [ack] = (await client.next()).acks.acks;
     assert.strictEqual(ack.outcome, ACK_OUTCOME.SUCCESS);
 
     const [published] = publishedEnvelopes();
+    // the channel is derived from the pair, inside the server only
+    assert.strictEqual(published.key, DM);
     assert.strictEqual(published.args.envelope.channelId, DM);
     assert.strictEqual(published.args.envelope.peer, BOB);
     // spelled out by the gateway: message-delivery must not look for a row.
     // The sender is in the list so their other devices get it (§8).
     assert.deepStrictEqual(published.args.recipients, [BOB, ALICE]);
+    const { push } = onWire(published.args.toPushFrame());
+    assert.deepStrictEqual(push.peer, userIdBytes(BOB), 'the peer is echoed on fanout');
+    assert.strictEqual(push.channelId, undefined, 'a DM channel is never on the wire');
     client.close();
   });
 });
 
-test('a DM envelope without a peer is validation_failed', async () => {
+test('a DM names a peer and no channel_id, a group the reverse; anything else is validation_failed', async () => {
   await withGateway(async ({ uri, publishedEnvelopes }) => {
     const client = connect(uri, ALICE);
     await client.opened;
-    client.send(opFrame([envelope(ALICE, 1, { channelId: DM })]));
+    const group = toWire(envelope(ALICE, 1));
+    const both = { ...toWire(envelope(ALICE, 2)), peer: userIdBytes(BOB) };
+    const { channelId: _, ...neither } = toWire(envelope(ALICE, 3));
+    assert.ok(group.channelId && !group.peer);
+    client.send(opFrame([both, neither]));
+
+    const { acks } = (await client.next()).acks;
+    assert.deepStrictEqual(acks.map((ack) => ack.reason), [
+      REASON.VALIDATION_FAILED, REASON.VALIDATION_FAILED
+    ]);
+    assert.deepStrictEqual(acks.map((ack) => ack.outcome), [
+      ACK_OUTCOME.PERMANENT, ACK_OUTCOME.PERMANENT
+    ]);
+    assert.strictEqual(publishedEnvelopes().length, 0);
+    client.close();
+  });
+});
+
+test('an id of the wrong length is validation_failed, and its ack names the bytes sent', async () => {
+  await withGateway(async ({ uri, publishedEnvelopes }) => {
+    const client = connect(uri, ALICE);
+    await client.opened;
+    const good = toWire(envelope(ALICE, 1));
+    const cases = [
+      { ...good, opId: good.opId.subarray(0, 15) },
+      { ...toWire(envelope(ALICE, 2)), channelId: good.channelId.subarray(0, 15) },
+      { ...toWire(envelope(ALICE, 3)), channelId: Buffer.concat([good.channelId, Buffer.from([0])]) },
+      { ...toWire(envelope(ALICE, 4, { peer: BOB })), peer: userIdBytes(BOB).subarray(1) },
+      // five bytes, but past 36 bits: no user_id has that top nibble
+      { ...toWire(envelope(ALICE, 5, { peer: BOB })), peer: Buffer.from('1b1c2d3e4f', 'hex') }
+    ];
+    client.send(opFrame(cases));
+
+    const { acks } = (await client.next()).acks;
+    assert.strictEqual(acks.length, cases.length);
+    acks.forEach((ack, index) => {
+      assert.strictEqual(ack.outcome, ACK_OUTCOME.PERMANENT, `case ${index}`);
+      assert.strictEqual(ack.reason, REASON.VALIDATION_FAILED, `case ${index}`);
+      assert.deepStrictEqual(ack.opId, cases[index].opId, `case ${index}`);
+    });
+    assert.strictEqual(publishedEnvelopes().length, 0);
+    client.close();
+  });
+});
+
+test('a session whose device id is no UUID cannot send: it could not be stamped', async () => {
+  await withGateway(async ({ uri, publishedEnvelopes }) => {
+    const client = connect(uri, ALICE, 'not-a-uuid');
+    await client.opened;
+    client.send(opFrame([envelope(ALICE, 1)]));
 
     const [ack] = (await client.next()).acks.acks;
-    assert.strictEqual(ack.outcome, ACK_OUTCOME.PERMANENT);
     assert.strictEqual(ack.reason, REASON.VALIDATION_FAILED);
     assert.strictEqual(publishedEnvelopes().length, 0);
     client.close();
   });
 });
 
-test('a peer that does not derive to the channel_id is forbidden', async () => {
-  await withGateway(async ({ uri, publishedEnvelopes }) => {
-    const client = connect(uri, ALICE);
-    await client.opened;
-    client.send(opFrame([envelope(ALICE, 1, { channelId: DM, peer: CARL })]));
-
-    const [ack] = (await client.next()).acks.acks;
-    assert.strictEqual(ack.outcome, ACK_OUTCOME.PERMANENT);
-    assert.strictEqual(ack.reason, REASON.FORBIDDEN);
-    assert.strictEqual(publishedEnvelopes().length, 0);
-    client.close();
-  });
-});
-
-test('a third party cannot send on somebody else\'s DM id', async () => {
+test('a third party cannot send on somebody else\'s DM: the pair derives another channel', async () => {
   await withGateway(async ({ uri, publishedEnvelopes }) => {
     const client = connect(uri, CARL);
     await client.opened;
-    // every peer carl can name derives to a different id, so squatting
-    // alice+bob's channel is unrepresentable
-    client.send(opFrame([envelope(CARL, 1, { channelId: DM, peer: BOB })]));
+    // carl's own user_id is half of whatever channel his peer derives to,
+    // so alice+bob's channel is unrepresentable
+    client.send(opFrame([envelope(CARL, 1, { peer: BOB })]));
 
     const [ack] = (await client.next()).acks.acks;
-    assert.strictEqual(ack.outcome, ACK_OUTCOME.PERMANENT);
-    assert.strictEqual(ack.reason, REASON.FORBIDDEN);
-    assert.strictEqual(publishedEnvelopes().length, 0);
+    assert.strictEqual(ack.outcome, ACK_OUTCOME.SUCCESS);
+    const [published] = publishedEnvelopes();
+    assert.strictEqual(published.args.envelope.channelId, dmChannelId(CARL, BOB));
+    assert.notStrictEqual(published.args.envelope.channelId, DM);
+    assert.deepStrictEqual(published.args.recipients, [BOB, CARL]);
     client.close();
   });
 });
@@ -268,23 +310,29 @@ test('a 0x53 payload from a client is rejected as validation_failed', async () =
   });
 });
 
-test('the ack and the fanout carry server_timestamp_ms and no delivery_sequence', async () => {
+test('the ack echoes the op_id bytes; the fanout encodes nothing at its default', async () => {
   await withGateway(async ({ uri, publishedEnvelopes }) => {
     const client = connect(uri, ALICE);
     await client.opened;
     const before = Date.now();
+    const sent = [envelope(ALICE, 1), envelope(ALICE, 2)];
 
-    client.send(opFrame([envelope(ALICE, 1), envelope(ALICE, 2)]));
+    client.send(opFrame(sent));
     const frame = await client.next();
-    const { acks } = legacyWire.decode(frame.raw).acks;
-    const pushes = publishedEnvelopes().map(({ args }) => legacyWire.decode(args.toPushFrame()).push);
+    const { acks } = onWire(frame.raw).acks;
+    const pushes = publishedEnvelopes().map(({ args }) => onWire(args.toPushFrame()).push);
 
     assert.strictEqual(acks.length, 2);
     acks.forEach((ack, index) => {
+      assert.deepStrictEqual(Object.keys(ack).sort(), ['opId', 'outcome', 'serverTimestampMs']);
+      assert.deepStrictEqual(ack.opId, uuidBytes(sent[index].opId), 'the op_id as sent');
       assert.ok(ack.serverTimestampMs >= before);
       assert.strictEqual(pushes[index].serverTimestampMs, ack.serverTimestampMs);
-      assert.strictEqual(ack.deliverySequence, undefined, 'Ack.delivery_sequence (6) is retired');
-      assert.strictEqual(pushes[index].deliverySequence, undefined, 'field 22 is retired');
+      // decision 218: no sender, no client clock, no flags/ttl/ephemeral unset
+      assert.deepStrictEqual(Object.keys(pushes[index]).sort(), [
+        'channelId', 'opId', 'payload', 'senderDeviceId', 'serverTimestampMs'
+      ]);
+      assert.deepStrictEqual(pushes[index].channelId, uuidBytes(CHANNEL));
     });
     client.close();
   });
@@ -331,7 +379,7 @@ test('a fanout envelope is pushed to the recipient device, not to the user', asy
 
     const frame = await bob.next();
     assert.strictEqual(frame.type, WS_TYPE.WS_PUSH);
-    assert.strictEqual(frame.push.senderUserId, ALICE);
+    assert.deepStrictEqual(frame.push.opId, uuidBytes(stamped.opId));
     assert.strictEqual(frame.push.serverTimestampMs, 1700000000123);
     // Every subject we could not reach comes back for the undelivered queue.
     assert.deepStrictEqual(offline, ['c0ffee123:device-1']);
@@ -414,7 +462,7 @@ test('a server-only WsType from a client is a protocol error', async () => {
   await withGateway(async ({ uri }) => {
     const client = connect(uri, ALICE);
     await client.opened;
-    client.send(encodeWsEnvelope({ type: WS_TYPE.WS_PUSH, push: envelope(ALICE, 1) }));
+    client.send(encodeWsEnvelope({ type: WS_TYPE.WS_PUSH, push: toWire(envelope(ALICE, 1)) }));
 
     const frame = await client.next();
     assert.strictEqual(frame.type, WS_TYPE.WS_ERROR);
@@ -555,7 +603,8 @@ test('envelope flags reach the fanout as sent, bits the server does not know inc
     assert.strictEqual(frame.acks.acks[0].outcome, ACK_OUTCOME.SUCCESS);
     const [published] = publishedEnvelopes();
     assert.strictEqual(published.args.envelope.flags, 33);
-    assert.strictEqual(published.args.silent, true);
+    assert.strictEqual(decodeWsEnvelope(published.args.toPushFrame()).push.flags, 33);
+    assert.strictEqual(published.args.wakes, false);
     client.close();
   });
 });
@@ -565,21 +614,21 @@ test('POST /ops takes a WS_OP frame over https and answers with its WS_ACK', asy
     const post = (frame) => fetch(`${uri}/ops`, {
       method: 'POST',
       // what nginx sets after the `/auth` subrequest
-      headers: { 'content-type': 'application/json', 'x-user': ALICE, 'x-device': 'device-2' },
+      headers: { 'content-type': 'application/json', 'x-user': ALICE, 'x-device': DEVICE_2 },
       body: JSON.stringify({ frame: frame.toString('base64') })
     });
-    const env = envelope(ALICE, 1, { channelId: DM, peer: BOB });
+    const env = envelope(ALICE, 1, { peer: BOB });
 
     const response = await post(opFrame([env]));
     assert.strictEqual(response.status, 200);
     const reply = decodeWsEnvelope(Buffer.from((await response.json()).frame, 'base64'));
     assert.strictEqual(reply.type, WS_TYPE.WS_ACK);
     const [ack] = reply.acks.acks;
-    assert.strictEqual(ack.opId, env.opId);
+    assert.strictEqual(uuidText(ack.opId), env.opId);
     assert.strictEqual(ack.outcome, ACK_OUTCOME.SUCCESS);
     const [published] = publishedEnvelopes();
     assert.strictEqual(published.args.envelope.senderUserId, ALICE);
-    assert.strictEqual(published.args.senderDevice, 'device-2');
+    assert.strictEqual(published.args.senderDevice, DEVICE_2);
 
     // one dedup window with the socket: the same op there is the stored ack
     const client = connect(uri, ALICE);

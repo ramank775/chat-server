@@ -7,6 +7,7 @@ const {
 const { addHttpOptions, initHttpResource, HttpServiceBase } = require('../../libs/http-service-base');
 const UndeliveredQueue = require('../../libs/delivery-manager/undelivered-queue');
 const { extractInfoFromRequest, schemas } = require('../../helper');
+const { pendingPage } = require('../../libs/v3-envelope');
 
 const asMain = require.main === module;
 
@@ -57,24 +58,23 @@ class MessageMs extends HttpServiceBase {
    * device's pointer (a server_timestamp_ms, inclusive) on, oldest first, and
    * whether more wait. Removes nothing and remembers nothing: the device keeps
    * its own pointer, and an envelope stays for the retention. What this device
-   * sent itself is left out; the user's other devices get it.
+   * sent itself is left out; the user's other devices get it. The body is a
+   * `PendingPage` (decision 218), each envelope as a WS_PUSH carries it.
    */
   async pendingSync(req, res) {
     const user = extractInfoFromRequest(req, 'x-user');
     // the gateway's default for a session that carried no device id
     const device = extractInfoFromRequest(req, 'x-device', 'default');
-    const { frames, more } = await this.undeliveredQueue.pending(user, device, req.query.since);
+    const { envelopes, more } = await this.undeliveredQueue.pending(user, device, req.query.since);
     this.statsClient.increment({
       stat: 'sync.pending.frame_count',
-      value: frames.length,
+      value: envelopes.length,
       tags: { user }
     });
-    return res.response({
-      frames: frames.map((frame) => frame.toString('base64')),
-      more
-    }).code(200);
+    return res.response(pendingPage(envelopes, more))
+      .header('content-type', 'application/x-protobuf')
+      .code(200);
   }
-
 
   async shutdown() {
     await super.shutdown();

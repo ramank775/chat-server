@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { dmChannelId, isDmChannelId } = require('../libs/v3-envelope');
+const { dmChannelId } = require('../libs/v3-envelope');
 
 /**
  * TRIM_4_12_CONTRACT §1. The client derives the same id in Dart, so this
@@ -31,14 +31,4 @@ test('a different peer derives a different id', () => {
 
 test('a self DM is derivable and stable', () => {
   assert.strictEqual(dmChannelId(ALICE, ALICE), dmChannelId(ALICE, ALICE));
-});
-
-test('only a derived id is a DM id — a group UUID never is', () => {
-  assert.ok(isDmChannelId(FIXTURE));
-  // a UUID starting with `d` still has a dash at index 8, so the two id
-  // spaces cannot collide
-  assert.ok(!isDmChannelId('d1efabcd-7000-8000-8abc-000000000002'));
-  assert.ok(!isDmChannelId('g1efabcd7000800'));
-  assert.ok(!isDmChannelId(''));
-  assert.ok(!isDmChannelId(undefined));
 });

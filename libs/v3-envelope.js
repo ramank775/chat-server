@@ -13,12 +13,14 @@ const { IEventArg } = require('./event-store');
 /**
  * Framing for the internal bus only — never on the client wire, so it lives
  * here rather than in proto/ (which holds the two schemas copied verbatim
- * from the spec). One stamped Envelope, the users (or, past fanout, the
- * `user_id:device_id` subjects) it goes to, and the device that sent it —
- * the one device fanout skips (TRIM_4_12_CONTRACT §8). What the gateway
- * publishes to the new-message topic and what delivery-manager carries over
- * its Redis pubsub between gateways. The `payload` bytes stay binary, which
- * is why this is protobuf and not JSON.
+ * from the spec). One stamped Envelope exactly as its recipients get it, the
+ * users (or, past fanout, the `user_id:device_id` subjects) it goes to, and
+ * what the server needs that the wire leaves out (decision 218): the sending
+ * device (the one device fanout skips, TRIM_4_12_CONTRACT §8), the sending
+ * user, and the channel id as text, a DM's derived one included. What the
+ * gateway publishes to the new-message topic and what delivery-manager
+ * carries over its Redis pubsub between gateways. The `payload` bytes stay
+ * binary, which is why this is protobuf and not JSON.
  */
 const INTERNAL_PROTO = `
   syntax = "proto3";
@@ -27,6 +29,8 @@ const INTERNAL_PROTO = `
     repeated string recipients = 1;
     Envelope envelope = 2;
     string sender_device = 3;
+    string sender = 4;
+    string channel_id = 5;
   }`;
 
 /** @type {protobufjs.Root} */
@@ -95,15 +99,28 @@ const SERVER_EVENT_MARKER = 0x53;
 /** `Envelope.flags` bits (proto §flags). */
 const ENVELOPE_FLAG = Object.freeze({ SILENT: 1 });
 
-/** A 9-lowercase-hex user_id, the only shape `peer` may take (trim 4). */
-const USER_ID = /^[0-9a-f]{9}$/;
+/** The frame class, `Envelope.flags` bits 1-3 (decision 218, proto §flags). */
+const FRAME_CLASS = Object.freeze({
+  MESSAGE: 0, MUTATION: 1, RECEIPT: 2, KEY: 3, RESEND: 4, EVENT: 5
+});
+
+/* eslint-disable no-bitwise -- flags is a bit set */
+/** The class a frame's flags carry; no flags is a MESSAGE. */
+const frameClass = (flags) => ((flags || 0) >> 1) & 7;
+
+/** The flags for a frame of class `cls`, no other bit set. */
+const classFlags = (cls) => cls << 1;
 
 /**
- * A derived DM channel id: `d` + 31 hex chars, no dashes. Group ids are
- * UUIDs, so the dash at index 8 keeps the two spaces disjoint even when a
- * UUID happens to start with `d`.
+ * Decision 218: wake an offline device only for a new message or a resend
+ * request, and never for a SILENT one.
  */
-const DM_CHANNEL_ID = /^d[0-9a-f]{31}$/;
+const wakes = (flags) => ((flags || 0) & ENVELOPE_FLAG.SILENT) === 0
+  && [FRAME_CLASS.MESSAGE, FRAME_CLASS.RESEND].includes(frameClass(flags));
+/* eslint-enable no-bitwise */
+
+/** A 9-lowercase-hex user_id, the only shape `peer` may take (trim 4). */
+const USER_ID = /^[0-9a-f]{9}$/;
 
 /**
  * TRIM_4_12_CONTRACT §1 — the DM channel id both clients and the server
@@ -121,11 +138,6 @@ function dmChannelId(a, b) {
   return `d${digest.slice(0, 31)}`;
 }
 
-/** Is this channel id a derived DM id (and so never a channel-ms row)? */
-function isDmChannelId(channelId) {
-  return DM_CHANNEL_ID.test(channelId || '');
-}
-
 function isUserId(userId) {
   return USER_ID.test(userId || '');
 }
@@ -136,6 +148,97 @@ const DECODE_OPTIONS = {
   bytes: Buffer,
   defaults: true
 };
+
+/** The text form of every UUID the server keeps: lowercase and dashed. */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+function isUuid(id) {
+  return UUID.test(id || '');
+}
+
+// Decision 218: ids are bytes on the wire only, text everywhere else. These
+// four are the edge; a wrong length from a client is null, never a guess.
+
+/** 16 bytes as UUID text; null for any other length. */
+function uuidText(bytes) {
+  if (!bytes || bytes.length !== 16) return null;
+  const hex = Buffer.from(bytes).toString('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+/** UUID text as its 16 bytes. Throws on anything else: the server made it. */
+function uuidBytes(text) {
+  if (!isUuid(text)) throw new TypeError(`not a uuid: ${text}`);
+  return Buffer.from(text.replace(/-/g, ''), 'hex');
+}
+
+/**
+ * 5 big-endian bytes as the 9-hex user_id; null for any other length, or a
+ * value past 36 bits (the top nibble is always 0).
+ */
+function userIdText(bytes) {
+  if (!bytes || bytes.length !== 5) return null;
+  const hex = Buffer.from(bytes).toString('hex');
+  return hex[0] === '0' ? hex.slice(1) : null;
+}
+
+/** A 9-hex user_id as 5 bytes, big-endian. Throws on anything else. */
+function userIdBytes(userId) {
+  if (!isUserId(userId)) throw new TypeError(`not a user_id: ${userId}`);
+  return Buffer.from(`0${userId}`, 'hex');
+}
+
+/**
+ * A server-side envelope (text ids) as the wire Envelope its recipients get
+ * (decision 218): a group names its channel, a DM its peer and never its
+ * derived channel; the sender is in the op_id; nothing at its default is
+ * encoded. `senderDevice` is '' on a server-authored event.
+ * @param {object} envelope
+ * @param {string} [senderDevice]
+ */
+function toWire(envelope, senderDevice = '') {
+  const wire = {};
+  if (envelope.opId) wire.opId = uuidBytes(envelope.opId);
+  if (envelope.peer) wire.peer = userIdBytes(envelope.peer);
+  else if (envelope.channelId) wire.channelId = uuidBytes(envelope.channelId);
+  if (envelope.payload && envelope.payload.length) wire.payload = envelope.payload;
+  if (envelope.ephemeral) wire.ephemeral = true;
+  if (envelope.ttlSec) wire.ttlSec = envelope.ttlSec;
+  if (envelope.flags) wire.flags = envelope.flags;
+  if (envelope.serverTimestampMs) wire.serverTimestampMs = envelope.serverTimestampMs;
+  if (senderDevice) wire.senderDeviceId = uuidBytes(senderDevice);
+  return wire;
+}
+
+/** One wire Envelope, serialized: what the timeline stores. */
+function encodeEnvelope(wire) {
+  const definition = type('Envelope');
+  return Buffer.from(definition.encode(definition.create(wire)).finish());
+}
+
+function decodeEnvelope(buffer) {
+  const definition = type('Envelope');
+  return definition.toObject(definition.decode(buffer), DECODE_OPTIONS);
+}
+
+/**
+ * The `GET /v3.0/sync/pending` body: a PendingPage around stored Envelope
+ * bytes. Each one is written as it was stored (field 1, length-delimited),
+ * so nothing is decoded only to be encoded again.
+ * @param {Buffer[]} envelopes
+ * @param {boolean} more
+ */
+function pendingPage(envelopes, more) {
+  const writer = protobufjs.Writer.create();
+  envelopes.forEach((bytes) => writer.uint32(10).bytes(bytes));
+  if (more) writer.uint32(16).bool(true);
+  return Buffer.from(writer.finish());
+}
+
+function decodePendingPage(buffer) {
+  const definition = type('PendingPage');
+  return definition.toObject(definition.decode(buffer), DECODE_OPTIONS);
+}
 
 function encodeWsEnvelope(payload) {
   const definition = type('WsEnvelope');
@@ -195,7 +298,10 @@ function opIdUserBits(opId) {
 /**
  * Internal bus event: one server-stamped Envelope plus its fanout targets.
  * Published by the gateway to the new-message topic and carried by
- * delivery-manager's pubsub.
+ * delivery-manager's pubsub. The envelope is held with text ids (decision
+ * 218: bytes on the wire only): `opId`, `channelId` (a DM's derived one
+ * too), `peer` (DMs only), `senderUserId` ('' or the actor on a server
+ * event); `toWire` is where they turn into bytes.
  */
 class EnvelopeEvent extends IEventArg {
   /** @type {object} */
@@ -215,18 +321,33 @@ class EnvelopeEvent extends IEventArg {
     return event;
   }
 
+  /** The bus framing back: the wire Envelope's ids in text again. */
   static fromBinary(payload) {
     const definition = type('PushEvent');
     const json = definition.toObject(definition.decode(payload), DECODE_OPTIONS);
-    return EnvelopeEvent.of(json.envelope, json.recipients || [], json.senderDevice);
+    const wire = json.envelope || {};
+    const envelope = {
+      opId: uuidText(wire.opId) || '',
+      channelId: json.channelId,
+      peer: userIdText(wire.peer) || '',
+      payload: wire.payload,
+      ephemeral: wire.ephemeral,
+      ttlSec: wire.ttlSec,
+      flags: wire.flags,
+      serverTimestampMs: wire.serverTimestampMs,
+      senderUserId: json.sender
+    };
+    return EnvelopeEvent.of(envelope, json.recipients || [], json.senderDevice);
   }
 
   toBinary() {
     const definition = type('PushEvent');
     const message = {
       recipients: this._recipients,
-      envelope: this._envelope,
-      senderDevice: this._senderDevice
+      envelope: this.toWire(),
+      senderDevice: this._senderDevice,
+      sender: this._envelope.senderUserId || '',
+      channelId: this._envelope.channelId || ''
     };
     return Buffer.from(definition.encode(definition.create(message)).finish());
   }
@@ -281,15 +402,24 @@ class EnvelopeEvent extends IEventArg {
     return !!this._envelope.ephemeral;
   }
 
-  /** Queued like any envelope, but never wakes an offline device (proto §flags). */
-  get silent() {
-    // eslint-disable-next-line no-bitwise -- flags is a bit set
-    return ((this._envelope.flags || 0) & ENVELOPE_FLAG.SILENT) !== 0;
+  /** Whether an offline recipient is woken for it (decision 218, `wakes`). */
+  get wakes() {
+    return !this.ephemeral && wakes(this._envelope.flags);
+  }
+
+  /** The wire Envelope recipients get (decision 218). */
+  toWire() {
+    return toWire(this._envelope, this._senderDevice);
+  }
+
+  /** The wire Envelope, serialized: what the timeline keeps. */
+  toEnvelopeBytes() {
+    return encodeEnvelope(this.toWire());
   }
 
   /** The exact bytes a recipient's socket receives. */
   toPushFrame() {
-    return pushFrame(this._envelope);
+    return pushFrame(this.toWire());
   }
 }
 
@@ -298,10 +428,24 @@ module.exports = {
   ACK_OUTCOME,
   REASON,
   ENVELOPE_FLAG,
+  FRAME_CLASS,
   SERVER_EVENT_MARKER,
   EnvelopeEvent,
   encodeWsEnvelope,
   decodeWsEnvelope,
+  encodeEnvelope,
+  decodeEnvelope,
+  pendingPage,
+  decodePendingPage,
+  frameClass,
+  classFlags,
+  wakes,
+  toWire,
+  uuidText,
+  uuidBytes,
+  userIdText,
+  userIdBytes,
+  isUuid,
   ackFrame,
   pushFrame,
   reauthFrame,
@@ -309,6 +453,5 @@ module.exports = {
   opIdUserBits,
   serverNow,
   dmChannelId,
-  isDmChannelId,
   isUserId
 };

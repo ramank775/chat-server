@@ -1,7 +1,9 @@
 const path = require('path');
 const protobufjs = require('protobufjs');
 const { uuidv4 } = require('../../helper');
-const { EnvelopeEvent, ENVELOPE_FLAG, SERVER_EVENT_MARKER, serverNow } = require('../../libs/v3-envelope');
+const {
+  EnvelopeEvent, FRAME_CLASS, SERVER_EVENT_MARKER, classFlags, serverNow
+} = require('../../libs/v3-envelope');
 
 /**
  * SYNC_PROTOCOL.md §10.2 — the REST→WS bridge. Every channel write fans out
@@ -53,12 +55,12 @@ function channelServerEvent(type, body, { channelId, actor, recipients }) {
       // dedup on this id (§10.5) and nothing else reads it.
       opId: uuidv4(),
       channelId,
-      clientTimestampMs: now,
       payload: Buffer.concat([Buffer.from([SERVER_EVENT_MARKER]), bytes]),
+      // not on the wire (decision 218): message-delivery leaves the actor out
       senderUserId: actor,
       serverTimestampMs: now,
-      // Decision 212: a group change alone shows no notification.
-      flags: ENVELOPE_FLAG.SILENT
+      // Decision 218: class EVENT, which wakes nobody; no SILENT bit needed.
+      flags: classFlags(FRAME_CLASS.EVENT)
     },
     recipients
   );

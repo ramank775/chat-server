@@ -2,7 +2,9 @@ const test = require('node:test');
 const assert = require('node:assert');
 const crypto = require('crypto');
 const { NotificationMS } = require('../notification-ms');
-const { EnvelopeEvent, ENVELOPE_FLAG } = require('../../../libs/v3-envelope');
+const {
+  EnvelopeEvent, ENVELOPE_FLAG, FRAME_CLASS, classFlags, wakes
+} = require('../../../libs/v3-envelope');
 
 const USER = 'a1b2c3d4e';
 /** Wakes are keyed per `(user_id, device_id)` — TRIM_4_12_CONTRACT §7. */
@@ -22,6 +24,9 @@ function deviceKeys() {
 }
 const KEYS = deviceKeys();
 const REGISTRATION = { deviceId: 'device-1', endpoint: ENDPOINT, ...KEYS };
+/** A queued frame with these flags (none: a new message) for an offline device. */
+const frame = (flags = 0, payload = Buffer.from('chat')) => EnvelopeEvent.of({ flags, payload }, []);
+const MESSAGE = frame();
 
 // ponytail: hand rolled stubs, the repo has no test framework and these are
 // the only three collaborators notification-ms has.
@@ -94,7 +99,7 @@ test('wake goes to the registered endpoint and never carries message content', a
   const pns = stubPns();
   const service = await buildService(db, pns);
 
-  await service.pushNotification({ type: 'text', text: 'a secret message' }, SUBJECT);
+  await service.pushNotification(frame(0, Buffer.from('a secret message')), SUBJECT);
 
   assert.deepStrictEqual(pns.pushes, [REGISTRATION]);
   assert.deepStrictEqual(db.calls, []);
@@ -107,12 +112,12 @@ test('wake is debounced per (user_id, device_id), held back not dropped', async 
   const pns = stubPns();
   const service = await buildService(db, pns);
 
-  await service.pushNotification({ type: 'text' }, SUBJECT);
-  await service.pushNotification({ type: 'text' }, SUBJECT);
-  await service.pushNotification({ type: 'text' }, SUBJECT);
+  await service.pushNotification(MESSAGE, SUBJECT);
+  await service.pushNotification(MESSAGE, SUBJECT);
+  await service.pushNotification(MESSAGE, SUBJECT);
   assert.strictEqual(pns.pushes.length, 1, 'wakes within 5s wait');
 
-  await service.pushNotification({ type: 'text' }, 'f00ba4321:device-1');
+  await service.pushNotification(MESSAGE, 'f00ba4321:device-1');
   assert.strictEqual(pns.pushes.length, 2, 'another recipient is not debounced');
 
   t.mock.timers.tick(5000);
@@ -120,17 +125,46 @@ test('wake is debounced per (user_id, device_id), held back not dropped', async 
   assert.strictEqual(pns.pushes.length, 3, 'one wake when the window ends, for both held back');
 });
 
-test('a silent frame never wakes, and leaves the debounce window alone (decision 212)', async () => {
+test('the wake rule: only MESSAGE and RESEND wake, and never with SILENT (decision 218)', () => {
+  const { SILENT } = ENVELOPE_FLAG;
+  const table = Object.entries(FRAME_CLASS).map(([name, cls]) => [
+    name, wakes(classFlags(cls)), wakes(classFlags(cls) + SILENT)
+  ]);
+  assert.deepStrictEqual(table, [
+    ['MESSAGE', true, false],
+    ['MUTATION', false, false],
+    ['RECEIPT', false, false],
+    ['KEY', false, false],
+    ['RESEND', true, false],
+    ['EVENT', false, false]
+  ]);
+  assert.strictEqual(wakes(0), true, 'no flags is a MESSAGE');
+  assert.strictEqual(wakes(undefined), true);
+  // a bit the server does not know leaves the class alone
+  assert.strictEqual(wakes(classFlags(FRAME_CLASS.RESEND) + 32), true);
+  assert.strictEqual(wakes(classFlags(FRAME_CLASS.RECEIPT) + 32), false);
+});
+
+test('a frame that does not wake leaves the debounce window alone', async () => {
   const db = stubDb();
   db.topics = [REGISTRATION];
   const pns = stubPns();
   const service = await buildService(db, pns);
 
-  await service.pushNotification(EnvelopeEvent.of({ flags: ENVELOPE_FLAG.SILENT }, []), SUBJECT);
-  assert.strictEqual(pns.pushes.length, 0, 'a receipt does not wake');
+  const quiet = [
+    frame(classFlags(FRAME_CLASS.RECEIPT)),
+    frame(classFlags(FRAME_CLASS.MUTATION)),
+    frame(classFlags(FRAME_CLASS.KEY)),
+    frame(classFlags(FRAME_CLASS.EVENT)),
+    frame(ENVELOPE_FLAG.SILENT),
+    frame(classFlags(FRAME_CLASS.RESEND) + ENVELOPE_FLAG.SILENT),
+    EnvelopeEvent.of({ ephemeral: true }, [])
+  ];
+  await Promise.all(quiet.map((event) => service.pushNotification(event, SUBJECT)));
+  assert.strictEqual(pns.pushes.length, 0, 'none of those wakes');
 
-  await service.pushNotification({ type: 'text' }, SUBJECT);
-  assert.strictEqual(pns.pushes.length, 1, 'the next message wakes at once');
+  await service.pushNotification(frame(classFlags(FRAME_CLASS.RESEND)), SUBJECT);
+  assert.strictEqual(pns.pushes.length, 1, 'a resend request wakes at once');
 });
 
 test('a pre Web Push topicUrl row is never woken', async () => {
@@ -139,7 +173,7 @@ test('a pre Web Push topicUrl row is never woken', async () => {
   const pns = stubPns();
   const service = await buildService(db, pns);
 
-  await service.pushNotification({ type: 'text' }, SUBJECT);
+  await service.pushNotification(MESSAGE, SUBJECT);
 
   assert.strictEqual(pns.pushes.length, 0);
 });
@@ -150,7 +184,7 @@ test('a pre Web Push topicUrl row is never woken', async () => {
     db.topics = [REGISTRATION];
     const service = await buildService(db, stubPns(status));
 
-    await service.pushNotification({ type: 'text' }, SUBJECT);
+    await service.pushNotification(MESSAGE, SUBJECT);
 
     assert.deepStrictEqual(db.calls, [['remove', USER, { deviceId: 'device-1', endpoint: ENDPOINT }]]);
   });
@@ -159,8 +193,8 @@ test('a pre Web Push topicUrl row is never woken', async () => {
 test('a 413 or a 429 keeps the registration', async () => {
   const db = stubDb();
   db.topics = [REGISTRATION];
-  await (await buildService(db, stubPns(413))).pushNotification({ type: 'text' }, SUBJECT);
-  await (await buildService(db, stubPns(429))).pushNotification({ type: 'text' }, SUBJECT);
+  await (await buildService(db, stubPns(413))).pushNotification(MESSAGE, SUBJECT);
+  await (await buildService(db, stubPns(429))).pushNotification(MESSAGE, SUBJECT);
   assert.deepStrictEqual(db.calls, []);
 });
 

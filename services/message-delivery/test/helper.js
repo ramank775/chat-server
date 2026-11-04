@@ -2,7 +2,8 @@ const { MongoClient } = require('mongodb');
 const { DeliveryManager } = require('../../../libs/delivery-manager');
 const { UndeliveredQueue, COLLECTION } = require('../../../libs/delivery-manager/undelivered-queue');
 const { PgUndeliveredQueue } = require('../../../libs/delivery-manager/pg-undelivered-queue');
-const { EnvelopeEvent } = require('../../../libs/v3-envelope');
+const { EnvelopeEvent, uuidText, uuidBytes } = require('../../../libs/v3-envelope');
+const { DEVICE_1 } = require('../../connection-gateway/test/helper');
 const { MessageDeliveryWorker } = require('../message-delivery-worker');
 const { initPgPool } = require('../../../libs/pg-utils');
 const {
@@ -69,6 +70,14 @@ async function closeQueues() {
   clients.clear();
 }
 
+/**
+ * A readable name (at most 16 bytes) as a UUID, its bytes zero padded, so a
+ * test can still say 'op-1' and 'channel-1' (decision 218: ids are UUIDs).
+ * Names sort as their UUIDs do.
+ */
+const idOf = (name) => uuidText(Buffer.concat([Buffer.from(name), Buffer.alloc(16 - Buffer.byteLength(name))]));
+const nameOf = (uuid) => uuidBytes(uuid).toString().replace(/\0+$/, '');
+
 /** Just enough ioredis for DeliveryManager's routing table and pubsub. */
 class FakeRedis {
   _kv = new Map();
@@ -106,8 +115,9 @@ function envelopeEvent({
   opId = 'op-1',
   channelId = 'channel-1',
   senderUserId = '00000000a',
-  senderDevice = 'device-1',
+  senderDevice = DEVICE_1,
   ephemeral = false,
+  flags = 0,
   payload = Buffer.from('chat'),
   recipients = [],
   // now: an envelope stamped long ago has expired (§10.6)
@@ -115,10 +125,11 @@ function envelopeEvent({
 } = {}) {
   return EnvelopeEvent.of(
     {
-      opId,
-      channelId,
+      opId: idOf(opId),
+      channelId: idOf(channelId),
       payload,
       ephemeral,
+      flags,
       senderUserId,
       serverTimestampMs
     },
@@ -131,7 +142,7 @@ const DB = 'message-delivery-test';
 
 /**
  * Wire up the real worker over a fake redis, a stub event store, a stub
- * channel-ms and an empty queue. `members` maps channel_id -> user_ids.
+ * channel-ms and an empty queue. `members` maps channel name -> user_ids.
  */
 async function startWorker({ members = new Map() } = {}) {
   const redis = new FakeRedis();
@@ -146,7 +157,8 @@ async function startWorker({ members = new Map() } = {}) {
       dispose: async () => { }
     },
     channelServiceClient: {
-      members: async (channelId) => new Set(members.get(channelId) || [])
+      // keyed by the channel's name, as the tests write it
+      members: async (channelId) => new Set(members.get(nameOf(channelId)) || [])
     },
     deliveryManager: new DeliveryManager({ redis, serverId: 'message-delivery', maxRetry: 3 }),
     undeliveredQueue: await emptyQueue(DB)
@@ -160,13 +172,13 @@ async function startWorker({ members = new Map() } = {}) {
     emitted,
     queue: context.undeliveredQueue,
     /** Park a device on a live gateway so delivery-manager routes to it. */
-    async online(userId, deviceId = 'device-1', gateway = 'gateway-1') {
+    async online(userId, deviceId = DEVICE_1, gateway = 'gateway-1') {
       await manager.userJoin(userId, deviceId);
       await redis.set(`route:${userId}:${deviceId}`, gateway);
       await redis.set(`gateway:${gateway}:health`, 1);
     },
     /** A device the registry knows but whose socket is closed. */
-    async offline(userId, deviceId = 'device-1') {
+    async offline(userId, deviceId = DEVICE_1) {
       await manager.userJoin(userId, deviceId);
       await manager.userLeft(userId, deviceId);
     },
@@ -184,6 +196,8 @@ const eachSeries = (items, fn) => items.reduce(
 );
 
 module.exports = {
+  idOf,
+  nameOf,
   envelopeEvent,
   startWorker,
   settle,

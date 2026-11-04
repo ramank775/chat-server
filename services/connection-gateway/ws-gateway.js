@@ -30,8 +30,9 @@ const {
   opIdUserBits,
   serverNow,
   dmChannelId,
-  isDmChannelId,
-  isUserId
+  uuidText,
+  userIdText,
+  isUuid
 } = require('../../libs/v3-envelope');
 
 const asMain = require.main === module;
@@ -428,110 +429,135 @@ class Gateway extends HttpServiceBase {
   /**
    * SYNC_PROTOCOL.md §6a.3. Returns the Ack to send back, or null for an
    * ephemeral envelope (which is never acked).
+   * Decision 218: the ids arrive as bytes and are turned into their text
+   * forms here, the one place they enter; the Ack names the op by the bytes
+   * it was sent with.
+   * @param {{userId: string, deviceId: string, remoteIp: string}} session
+   * @param {object} wire the Envelope as decoded off the wire
    */
-  async processEnvelope(session, envelope) {
+  async processEnvelope(session, wire) {
     const { userId } = session;
-    const { opId } = envelope;
     const dedupKey = `dedup:${userId}`;
+    const permanent = (reason) => ({ opId: wire.opId, outcome: ACK_OUTCOME.PERMANENT, reason });
 
     // §14 rate limits. Checked first so a flood cannot burn downstream calls,
     // and never recorded in the dedup window — a transient outcome has to
     // stay retryable.
     const retryAfterMs = await this.checkRate(session);
     if (retryAfterMs) {
-      return { opId, outcome: ACK_OUTCOME.TRANSIENT, reason: REASON.RATE_LIMITED, retryAfterMs };
+      return {
+        opId: wire.opId, outcome: ACK_OUTCOME.TRANSIENT, reason: REASON.RATE_LIMITED, retryAfterMs
+      };
     }
 
+    // An op_id that is not 16 bytes has no text form to remember it by, and
+    // fails the same way again. The sending device goes on every fanout as
+    // 16 bytes, so a session whose device id is no UUID cannot send at all
+    // (the app's is a UUIDv4; only a hand-made session lacks one).
+    const opId = uuidText(wire.opId);
+    if (!opId || !isUuid(session.deviceId)) return permanent(REASON.VALIDATION_FAILED);
+
     // §3 — op_id must embed this session's user_id.
-    const bits = opIdUserBits(opId);
-    if (bits === null) return this.rejectPermanent(dedupKey, opId, REASON.VALIDATION_FAILED);
-    if (bits !== parseInt(userId, 16)) {
-      return this.rejectPermanent(dedupKey, opId, REASON.PREFIX_MISMATCH);
+    if (opIdUserBits(opId) !== parseInt(userId, 16)) {
+      return this.rejectPermanent(dedupKey, opId, wire.opId, REASON.PREFIX_MISMATCH);
     }
 
     // §7.1 — a replayed op_id returns the stored outcome, never re-processed.
     // Best effort: the window lives in the cache and may be lost on a restart,
     // which is harmless because clients dedupe inbound envelopes by op_id.
-    if (!envelope.ephemeral) {
+    if (!wire.ephemeral) {
       const stored = await this.memCache.dedupGet(dedupKey, opId);
-      if (stored) return JSON.parse(stored);
+      if (stored) return { ...JSON.parse(stored), opId: wire.opId };
+    }
+
+    // Decision 218: a DM names its peer and no channel, a group its channel
+    // and no peer; anything else is malformed.
+    const isDm = wire.peer.length > 0;
+    if (isDm === wire.channelId.length > 0) {
+      return this.rejectPermanent(dedupKey, opId, wire.opId, REASON.VALIDATION_FAILED);
     }
 
     // §6a.3 step 3 — membership. A DM id is derived from the pair
-    // (TRIM_4_12_CONTRACT §3), so it has no row to look up: recompute it
-    // from the authenticated sender and `peer` instead.
+    // (TRIM_4_12_CONTRACT §3), so it has no row to look up: the channel is
+    // whatever (sender, peer) derives to, and a third party cannot reach
+    // someone else's DM because their own user_id is half of it.
+    let channelId;
+    let peer = '';
     let recipients = [];
-    if (isDmChannelId(envelope.channelId)) {
-      if (!isUserId(envelope.peer)) {
-        return this.rejectPermanent(dedupKey, opId, REASON.VALIDATION_FAILED);
-      }
-      if (dmChannelId(userId, envelope.peer) !== envelope.channelId) {
-        return this.rejectPermanent(dedupKey, opId, REASON.FORBIDDEN);
-      }
+    if (isDm) {
+      peer = userIdText(wire.peer);
+      if (!peer) return this.rejectPermanent(dedupKey, opId, wire.opId, REASON.VALIDATION_FAILED);
+      channelId = dmChannelId(userId, peer);
       // Both sides, so the sender's own other devices get it too (§8); the
       // sending device is what fanout excludes.
-      recipients = [envelope.peer, userId];
+      recipients = [peer, userId];
     } else {
+      channelId = uuidText(wire.channelId);
+      if (!channelId) {
+        return this.rejectPermanent(dedupKey, opId, wire.opId, REASON.VALIDATION_FAILED);
+      }
       let isMember;
       try {
-        isMember = await this.channelClient.isMember(envelope.channelId, userId);
+        isMember = await this.channelClient.isMember(channelId, userId);
       } catch (e) {
         this.log.error('channel-ms membership lookup failed', { err: e, user: userId });
         return {
-          opId,
+          opId: wire.opId,
           outcome: ACK_OUTCOME.TRANSIENT,
           reason: REASON.DOWNSTREAM_TIMEOUT,
           retryAfterMs: 1000
         };
       }
-      if (!isMember) return this.rejectPermanent(dedupKey, opId, REASON.FORBIDDEN);
+      if (!isMember) return this.rejectPermanent(dedupKey, opId, wire.opId, REASON.FORBIDDEN);
     }
 
     // §10.2 / §19 decision 15 — a 0x53 payload is a server-authored event.
     // Clients may not mint one. This is the ONLY byte of `payload` we look
     // at; §6a.2 forbids parsing the rest.
-    if (envelope.payload && envelope.payload.length && envelope.payload[0] === SERVER_EVENT_MARKER) {
-      return this.rejectPermanent(dedupKey, opId, REASON.VALIDATION_FAILED);
-    }
-
-    // Ephemeral (typing): no dedup, no ack, and message-delivery drops it
-    // rather than queueing it offline.
-    if (envelope.ephemeral) {
-      await this.publishEnvelope({
-        ...envelope,
-        senderUserId: userId,
-        senderDeviceId: session.deviceId,
-        serverTimestampMs: serverNow()
-      }, recipients, session.deviceId);
-      return null;
+    if (wire.payload.length && wire.payload[0] === SERVER_EVENT_MARKER) {
+      return this.rejectPermanent(dedupKey, opId, wire.opId, REASON.VALIDATION_FAILED);
     }
 
     // The server keeps no per-channel order: it stamps server_timestamp_ms
     // and clients order a channel by (server_timestamp_ms, op_id). An edit
     // that arrives before its message is the client's to hold (DECISIONS row 127).
     const serverTimestampMs = serverNow();
+    const envelope = {
+      opId,
+      channelId,
+      peer,
+      payload: wire.payload,
+      ephemeral: wire.ephemeral,
+      ttlSec: wire.ttlSec,
+      flags: wire.flags,
+      senderUserId: userId,
+      serverTimestampMs
+    };
+
+    // Ephemeral (typing): no dedup, no ack, and message-delivery drops it
+    // rather than queueing it offline.
+    if (wire.ephemeral) {
+      await this.publishEnvelope(envelope, recipients, session.deviceId);
+      return null;
+    }
+
     try {
-      await this.publishEnvelope({
-        ...envelope,
-        senderUserId: userId,
-        senderDeviceId: session.deviceId,
-        serverTimestampMs
-      }, recipients, session.deviceId);
+      await this.publishEnvelope(envelope, recipients, session.deviceId);
     } catch (e) {
       this.log.error('Failed to publish envelope', { err: e, user: userId, opId });
       return {
-        opId,
+        opId: wire.opId,
         outcome: ACK_OUTCOME.TRANSIENT,
         reason: REASON.STORAGE_UNAVAILABLE,
         retryAfterMs: 1000
       };
     }
 
-    const ack = { opId, outcome: ACK_OUTCOME.SUCCESS, serverTimestampMs };
+    const ack = { outcome: ACK_OUTCOME.SUCCESS, serverTimestampMs };
     await this.memCache.dedupPut(
       dedupKey, opId, JSON.stringify(ack), DEDUP_MAX_ENTRIES, DEDUP_TTL_SEC
     );
-    return ack;
+    return { ...ack, opId: wire.opId };
   }
 
   /**
@@ -549,13 +575,16 @@ class Gateway extends HttpServiceBase {
     );
   }
 
-  /** §7.1 case 2 — permanent rejects are remembered so a replay repeats them. */
-  async rejectPermanent(dedupKey, opId, reason) {
-    const ack = { opId, outcome: ACK_OUTCOME.PERMANENT, reason };
+  /**
+   * §7.1 case 2 — permanent rejects are remembered so a replay repeats them.
+   * Kept under the op_id's text, without it: a replay names its own bytes.
+   */
+  async rejectPermanent(dedupKey, opId, opIdBytes, reason) {
+    const ack = { outcome: ACK_OUTCOME.PERMANENT, reason };
     await this.memCache.dedupPut(
       dedupKey, opId, JSON.stringify(ack), DEDUP_MAX_ENTRIES, DEDUP_TTL_SEC
     );
-    return ack;
+    return { ...ack, opId: opIdBytes };
   }
 
   /** §14.1 — per-user then per-IP. Returns 0 when the envelope may proceed. */

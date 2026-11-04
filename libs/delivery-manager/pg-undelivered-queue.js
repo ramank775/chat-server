@@ -1,5 +1,6 @@
-const { TTL_SEC, PAGE } = require('./undelivered-queue');
+const { TTL_SEC, PAGE, userNumber } = require('./undelivered-queue');
 const { ensureSchema } = require('../pg-utils');
+const { isUuid } = require('../v3-envelope');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const RETENTION_MS = TTL_SEC * 1000;
@@ -14,16 +15,21 @@ const MAINTAIN_LOCK = "hashtext('vartalap.undelivered'), 0";
  * `undelivered` is the timeline, append-only, one partition per UTC day of
  * `at`: nothing ever deletes a row, whole days are dropped past the 30-day
  * maximum instead, and reads leave out rows past their own `expires_at`. One
- * row per fanout, its readers in `recipients`.
+ * row per fanout, its readers in `recipients`, the wire Envelope in
+ * `envelope`. Ids in their binary types (decision 218): user ids as the
+ * 36-bit number, the others as uuid. `sender`/`sender_device` are null when
+ * no user/device sent it (a server event).
+ * The three indexes are the three lookups: a reader's rows (gin), their
+ * order (ts, op_id), and the once-per-op_id check on append.
  */
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS undelivered (
     ts bigint NOT NULL,
-    op_id text NOT NULL,
-    recipients text[] NOT NULL,
-    sender text NOT NULL,
-    sender_device text NOT NULL,
-    frame bytea NOT NULL,
+    op_id uuid NOT NULL,
+    recipients bigint[] NOT NULL,
+    sender bigint,
+    sender_device uuid,
+    envelope bytea NOT NULL,
     expires_at timestamptz NOT NULL,
     at timestamptz NOT NULL DEFAULT now()
   ) PARTITION BY RANGE (at);
@@ -33,20 +39,34 @@ const SCHEMA = `
 `;
 
 /**
+ * Decision 218: the text-id timeline of before goes, partitions and all.
+ * It only ever held test data, and every frame in it is in the old wire.
+ */
+const DROP_OLD_SHAPE = `
+  DO $$ BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+      WHERE table_schema = current_schema() AND table_name = 'undelivered'
+        AND column_name = 'op_id' AND data_type = 'text') THEN
+      DROP TABLE undelivered;
+    END IF;
+  END $$;
+`;
+
+/**
  * Once per op_id, as the mongo one: a unique index on a partitioned table must
  * include `at`, so the check is a lookup. Fanouts run one at a time, so two
  * never race it.
  */
 const APPEND = `
-  INSERT INTO undelivered (ts, op_id, recipients, sender, sender_device, frame, expires_at)
-  SELECT $1, $2, $3, $4, $5, $6, $7
-  WHERE NOT EXISTS (SELECT 1 FROM undelivered WHERE op_id = $2)`;
+  INSERT INTO undelivered (ts, op_id, recipients, sender, sender_device, envelope, expires_at)
+  SELECT $1, $2::uuid, $3::bigint[], $4::bigint, $5::uuid, $6, $7
+  WHERE NOT EXISTS (SELECT 1 FROM undelivered WHERE op_id = $2::uuid)`;
 
 /** A page plus one (`$4`), to tell whether more wait past it. */
 const PENDING = `
-  SELECT frame FROM undelivered
-  WHERE recipients @> ARRAY[$1]::text[] AND ts >= $2 AND expires_at > now()
-    AND NOT (sender = $1 AND sender_device = $3)
+  SELECT envelope FROM undelivered
+  WHERE recipients @> ARRAY[$1::bigint] AND ts >= $2 AND expires_at > now()
+    AND (sender IS DISTINCT FROM $1 OR sender_device IS DISTINCT FROM $3::uuid)
   ORDER BY ts, op_id LIMIT $4`;
 
 /** Every day partition, attached or left behind by a run that died mid-drop. */
@@ -89,7 +109,7 @@ class PgUndeliveredQueue {
 
   /** Tables, today's partitions, and the daily job. `init` runs it at boot. */
   async init() {
-    await ensureSchema(this.#pool, SCHEMA);
+    await ensureSchema(this.#pool, DROP_OLD_SHAPE + SCHEMA);
     await this.maintain();
     this.#timer = setInterval(() => {
       this.maintain().catch((error) =>
@@ -139,10 +159,13 @@ class PgUndeliveredQueue {
   /**
    * Store one fanout (see the mongo `append`).
    * @param {{opId: string, ts: number, expiresAt: Date, recipients: string[],
-   *   sender: string, senderDevice: string, frame: Buffer}} entry
+   *   sender: string, senderDevice: string, envelope: Buffer}} entry
    */
-  async append({ opId, ts, expiresAt, recipients, sender, senderDevice, frame }) {
-    const values = [ts, opId, recipients, sender, senderDevice, frame, expiresAt];
+  async append({ opId, ts, expiresAt, recipients, sender, senderDevice, envelope }) {
+    const values = [
+      ts, opId, recipients.map(userNumber), sender ? userNumber(sender) : null,
+      senderDevice || null, envelope, expiresAt
+    ];
     try {
       await this.#pool.query(APPEND, values);
     } catch (error) {
@@ -160,11 +183,16 @@ class PgUndeliveredQueue {
    * @param {string} deviceId
    * @param {number} [since]
    * @param {number} [limit]
-   * @returns {Promise<{frames: Buffer[], more: boolean}>}
+   * @returns {Promise<{envelopes: Buffer[], more: boolean}>}
    */
   async pending(userId, deviceId, since = 0, limit = PAGE) {
-    const { rows } = await this.#pool.query(PENDING, [userId, since, deviceId, limit + 1]);
-    return { frames: rows.slice(0, limit).map((row) => row.frame), more: rows.length > limit };
+    // a device id that is no UUID never sent anything: nothing to leave out
+    const device = isUuid(deviceId) ? deviceId : null;
+    const { rows } = await this.#pool.query(PENDING, [userNumber(userId), since, device, limit + 1]);
+    return {
+      envelopes: rows.slice(0, limit).map((row) => row.envelope),
+      more: rows.length > limit
+    };
   }
 
   async dispose() {
