@@ -200,7 +200,12 @@ tags:
       and returns it on the `Ack`, and clients order a channel by
       (`server_timestamp_ms`, `op_id`). `Envelope.resource_seq` (3),
       `Envelope.delivery_sequence` (22) and `Ack.delivery_sequence` (6) are
-      retired and reserved (decision 127).
+      retired and reserved (decision 127). Since decision 218 every id on
+      the wire is raw bytes (op_id, group channel_id and device ids 16, a
+      DM's `peer` 5), a DM sends `peer` and no `channel_id`, and the sender
+      is read from the op_id; `Envelope.flags` bits 1-3 carry the frame
+      class, which decides the push wake (MESSAGE and RESEND only) and a
+      receipt's 7-day retention.
 paths:
   /v3.0/keys/me:
     put:
@@ -574,9 +579,9 @@ paths:
         - v3.0 > Sync
       summary: Read the caller's timeline from this device's pointer
       description: >-
-        Every `WsEnvelope{type: WS_PUSH}` fanned out to the calling user is
-        kept once on the server, pushed live or not, until it expires: its
-        sender's `ttl_sec`, at most and by default 30 days. This returns
+        Every `Envelope` fanned out to the calling user is kept once on the
+        server, pushed live or not, until it expires: its sender's
+        `ttl_sec`, at most and by default 30 days (a receipt 7). This returns
         the unexpired ones naming this user with a `server_timestamp_ms` at or after
         `since`, oldest first (then by `op_id`), up to 500, leaving out what
         this very device sent. It removes nothing and remembers nothing: the
@@ -598,22 +603,17 @@ paths:
             default: 0
       responses:
         '200':
-          description: The frames from the pointer on; empty when there are none
+          description: >-
+            A serialized `PendingPage` (proto/v3-envelope.proto, decision
+            218): the envelopes from the pointer on, each exactly as a
+            WS_PUSH carries it, and `more` when more wait past this page
+            (pull again from its last server_timestamp_ms). Zero bytes when
+            there are none.
           content:
-            application/json:
+            application/x-protobuf:
               schema:
-                type: object
-                properties:
-                  frames:
-                    type: array
-                    items:
-                      type: string
-                      contentEncoding: base64
-                      description: A serialized `WsEnvelope` (proto/v3-envelope.proto) with `push` set
-                  more:
-                    type: boolean
-                    description: More frames wait past this page; pull again from its last server_timestamp_ms
-                required: [frames, more]
+                type: string
+                format: binary
         '400':
           description: '`since` is not a non-negative integer'
         '401':
