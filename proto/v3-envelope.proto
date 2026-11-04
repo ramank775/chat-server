@@ -44,126 +44,73 @@ package vartalap.v3;
 //
 // A client sends an Envelope to push some payload bytes into a channel.
 // The server validates routing fields, adds the server-stamped fields
-// (sender_user_id, server_timestamp_ms) on fanout,
+// (server_timestamp_ms, sender_device_id) on fanout,
 // and delivers the same Envelope to every other channel member.
 //
 // Recipients interpret `payload` according to the client-to-client
 // schema. The server's job ends at "delivered to channel members."
 //
 message Envelope {
-  // Client-generated UUIDv7. The dedup key. Stable across retries.
-  // Required on client→server. Echoed unchanged on fanout. Also the
-  // tie-break when two envelopes share a `server_timestamp_ms`.
-  string op_id = 1;
+  // Decision 218: every id is raw bytes, never text; what the receiver can
+  // derive is not sent. Fields 1-4, 7, 20, 22, 23 held the text-era
+  // fields and stay reserved, so an old build's frame fails cleanly.
+  reserved 1, 2, 3, 4, 7, 20, 22, 23;
+  reserved "resource_seq", "delivery_sequence", "client_timestamp_ms",
+    "sender_user_id";
 
-  // The channel this envelope targets. Server validates the sender is a
-  // member: a channel-ms row lookup for a group, the `peer` derivation
-  // below for a DM. Routing only; not a sequencing key. Required.
-  string channel_id = 2;
+  // The op's UUIDv7, 16 bytes (RFC 9562 byte order). Required. Its first
+  // 48 bits are the client's clock in ms (what client_timestamp_ms was),
+  // and bits 64..99 carry the sender's 36-bit user_id (§3): the server
+  // checks them against the session, so a receiver reads the sender from
+  // here. Clients dedupe on it and break ordering ties with it. A
+  // server-authored event (payload starting 0x53) has a random op id
+  // whose user bits mean nothing.
+  bytes op_id = 10;
 
-  // Retired: the per-(user, channel) counter the server used to validate
-  // (`out_of_order`). Sent by older clients; the server ignores it.
-  reserved 3;
-  reserved "resource_seq";
+  // A group's channel id: its UUID, 16 bytes. Absent for a DM: a DM
+  // channel is derived from the pair (TRIM_4_12_CONTRACT §1), the server
+  // from (sender, peer) and a receiver from (sender, peer) as well.
+  bytes channel_id = 11;
 
-  // Client wall-clock at op-creation, ms since epoch. Advisory only —
-  // server may use for audit logs and debugging; never for ordering —
-  // clients order by server_timestamp_ms then op_id. Optional.
-  uint64 client_timestamp_ms = 4;
+  // A DM's other participant: the 36-bit user_id as 5 bytes, big-endian
+  // (the 9-hex id left-padded with one 0 nibble). Required on a DM,
+  // absent on a group. Echoed unchanged on fanout.
+  bytes peer = 12;
 
-  // OPAQUE TO SERVER. Client-defined chat-content payload. The server
-  // does not parse, validate, or interpret these bytes — it only
-  // forwards them. Suggested client schema in v3-chat-payload.proto;
-  // clients are free to evolve it without server coordination.
-  // Required (zero-length allowed for client-defined "ping" semantics).
+  // Opaque to the server (end-to-end encrypted, sealed format v2,
+  // decision 218). Required.
   bytes payload = 5;
 
-  // Best-effort, no-persistence, no-ack signal. Drives "send-and-forget"
-  // events like typing indicators. Server semantics:
-  //   - Fan to currently-connected channel members verbatim.
-  //   - DO NOT enqueue for offline members (skip the undelivered queue).
-  //   - DO NOT emit an `Ack` back to the sender.
-  //   - DO NOT include in any history / sync-pull responses.
-  //
-  // Recipients that observe this flag bypass `op_id_seen` and any
-  // projection writes — these envelopes are routed to a side-channel
-  // (e.g. typing-indicator stream) and dropped from the persistent
-  // pipeline entirely. Senders construct ephemeral envelopes via a
-  // direct `WsTransport.sendEphemeral(...)` path that bypasses
-  // `outbound_ops`; if the WS is not connected the envelope is dropped.
-  //
-  // Wire compat: defaults to false, so older clients/servers that don't
-  // know about this field treat the envelope as a normal queued op —
-  // which is harmless for typing (wastes one row, never re-applied
-  // because the receiver-side dispatcher dedups by op_id) but the
-  // optimization only kicks in once both sides understand the flag.
+  // Typing and the like: never acked, never stored, never pushed.
   bool ephemeral = 6;
 
-  // Trim 4 (design/protocol/TRIM_4_12_CONTRACT.md §2) — the OTHER
-  // participant's user_id (9 lowercase hex chars) on a derived DM
-  // channel. Required iff `channel_id` matches ^d[0-9a-f]{31}$,
-  // absent otherwise. (The full shape, not the `d` prefix: a group id
-  // is a dashed UUID, so the two id spaces are provably disjoint.)
-  //
-  // A DM channel id is `"d" + sha256_hex(min(a,b) || 0x00 || max(a,b))
-  // [0:31]`, so the server does not look up a channel row or a member
-  // list for it — there is none, and there never was. It recomputes
-  // the derivation from the authenticated session's user_id and this
-  // field: a missing or malformed `peer` is `validation_failed`, a
-  // `peer` that does not derive to `channel_id` is `forbidden`. A
-  // third party cannot send on, create or reserve someone else's DM
-  // id because they cannot produce a `peer` that derives to it from
-  // their own user_id.
-  //
-  // Recipients are {peer, sender} expanded to devices, minus the
-  // sending device (trim 12), so the sender's own other devices get
-  // their message. At max_devices = 1 that is the same thing as
-  // {peer}.
-  //
-  // Echoed unchanged on fanout; the recipient already knows the pair
-  // from `sender_user_id` and does not need to read it.
-  string peer = 7;
-
-  // How long the server keeps this envelope on its recipients'
-  // timeline for a later pull, in seconds (SYNC_PROTOCOL.md §10.6).
-  // 0 or absent means the maximum, 30 days (§19 decision 1); more is
-  // capped to it. Once expired it is left out of every pull and
-  // deleted; a live push is unaffected. Ignored on an ephemeral
-  // envelope, which is never kept. Echoed unchanged on fanout.
+  // How long the server keeps this envelope on its recipients' timeline
+  // for a later pull, in seconds (SYNC_PROTOCOL.md §10.6). 0 or absent
+  // means the maximum, 30 days; more is capped to it. The server may keep
+  // a class for less (a receipt: 7 days). Echoed unchanged on fanout.
   uint32 ttl_sec = 8;
 
-  // Handling flags, one bit each (decisions 212, 215). Unknown bits are
-  // kept and echoed, so a newer sender's flags survive an older server.
-  // Echoed unchanged on fanout.
-  //   bit 0 (1) SILENT: no push wake. Stored and fanned out as usual, but
-  //         an offline recipient gets it on its next pull instead of
-  //         being woken for it. Senders set it on whatever shows no
-  //         notification (receipts, edits, deletes, reactions, keys); the
-  //         server sets it on its own events.
+  // Handling bits (decisions 212, 215, 218). Unknown bits are kept and
+  // echoed. Echoed unchanged on fanout.
+  //   bit 0 (1)       SILENT: no push wake, whatever the class.
+  //   bits 1-3 (2-14) CLASS, (flags >> 1) & 7:
+  //     0 MESSAGE   a new message or forward: wakes, served first
+  //     1 MUTATION  edit, delete, reaction: no wake
+  //     2 RECEIPT   delivered/read: no wake, served last, kept 7 days
+  //     3 KEY       a group-key handoff: no wake, never dropped
+  //     4 RESEND    "send me that again": wakes
+  //     5 EVENT     server-authored (set by the server only): no wake
+  //   A frame with no flags is a MESSAGE.
   uint32 flags = 9;
 
-  // ---------------------------------------------------------------------------
-  // Server-stamped fields. Absent on client→server. Populated by the
-  // server before fanout to recipients.
-  // ---------------------------------------------------------------------------
+  // Server-stamped on fanout; a client never sets it. When the server
+  // accepted the envelope, ms since epoch: with op_id, the channel's
+  // ordering key (server_timestamp_ms, op_id).
+  uint64 server_timestamp_ms = 14;
 
-  // The authenticated sender's user_id (9 lowercase hex chars). Server
-  // derives from session, not from any client-supplied field. Recipients
-  // use this for sender attribution; see SYNC_PROTOCOL.md §10.1 for the
-  // display-name resolution rule (contact-book → username → phone).
-  string sender_user_id = 20;
-
-  // When the server accepted the envelope, ms since epoch. The ordering
-  // key: recipients order a channel by (server_timestamp_ms, op_id).
-  uint64 server_timestamp_ms = 21;
-
-  // Retired: the per-channel sequence the server used to stamp on fanout.
-  reserved 22;
-  reserved "delivery_sequence";
-
-  // Authenticated sending installation, overwritten from the session.
-  // Empty on server-authored events. Selects the sender's E2EE device keys.
-  string sender_device_id = 23;
+  // Server-stamped on fanout: the sending device's id, its UUID as 16
+  // bytes. Absent on a server-authored event.
+  bytes sender_device_id = 13;
 }
 
 
@@ -175,7 +122,12 @@ message Envelope {
 // matches by `op_id`.
 //
 message Ack {
-  string op_id = 1;
+  // Text-era op_id, retired with decision 218.
+  reserved 1, 6;
+  reserved "delivery_sequence";
+
+  // The op this answers: its 16-byte UUIDv7, as sent.
+  bytes op_id = 7;
   AckOutcome outcome = 2;
 
   // Server-defined code string. Populated for non-success outcomes.
@@ -183,25 +135,15 @@ message Ack {
   //   forbidden, prefix_mismatch, rate_limited,
   //   validation_failed, server_busy, storage_unavailable,
   //   downstream_timeout, fanout_queue_full.
-  // Note: per SYNC_PROTOCOL.md §6a, reasons specific to chat-content
-  // semantics (gone, not_found-for-message, author-mismatch) do NOT
-  // appear here — the server does not interpret payloads, so it
-  // cannot produce those outcomes.
   string reason = 3;
 
   // Lower bound on retry delay. Populated on transient outcomes and
   // on rate_limited.
   uint64 retry_after_ms = 4;
 
-  // Server-stamped on success — same value the recipient sees on the
-  // fanout Envelope. Lets the sender's local store record a stable
-  // server timestamp (its ordering key) without waiting for the fanout
-  // echo.
+  // Server-stamped on success: the same value the recipients get on the
+  // fanout Envelope, so the sender orders its own op without waiting.
   uint64 server_timestamp_ms = 5;
-
-  // Retired with Envelope.delivery_sequence.
-  reserved 6;
-  reserved "delivery_sequence";
 }
 
 enum AckOutcome {
@@ -262,4 +204,17 @@ message AckBatch {
 message WsError {
   string code = 1;       // UPPER_SNAKE_CASE, e.g. MALFORMED_FRAME
   string message = 2;    // human-readable
+}
+
+// -----------------------------------------------------------------------------
+// PendingPage — the body of GET /v3.0/sync/pending (decision 218).
+// -----------------------------------------------------------------------------
+//
+// application/x-protobuf. The device's timeline from its pointer on,
+// oldest first, each envelope exactly as a WS_PUSH carries it.
+//
+message PendingPage {
+  repeated Envelope envelopes = 1;
+  // More wait past this page: pull again from the last one's stamp.
+  bool more = 2;
 }
