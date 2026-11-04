@@ -7,10 +7,16 @@ const { Pool } = require('pg');
 const {
   WS_TYPE,
   SERVER_EVENT_MARKER,
-  encodeWsEnvelope,
-  decodeWsEnvelope
+  decodePendingPage,
+  decodeWsEnvelope,
+  dmChannelId,
+  opIdUserBits,
+  userIdText,
+  uuidText
 } = require('../../libs/v3-envelope');
-const { mintOpId, legacyWire } = require('../../services/connection-gateway/test/helper');
+const {
+  mintOpId, legacyWire, onWire, opFrame
+} = require('../../services/connection-gateway/test/helper');
 
 /**
  * Conformance suite: drives the compose stack through nginx rather than
@@ -111,8 +117,11 @@ function uniquePhone() {
   return `+9199${crypto.randomInt(0, 1e9).toString().padStart(9, '0')}`;
 }
 
+/** A fresh device id: the app's is a UUIDv4, and only a UUID can send (decision 218). */
+const newDevice = () => crypto.randomUUID();
+
 /** Full signup: OTP send, dev read, verify. Leaves `username` unset. */
-async function signup(deviceId = 'device-1') {
+async function signup(deviceId = newDevice()) {
   const phone = uniquePhone();
   const send = await api('POST', '/v3.0/auth/otp/send', { body: { phone, deviceId } });
   if (send.status !== 200) throw new Error(`otp/send ${send.status}`);
@@ -125,7 +134,7 @@ async function signup(deviceId = 'device-1') {
 }
 
 /** Signup plus the mandatory username pick (AUTH_CONTRACT 2.4). */
-async function signupWithUsername(deviceId = 'device-1') {
+async function signupWithUsername(deviceId = newDevice()) {
   const user = await signup(deviceId);
   const username = `c${crypto.randomInt(0, 1e9).toString().padStart(9, '0')}`;
   const patch = await api('PATCH', '/v3.0/users/me', {
@@ -136,9 +145,49 @@ async function signupWithUsername(deviceId = 'device-1') {
   return { ...user, username };
 }
 
-/** Wrap one Envelope batch in a WS_OP frame. */
-function opFrame(envelopes) {
-  return encodeWsEnvelope({ type: WS_TYPE.WS_OP, ops: { envelopes } });
+/**
+ * An envelope as the app reads it (decision 218): its ids back in text, the
+ * sender from the op_id's user bits, a DM's channel derived from the pair.
+ * A server event's op_id is random, so its sender means nothing.
+ */
+function readEnvelope(wire) {
+  const opId = uuidText(wire.opId);
+  const peer = userIdText(wire.peer);
+  const senderUserId = opIdUserBits(opId).toString(16).padStart(9, '0');
+  return {
+    ...wire,
+    opId,
+    peer,
+    senderUserId,
+    channelId: peer ? dmChannelId(senderUserId, peer) : uuidText(wire.channelId)
+  };
+}
+
+/** A frame off the socket, read as the app reads it; its bytes kept for `onWire`. */
+function readFrame(data) {
+  const frame = decodeWsEnvelope(data);
+  if (frame.push) frame.push = readEnvelope(frame.push);
+  if (frame.acks) frame.acks.acks.forEach((ack) => { ack.opId = uuidText(ack.opId); });
+  return Object.defineProperty(frame, 'raw', { value: data });
+}
+
+/**
+ * `GET /v3.0/sync/pending` as the app pulls it: a PendingPage (decision 218)
+ * of envelopes read as above.
+ * @param {string} token
+ * @param {number} [since]
+ */
+async function pull(token, since) {
+  const query = since === undefined ? '' : `?since=${since}`;
+  const response = await fetch(`${BASE}/v3.0/sync/pending${query}`, {
+    headers: { authorization: `Bearer ${token}` }
+  });
+  if (response.status !== 200) throw new Error(`pull ${response.status}`);
+  if (response.headers.get('content-type') !== 'application/x-protobuf') {
+    throw new Error(`pull content-type ${response.headers.get('content-type')}`);
+  }
+  const page = decodePendingPage(Buffer.from(await response.arrayBuffer()));
+  return { envelopes: page.envelopes.map(readEnvelope), more: page.more };
 }
 
 /**
@@ -159,10 +208,7 @@ function connect(accesskey) {
     }
   };
   socket.on('message', (data, isBinary) => {
-    // binary frames keep their bytes, unenumerated, for `legacyWire.decode`
-    frames.push(isBinary
-      ? Object.defineProperty(decodeWsEnvelope(data), 'raw', { value: data })
-      : data.toString());
+    frames.push(isBinary ? readFrame(data) : data.toString());
     drain();
   });
   const closed = new Promise((resolve) => {
@@ -182,7 +228,7 @@ function connect(accesskey) {
     send(envelopes) {
       socket.send(opFrame(envelopes), { binary: true });
     },
-    /** Send as an older client would, retired `resourceSeq` included. */
+    /** Send as an older build would, text ids and all. */
     sendLegacy(envelopes) {
       socket.send(legacyWire.opFrame(envelopes), { binary: true });
     },
@@ -238,8 +284,9 @@ module.exports = {
   decodeServerEvent,
   devOtp,
   eventually,
-  legacyWire,
   mintOpId,
+  onWire,
+  pull,
   pushTopic,
   signup,
   signupWithUsername,

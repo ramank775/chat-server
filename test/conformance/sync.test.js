@@ -5,8 +5,11 @@ const {
   ACK_OUTCOME,
   REASON,
   WS_TYPE,
-  decodeWsEnvelope,
-  dmChannelId
+  dmChannelId,
+  toWire,
+  userIdBytes,
+  uuidBytes,
+  uuidText
 } = require('../../libs/v3-envelope');
 const {
   BASE,
@@ -15,8 +18,9 @@ const {
   decodeServerEvent,
   devOtp,
   eventually,
-  legacyWire,
   mintOpId,
+  onWire,
+  pull,
   signup,
   signupWithUsername,
   uniquePhone
@@ -55,8 +59,8 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
   // -- 1. OTP send / verify -------------------------------------------------
 
   it('signs two users up over OTP with the mock sms sender', async () => {
-    alice = await signup('device-a');
-    bob = await signup('device-b');
+    alice = await signup();
+    bob = await signup();
     assert.equal(alice.isNew, true);
     assert.equal(bob.isNew, true);
     assert.match(alice.user_id, /^[0-9a-f]{9}$/);
@@ -269,24 +273,22 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
     assert.equal(bobWs.protocol, `accesskey.${bob.accesskey}`);
   });
 
-  it('acks a batch with server_timestamp_ms and no delivery_sequence; the peer sees the same', async () => {
+  it('acks a batch with the op_id bytes and server_timestamp_ms; the peer sees the same', async () => {
     const sent = [1, 2, 3].map((n) => ({
       opId: bobOp(),
-      channelId: dmId,
       peer: alice.user_id,
-      clientTimestampMs: Date.now(),
       payload: Buffer.from(`hello ${n}`)
     }));
 
     // no per-channel counter, so nothing limits a client to one op in flight
     bobWs.send(sent);
     const ackFrame = await bobWs.ack();
-    const { acks } = legacyWire.decode(ackFrame.raw).acks;
+    const { acks } = ackFrame.acks;
     assert.deepEqual(acks.map((ack) => ack.opId), sent.map((envelope) => envelope.opId));
-    acks.forEach((ack) => {
+    onWire(ackFrame.raw).acks.acks.forEach((ack, index) => {
+      assert.deepEqual(ack.opId, uuidBytes(sent[index].opId), 'the op_id bytes as sent');
       assert.equal(ack.outcome, ACK_OUTCOME.SUCCESS);
       assert.ok(ack.serverTimestampMs > 0);
-      assert.equal(ack.deliverySequence, undefined, 'Ack.delivery_sequence (6) is retired');
     });
 
     // the peer orders by (server_timestamp_ms, op_id), whatever order the
@@ -295,44 +297,38 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
     const pushes = [];
     await sent.reduce(async (previous) => {
       await previous;
-      pushes.push(legacyWire.decode((await aliceWs.push()).raw).push);
+      pushes.push(await aliceWs.push());
     }, Promise.resolve());
-    assert.deepEqual(pushes.map((push) => push.opId).sort(), [...stamps.keys()].sort());
-    pushes.forEach((push) => {
-      assert.equal(push.senderUserId, bob.user_id);
+    assert.deepEqual(pushes.map(({ push }) => push.opId).sort(), [...stamps.keys()].sort());
+    pushes.forEach(({ push, raw }) => {
+      assert.equal(push.senderUserId, bob.user_id, 'read from the op_id');
+      assert.equal(push.channelId, dmId, 'derived from the pair');
       assert.equal(push.serverTimestampMs, stamps.get(push.opId));
-      assert.equal(push.deliverySequence, undefined, 'Envelope.delivery_sequence (22) is retired');
+      // decision 218: nothing the receiver can derive, nothing at its default
+      assert.deepEqual(Object.keys(onWire(raw).push).sort(), [
+        'opId', 'payload', 'peer', 'senderDeviceId', 'serverTimestampMs'
+      ]);
     });
   });
 
-  it('accepts an older client\'s resource_seq whatever it is: gaps, repeats, none', async () => {
-    const sent = [5, 5, 1, undefined].map((resourceSeq, n) => ({
+  it('fails a text-era frame from an older build cleanly as validation_failed', async () => {
+    bobWs.sendLegacy([{
       opId: bobOp(),
       channelId: dmId,
       peer: alice.user_id,
-      resourceSeq,
       clientTimestampMs: Date.now(),
-      payload: Buffer.from(`legacy ${n}`)
-    }));
-    bobWs.sendLegacy(sent);
-    const { acks } = (await bobWs.ack()).acks;
-    acks.forEach((ack) => assert.equal(ack.outcome, ACK_OUTCOME.SUCCESS, JSON.stringify(ack)));
-
-    // and the field is not passed on
-    await sent.reduce(async (previous) => {
-      await previous;
-      const { push } = legacyWire.decode((await aliceWs.push()).raw);
-      assert.equal(push.resourceSeq, undefined);
-    }, Promise.resolve());
+      payload: Buffer.from('legacy')
+    }]);
+    const [ack] = (await bobWs.ack()).acks.acks;
+    assert.equal(ack.outcome, ACK_OUTCOME.PERMANENT);
+    assert.equal(ack.reason, REASON.VALIDATION_FAILED);
   });
 
   it('rejects an op_id bound to another user with prefix_mismatch', async () => {
     bobWs.send([
       {
         opId: aliceOp(), // minted for alice, sent on bob's socket
-        channelId: dmId,
         peer: alice.user_id,
-        clientTimestampMs: Date.now(),
         payload: Buffer.from('not mine')
       }
     ]);
@@ -344,9 +340,7 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
   it('rejects a batch over the 20 envelope cap, one permanent ack each', async () => {
     const envelopes = Array.from({ length: 21 }, () => ({
       opId: bobOp(),
-      channelId: dmId,
       peer: alice.user_id,
-      clientTimestampMs: Date.now(),
       payload: Buffer.from('too many')
     }));
     bobWs.send(envelopes);
@@ -358,60 +352,45 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
     });
   });
 
-  it('rejects a DM envelope with no peer as validation_failed', async () => {
-    bobWs.send([
-      {
-        opId: bobOp(),
-        channelId: dmId,
-        clientTimestampMs: Date.now(),
-        payload: Buffer.from('no peer')
-      }
+  it('rejects an envelope with neither a peer nor a channel_id, or with both', async () => {
+    const both = {
+      ...toWire({ opId: bobOp(), channelId: crypto.randomUUID(), payload: Buffer.from('both') }),
+      peer: userIdBytes(alice.user_id)
+    };
+    bobWs.send([{ opId: bobOp(), payload: Buffer.from('neither') }, both]);
+    const { acks } = (await bobWs.ack()).acks;
+    assert.deepEqual(acks.map((ack) => [ack.outcome, ack.reason]), [
+      [ACK_OUTCOME.PERMANENT, REASON.VALIDATION_FAILED],
+      [ACK_OUTCOME.PERMANENT, REASON.VALIDATION_FAILED]
     ]);
+  });
+
+  it('rejects an id of the wrong length as validation_failed', async () => {
+    const short = { ...toWire({ opId: bobOp(), peer: alice.user_id }), peer: Buffer.from([1, 2, 3, 4]) };
+    bobWs.send([short]);
     const [ack] = (await bobWs.ack()).acks.acks;
     assert.equal(ack.outcome, ACK_OUTCOME.PERMANENT);
     assert.equal(ack.reason, REASON.VALIDATION_FAILED);
   });
 
-  it('forbids a peer that does not derive to the channel_id', async () => {
-    bobWs.send([
-      {
-        opId: bobOp(),
-        channelId: dmId,
-        peer: bob.user_id, // dm_chan(bob, bob) is a different id
-        clientTimestampMs: Date.now(),
-        payload: Buffer.from('wrong peer')
-      }
-    ]);
-    const [ack] = (await bobWs.ack()).acks.acks;
-    assert.equal(ack.outcome, ACK_OUTCOME.PERMANENT);
-    assert.equal(ack.reason, REASON.FORBIDDEN);
-  });
-
-  it('forbids a third party sending on somebody else\'s derived DM id', async () => {
-    const mallory = await signupWithUsername('device-m');
+  it('a third party\'s DM lands on their own pair\'s channel, never on alice+bob\'s', async () => {
+    const mallory = await signupWithUsername();
     const malloryWs = connect(mallory.accesskey);
     await malloryWs.opened;
     const malloryOp = opIds(mallory.user_id);
 
-    // no peer mallory can name derives to alice+bob's id, so the channel
-    // cannot be squatted, entered or written to
-    malloryWs.send([
-      {
-        opId: malloryOp(),
-        channelId: dmId,
-        peer: alice.user_id,
-        clientTimestampMs: Date.now(),
-        payload: Buffer.from('let me in')
-      }
-    ]);
+    // mallory's own user_id is half of whatever a DM of hers derives to, so
+    // alice+bob's channel cannot be squatted, entered or written to
+    const envelope = { opId: malloryOp(), peer: alice.user_id, payload: Buffer.from('hi alice') };
+    malloryWs.send([envelope]);
     const [ack] = (await malloryWs.ack()).acks.acks;
-    assert.equal(ack.outcome, ACK_OUTCOME.PERMANENT);
-    assert.equal(ack.reason, REASON.FORBIDDEN);
+    assert.equal(ack.outcome, ACK_OUTCOME.SUCCESS);
 
-    // and alice sees nothing from it
-    await assert.rejects(() =>
-      aliceWs.waitFor((frame) => frame.type === WS_TYPE.WS_PUSH
-        && frame.push.senderUserId === mallory.user_id, 500));
+    const { push } = await aliceWs.waitFor((frame) => frame.type === WS_TYPE.WS_PUSH
+      && frame.push.opId === envelope.opId);
+    assert.equal(push.senderUserId, mallory.user_id);
+    assert.equal(push.channelId, dmChannelId(mallory.user_id, alice.user_id));
+    assert.notEqual(push.channelId, dmId);
     await malloryWs.close();
   });
 
@@ -420,7 +399,6 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
       {
         opId: bobOp(),
         channelId: crypto.randomUUID(),
-        clientTimestampMs: Date.now(),
         payload: Buffer.from('stranger')
       }
     ]);
@@ -434,9 +412,7 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
   it('pushes a sender envelope to the connected peer, never back to the sender', async () => {
     const envelope = {
       opId: aliceOp(),
-      channelId: dmId,
       peer: bob.user_id,
-      clientTimestampMs: Date.now(),
       payload: Buffer.from('for bob')
     };
     aliceWs.send([envelope]);
@@ -449,6 +425,7 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
     assert.equal(push.push.channelId, dmId);
     assert.equal(push.push.senderUserId, alice.user_id);
     assert.equal(push.push.peer, bob.user_id, 'the peer field is echoed on fanout');
+    assert.equal(uuidText(push.push.senderDeviceId), alice.deviceId);
     assert.equal(Buffer.from(push.push.payload).toString(), 'for bob');
     assert.equal(Number(push.push.serverTimestampMs), Number(ack.serverTimestampMs));
 
@@ -462,22 +439,18 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
 
   // -- 8. timeline: kept for the retention, read from the device's pointer --
 
-  /** bob's timeline from `pointer` on, decoded; it may also hold server events (§10.2). */
+  /** bob's timeline from `pointer` on, read; it may also hold server events (§10.2). */
   const pending = async (pointer) => {
-    const query = pointer === undefined ? '' : `?since=${pointer}`;
-    const response = await api('GET', `/v3.0/sync/pending${query}`, { token: bob.accesskey });
-    assert.equal(response.status, 200);
-    assert.equal(typeof response.body.more, 'boolean');
-    return response.body.frames.map((entry) => decodeWsEnvelope(Buffer.from(entry, 'base64')));
+    const page = await pull(bob.accesskey, pointer);
+    assert.equal(typeof page.more, 'boolean');
+    return page.envelopes;
   };
-  const pendingOps = async (pointer) => (await pending(pointer)).map((frame) => frame.push.opId);
+  const pendingOps = async (pointer) => (await pending(pointer)).map((envelope) => envelope.opId);
 
   it('a live push is on the timeline all the same', async () => {
     const envelope = {
       opId: aliceOp(),
-      channelId: dmId,
       peer: bob.user_id,
-      clientTimestampMs: Date.now(),
       payload: Buffer.from('kept')
     };
     aliceWs.send([envelope]);
@@ -488,7 +461,9 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
     const stamp = Number(push.push.serverTimestampMs);
 
     // §10.3 step 2 — had bob's socket been dead, his next pull would have it
-    assert.ok((await pendingOps(stamp)).includes(envelope.opId), 'since is inclusive');
+    const kept = (await pending(stamp)).find((pulled) => pulled.opId === envelope.opId);
+    assert.ok(kept, 'since is inclusive');
+    assert.deepEqual(kept, push.push, 'pulled exactly as it was pushed');
     assert.ok(!(await pendingOps(stamp + 1)).includes(envelope.opId));
   });
 
@@ -499,9 +474,7 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
     const send = async (text) => {
       const envelope = {
         opId: aliceOp(),
-        channelId: dmId,
         peer: bob.user_id,
-        clientTimestampMs: Date.now(),
         payload: Buffer.from(text)
       };
       aliceWs.send([envelope]);
@@ -514,13 +487,13 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
     const second = await send('and this');
 
     const mine = await eventually(async () => {
-      const frames = (await pending(first.stamp)).filter((frame) =>
-        [first.opId, second.opId].includes(frame.push.opId));
-      return frames.length === 2 ? frames : null;
+      const envelopes = (await pending(first.stamp)).filter((envelope) =>
+        [first.opId, second.opId].includes(envelope.opId));
+      return envelopes.length === 2 ? envelopes : null;
     });
-    assert.deepEqual(mine.map((frame) => frame.push.opId), [first.opId, second.opId]);
-    assert.equal(mine[0].push.senderUserId, alice.user_id);
-    assert.equal(Buffer.from(mine[0].push.payload).toString(), 'while you were out');
+    assert.deepEqual(mine.map((envelope) => envelope.opId), [first.opId, second.opId]);
+    assert.equal(mine[0].senderUserId, alice.user_id);
+    assert.equal(Buffer.from(mine[0].payload).toString(), 'while you were out');
 
     // nothing was taken off: the same pull returns them again
     assert.ok((await pendingOps(first.stamp)).includes(first.opId));
@@ -529,16 +502,13 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
     assert.deepEqual(await pendingOps(second.stamp + 1), []);
 
     // and alice's own device never gets her envelopes back
-    const own = await api('GET', `/v3.0/sync/pending?since=${first.stamp}`, { token: alice.accesskey });
-    assert.deepEqual(own.body.frames, []);
+    assert.deepEqual((await pull(alice.accesskey, first.stamp)).envelopes, []);
   });
 
   it('an envelope past its sender\'s ttl_sec is left out of the timeline', async () => {
     const envelope = {
       opId: aliceOp(),
-      channelId: dmId,
       peer: bob.user_id,
-      clientTimestampMs: Date.now(),
       payload: Buffer.from('gone soon'),
       ttlSec: 1
     };
@@ -547,9 +517,9 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
     assert.equal(ack.outcome, ACK_OUTCOME.SUCCESS);
     const stamp = Number(ack.serverTimestampMs);
 
-    const kept = (await pending(stamp)).find((frame) => frame.push.opId === envelope.opId);
+    const kept = (await pending(stamp)).find((pulled) => pulled.opId === envelope.opId);
     assert.ok(kept, 'there until it expires');
-    assert.equal(kept.push.ttlSec, 1, 'echoed for the other side to apply too');
+    assert.equal(kept.ttlSec, 1, 'echoed for the other side to apply too');
     await new Promise((resolve) => { setTimeout(resolve, 1500); });
     assert.ok(!(await pendingOps(stamp)).includes(envelope.opId));
   });
@@ -579,7 +549,7 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
     assert.equal(createdEvent.channelCreated.channelId, groupId);
     assert.equal(createdEvent.channelCreated.creator, alice.user_id);
 
-    const carol = await signup('device-c');
+    const carol = await signup();
     await api('PATCH', '/v3.0/users/me', {
       token: carol.accesskey,
       body: { username: `c${crypto.randomInt(0, 1e9).toString().padStart(9, '0')}` }
@@ -618,7 +588,7 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
   // -- 10. roles and owner succession (DECISIONS rows 9 / 80) ---------------
 
   it('promotes an admin and hands the group over when the owner leaves', async () => {
-    const carol = await signupWithUsername('device-r');
+    const carol = await signupWithUsername();
     const carolWs = connect(carol.accesskey);
     await carolWs.opened;
     /** The next 0x53 push on `socket` whose decoded event satisfies `match`. */
