@@ -119,6 +119,8 @@ versionCodes, the number after `+` in the app's `pubspec.yaml` version
 - `MIN_APP_BUILD`: apps below it are refused (HTTP 426) and show only a
   "no longer supported" screen with an Update button. Raise it only once
   the new build is live on Play and on GitHub, or those users are stuck.
+  At least 85, the first build on the byte wire (decision 218): an older
+  build cannot talk to this server.
 
 The Update button opens Play for Play installs and the GitHub release
 otherwise. After editing `.env`, `docker compose -f docker-compose.prod.yml up -d`.
