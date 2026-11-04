@@ -293,6 +293,35 @@ function opIdUserBits(opId) {
     (byte(12) >> 2)
   );
 }
+
+/**
+ * A new op_id for an event the server authors on a user's behalf (decision
+ * 218): a UUIDv7 carrying the actor's user bits, so a receiver reads who
+ * added or removed whom from it exactly as it reads the sender of any op.
+ * The app's layout (uuid7.dart): 48b ms | 4b ver | 12b counter | 2b variant
+ * | 36b user_id | 4b device slot | 18b random; here the counter and the
+ * random bits are random and the device slot is 0.
+ * @param {string} actorUserId 9 lowercase hex chars
+ */
+function opIdFor(actorUserId, ms = Date.now()) {
+  if (!isUserId(actorUserId)) throw new TypeError(`not a user_id: ${actorUserId}`);
+  const uid = parseInt(actorUserId, 16);
+  const rnd = crypto.randomBytes(4);
+  const b = Buffer.alloc(16);
+  b.writeUIntBE(ms, 0, 6);
+  b[6] = 0x70 | (rnd[0] & 0x0f);
+  b[7] = rnd[1];
+  // Bitwise ops are 32-bit, so the 36-bit user_id is sliced with arithmetic.
+  b[8] = 0x80 | (Math.floor(uid / 2 ** 30) % 64);
+  b[9] = Math.floor(uid / 2 ** 22) % 256;
+  b[10] = Math.floor(uid / 2 ** 14) % 256;
+  b[11] = Math.floor(uid / 2 ** 6) % 256;
+  b[12] = (uid % 64) << 2;
+  b[13] = rnd[2] & 0x3f;
+  b[14] = rnd[3];
+  b[15] = (rnd[0] & 0xf0);
+  return uuidText(b);
+}
 /* eslint-enable no-bitwise */
 
 /**
@@ -451,6 +480,7 @@ module.exports = {
   reauthFrame,
   errorFrame,
   opIdUserBits,
+  opIdFor,
   serverNow,
   dmChannelId,
   isUserId

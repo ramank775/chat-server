@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { startChannelMs, decodeServerEvent, mintOpId, op, headers } = require('./helper');
 const {
-  FRAME_CLASS, classFlags, decodeWsEnvelope, uuidBytes
+  FRAME_CLASS, classFlags, decodeWsEnvelope, opIdUserBits, uuidBytes
 } = require('../../../libs/v3-envelope');
 
 const ALICE = 'a3f2e8c5d';
@@ -38,6 +38,9 @@ test('creates a group and fans ChannelCreated to every member', async () => {
   const { recipients, envelope, body: event } = harness.lastEvent();
   assert.deepStrictEqual(recipients.sort(), [ALICE, BOB, CARL].sort());
   assert.strictEqual(envelope.senderUserId, ALICE);
+  // decision 218: the actor rides in the op_id's user bits, as on any op
+  assert.strictEqual(opIdUserBits(envelope.opId), parseInt(ALICE, 16));
+  assert.strictEqual(envelope.opId[14], '7', 'a UUIDv7');
   assert.strictEqual(envelope.payload[0], 0x53);
   assert.ok(envelope.serverTimestampMs > 0);
   assert.strictEqual(envelope.deliverySequence, undefined, 'no per-channel sequence any more');

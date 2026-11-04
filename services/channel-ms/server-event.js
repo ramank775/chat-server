@@ -1,8 +1,7 @@
 const path = require('path');
 const protobufjs = require('protobufjs');
-const { uuidv4 } = require('../../helper');
 const {
-  EnvelopeEvent, FRAME_CLASS, SERVER_EVENT_MARKER, classFlags, serverNow
+  EnvelopeEvent, FRAME_CLASS, SERVER_EVENT_MARKER, classFlags, opIdFor, serverNow
 } = require('../../libs/v3-envelope');
 
 /**
@@ -51,9 +50,10 @@ function channelServerEvent(type, body, { channelId, actor, recipients }) {
   const now = serverNow();
   return EnvelopeEvent.of(
     {
-      // Server-authored, so there is no client op_id to echo: recipients
-      // dedup on this id (§10.5) and nothing else reads it.
-      opId: uuidv4(),
+      // Server-authored, so there is no client op_id to echo. Minted with
+      // the actor's user bits (decision 218): recipients dedup on it
+      // (§10.5) and read from it who added, removed or left.
+      opId: opIdFor(actor),
       channelId,
       payload: Buffer.concat([Buffer.from([SERVER_EVENT_MARKER]), bytes]),
       // not on the wire (decision 218): message-delivery leaves the actor out

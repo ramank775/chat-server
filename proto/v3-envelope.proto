@@ -60,11 +60,11 @@ message Envelope {
 
   // The op's UUIDv7, 16 bytes (RFC 9562 byte order). Required. Its first
   // 48 bits are the client's clock in ms (what client_timestamp_ms was),
-  // and bits 64..99 carry the sender's 36-bit user_id (§3): the server
-  // checks them against the session, so a receiver reads the sender from
-  // here. Clients dedupe on it and break ordering ties with it. A
-  // server-authored event (payload starting 0x53) has a random op id
-  // whose user bits mean nothing.
+  // and bits 66..101 (bytes 8-12, after the variant bits) carry the
+  // sender's 36-bit user_id (§3): the server checks them against the
+  // session, so a receiver reads the sender from here. Clients dedupe on
+  // it and break ordering ties with it. A server-authored group event
+  // (payload starting 0x53) carries the acting user's bits the same way.
   bytes op_id = 10;
 
   // A group's channel id: its UUID, 16 bytes. Absent for a DM: a DM
@@ -94,10 +94,10 @@ message Envelope {
   // echoed. Echoed unchanged on fanout.
   //   bit 0 (1)       SILENT: no push wake, whatever the class.
   //   bits 1-3 (2-14) CLASS, (flags >> 1) & 7:
-  //     0 MESSAGE   a new message or forward: wakes, served first
+  //     0 MESSAGE   a new message or forward: wakes
   //     1 MUTATION  edit, delete, reaction: no wake
-  //     2 RECEIPT   delivered/read: no wake, served last, kept 7 days
-  //     3 KEY       a group-key handoff: no wake, never dropped
+  //     2 RECEIPT   delivered/read: no wake, kept 7 days
+  //     3 KEY       a group-key handoff: no wake
   //     4 RESEND    "send me that again": wakes
   //     5 EVENT     server-authored (set by the server only): no wake
   //   A frame with no flags is a MESSAGE.
