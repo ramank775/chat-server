@@ -18,7 +18,9 @@ for (const ephemeral of [false, true]) { // eslint-disable-line no-restricted-sy
       options: {},
       events: { 'new-message': 'new-message' },
       eventStore: { emit: async (_topic, event) => published.push(event) },
-      memCache: new LocalCache()
+      memCache: new LocalCache(),
+      // the pair is connected (decision 219)
+      channelServiceClient: { dmVerdict: async () => 'ok' }
     });
     const socket = { userId: ALICE, deviceId: DEVICE_1, remoteIp: '127.0.0.1' };
     // what decodeWsEnvelope hands the gateway, a forged sender device included

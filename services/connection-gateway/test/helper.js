@@ -119,8 +119,15 @@ async function startGateway(overrides = {}) {
     dispose: async () => { }
   };
   const channels = new Map();
+  // the invite gate's answer per `from>to`, `ok` unless a test sets one
+  const verdicts = new Map();
+  const asked = [];
   context.channelServiceClient = {
-    isMember: async (channelId, userId) => (channels.get(channelId) || new Set()).has(userId)
+    isMember: async (channelId, userId) => (channels.get(channelId) || new Set()).has(userId),
+    dmVerdict: async (from, to, cls) => {
+      asked.push({ from, to, cls });
+      return verdicts.get(`${from}>${to}`) || 'ok';
+    }
   };
   context.deliveryManager = {
     userJoin: async () => { },
@@ -136,6 +143,8 @@ async function startGateway(overrides = {}) {
     published,
     uri: gateway.uri,
     addChannel(channelId, members) { channels.set(channelId, new Set(members)); },
+    setVerdict(from, to, verdict) { verdicts.set(`${from}>${to}`, verdict); },
+    gateAsked: asked,
     wakes() { return published.filter((p) => p.topic === options.offlineMessageTopic); },
     publishedEnvelopes() { return published.filter((p) => p.topic === options.newMessageTopic); },
     async stop() { await gateway.shutdown(); }

@@ -41,7 +41,8 @@ const {
   dmChannelId,
   uuidText,
   userIdText,
-  isUuid
+  isUuid,
+  frameClass
 } = require('../../libs/v3-envelope');
 
 const asMain = require.main === module;
@@ -653,6 +654,7 @@ class Gateway extends HttpServiceBase {
     let channelId;
     let peer = '';
     let recipients = [];
+    let blocked = false;
     if (isDm) {
       peer = userIdText(wire.peer);
       if (!peer) return this.rejectPermanent(dedupKey, opId, wire.opId, REASON.VALIDATION_FAILED);
@@ -660,6 +662,26 @@ class Gateway extends HttpServiceBase {
       // Both sides, so the sender's own other devices get it too (§8); the
       // sending device is what fanout excludes.
       recipients = [peer, userId];
+      // Decisions 219/220 (§21): nothing flows 1:1 before an accepted
+      // invite, but co-members' keys, receipts and resend requests do. A
+      // blocked sender is acked as usual and relayed nowhere, as WhatsApp's
+      // single tick: they cannot tell.
+      let verdict;
+      try {
+        verdict = await this.channelClient.dmVerdict(userId, peer, frameClass(wire.flags));
+      } catch (e) {
+        this.log.error('channel-ms gate lookup failed', { err: e, user: userId });
+        return {
+          opId: wire.opId,
+          outcome: ACK_OUTCOME.TRANSIENT,
+          reason: REASON.DOWNSTREAM_TIMEOUT,
+          retryAfterMs: 1000
+        };
+      }
+      if (verdict === 'not_connected') {
+        return this.rejectPermanent(dedupKey, opId, wire.opId, REASON.NOT_CONNECTED);
+      }
+      blocked = verdict === 'blocked';
     } else {
       channelId = uuidText(wire.channelId);
       if (!channelId) {
@@ -716,12 +738,12 @@ class Gateway extends HttpServiceBase {
     // Ephemeral (typing): no dedup, no ack, and message-delivery drops it
     // rather than queueing it offline.
     if (wire.ephemeral) {
-      await this.publishEnvelope(envelope, recipients, session.deviceId);
+      if (!blocked) await this.publishEnvelope(envelope, recipients, session.deviceId);
       return null;
     }
 
     try {
-      await this.publishEnvelope(envelope, recipients, session.deviceId);
+      if (!blocked) await this.publishEnvelope(envelope, recipients, session.deviceId);
     } catch (e) {
       this.log.error('Failed to publish envelope', { err: e, user: userId, opId });
       return {

@@ -33,6 +33,13 @@ const {
  */
 const { describe, it, after } = test;
 
+/** Decision 219: `a` invites `b` and `b` accepts. */
+async function connectPair(a, b) {
+  await api('POST', '/v3.0/channels/invites', { token: a.accesskey, body: { user_id: b.user_id } });
+  const dm = dmChannelId(a.user_id, b.user_id);
+  await api('POST', `/v3.0/channels/${dm}/invite/accept`, { token: b.accesskey, body: {} });
+}
+
 /** Per user op_id minter — the 36 bit user_id is baked into every UUIDv7 (§3). */
 function opIds(userId) {
   let counter = 0;
@@ -185,6 +192,29 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
     assert.equal(malformed.body.error.code, 'validation_failed');
   });
 
+  // -- 4b. invite-only (decision 219, SYNC_PROTOCOL §21) -------------------
+
+  it('connects a pair by an invite and an accept', async () => {
+    const sent = await api('POST', '/v3.0/channels/invites', {
+      token: alice.accesskey, body: { user_id: bob.user_id }
+    });
+    assert.equal(sent.status, 200);
+    assert.deepEqual(sent.body, { state: 'sent' });
+    const dm = dmChannelId(alice.user_id, bob.user_id);
+    const seen = await api('GET', '/v3.0/channels/connections', { token: bob.accesskey });
+    assert.deepEqual(seen.body.invites.map((i) => [i.channel_id, i.from, i.to]), [
+      [dm, alice.user_id, bob.user_id]
+    ]);
+
+    const accepted = await api('POST', `/v3.0/channels/${dm}/invite/accept`, {
+      token: bob.accesskey, body: {}
+    });
+    assert.equal(accepted.status, 200);
+    assert.deepEqual(accepted.body, { state: 'connected' });
+    const connected = await api('GET', '/v3.0/channels/connections', { token: alice.accesskey });
+    assert.deepEqual(connected.body, { connections: [bob.user_id], blocked: [], invites: [] });
+  });
+
   // -- 5. channel create over REST, with dedup and id collision -------------
 
   it('creates a group, replays the stored 201 and 409s a taken channel id', async () => {
@@ -204,7 +234,9 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
     assert.equal(created.status, 201);
     assert.equal(created.body.channel_id, channelId);
     assert.equal(created.body.kind, 'group');
-    assert.deepEqual([...created.body.members].sort(), [alice.user_id, bob.user_id].sort());
+    // decision 221: the creator is the member, bob is invited
+    assert.deepEqual(created.body.members, [alice.user_id]);
+    assert.deepEqual(created.body.invited, [bob.user_id]);
 
     // §7.1 — the same op_id replays the stored outcome verbatim
     const replay = await api('POST', '/v3.0/channels', { token: alice.accesskey, body: payload });
@@ -373,11 +405,30 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
     assert.equal(ack.reason, REASON.VALIDATION_FAILED);
   });
 
-  it('a third party\'s DM lands on their own pair\'s channel, never on alice+bob\'s', async () => {
+  it('a stranger\'s DM is refused not_connected; their invite wakes, and accepted, it flows', async () => {
     const mallory = await signupWithUsername();
     const malloryWs = connect(mallory.accesskey);
     await malloryWs.opened;
     const malloryOp = opIds(mallory.user_id);
+
+    const refused = { opId: malloryOp(), peer: alice.user_id, payload: Buffer.from('hi alice') };
+    malloryWs.send([refused]);
+    const [no] = (await malloryWs.ack()).acks.acks;
+    assert.equal(no.outcome, ACK_OUTCOME.PERMANENT);
+    assert.equal(no.reason, REASON.NOT_CONNECTED);
+
+    // the invite reaches alice as a 1:1 server event: class INVITE, no SILENT
+    await api('POST', '/v3.0/channels/invites', {
+      token: mallory.accesskey, body: { user_id: alice.user_id }
+    });
+    const { push: invited } = await aliceWs.waitFor((frame) => frame.type === WS_TYPE.WS_PUSH
+      && decodeServerEvent(frame.push.payload)?.type === 'INVITE_SENT');
+    assert.equal(invited.flags, 18);
+    assert.equal(invited.senderUserId, mallory.user_id);
+    assert.equal(invited.peer, alice.user_id);
+    const mine = dmChannelId(mallory.user_id, alice.user_id);
+    assert.equal(invited.channelId, mine);
+    await api('POST', `/v3.0/channels/${mine}/invite/accept`, { token: alice.accesskey, body: {} });
 
     // mallory's own user_id is half of whatever a DM of hers derives to, so
     // alice+bob's channel cannot be squatted, entered or written to
@@ -389,7 +440,7 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
     const { push } = await aliceWs.waitFor((frame) => frame.type === WS_TYPE.WS_PUSH
       && frame.push.opId === envelope.opId);
     assert.equal(push.senderUserId, mallory.user_id);
-    assert.equal(push.channelId, dmChannelId(mallory.user_id, alice.user_id));
+    assert.equal(push.channelId, mine);
     assert.notEqual(push.channelId, dmId);
     await malloryWs.close();
   });
@@ -543,17 +594,27 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
     });
     assert.equal(created.status, 201);
 
-    const createdPush = await bobWs.push();
-    const createdEvent = decodeServerEvent(createdPush.push.payload);
-    assert.equal(createdEvent.type, 'CHANNEL_CREATED');
-    assert.equal(createdEvent.channelCreated.channelId, groupId);
-    assert.equal(createdEvent.channelCreated.creator, alice.user_id);
+    // decision 221: bob is invited, and joins by accepting
+    const invitedPush = await bobWs.push();
+    const invitedEvent = decodeServerEvent(invitedPush.push.payload);
+    assert.equal(invitedEvent.type, 'INVITE_SENT');
+    assert.equal(invitedEvent.inviteSent.channelId, groupId);
+    assert.equal(invitedEvent.inviteSent.name, 'conformance');
+    const joined = await api('POST', `/v3.0/channels/${groupId}/invite/accept`, {
+      token: bob.accesskey, body: {}
+    });
+    assert.equal(joined.status, 200);
+    assert.deepEqual(joined.body.members, [alice.user_id, bob.user_id]);
+    const joinedEvent = decodeServerEvent((await aliceWs.push()).push.payload);
+    assert.equal(joinedEvent.type, 'CHANNEL_MEMBER_ADDED');
+    assert.deepEqual(joinedEvent.memberAdded.members, [bob.user_id]);
 
     const carol = await signup();
     await api('PATCH', '/v3.0/users/me', {
       token: carol.accesskey,
       body: { username: `c${crypto.randomInt(0, 1e9).toString().padStart(9, '0')}` }
     });
+    await connectPair(alice, carol);
     const added = await api('POST', `/v3.0/channels/${groupId}/members`, {
       token: alice.accesskey,
       body: {
@@ -563,11 +624,13 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
       }
     });
     assert.equal(added.status, 200);
-    assert.equal(added.body.member_count, 3);
+    assert.deepEqual(added.body, { member_count: 2, invited: [carol.user_id] });
+    await api('POST', `/v3.0/channels/${groupId}/invite/accept`, {
+      token: carol.accesskey, body: {}
+    });
 
-    const addedPush = await bobWs.push();
-    const addedEvent = decodeServerEvent(addedPush.push.payload);
-    assert.equal(addedEvent.type, 'CHANNEL_MEMBER_ADDED');
+    const addedEvent = decodeServerEvent((await bobWs.waitFor((frame) => frame.type === WS_TYPE.WS_PUSH
+      && decodeServerEvent(frame.push.payload)?.type === 'CHANNEL_MEMBER_ADDED')).push.payload);
     assert.deepEqual(addedEvent.memberAdded.members, [carol.user_id]);
 
     // bob leaves; the actor is excluded from its own fanout, alice is told
@@ -578,7 +641,8 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
     assert.equal(left.status, 200);
     assert.equal(left.body.member_count, 2);
 
-    const removedPush = await aliceWs.push();
+    const removedPush = await aliceWs.waitFor((frame) => frame.type === WS_TYPE.WS_PUSH
+      && decodeServerEvent(frame.push.payload)?.type === 'CHANNEL_MEMBER_REMOVED');
     const removedEvent = decodeServerEvent(removedPush.push.payload);
     assert.equal(removedEvent.type, 'CHANNEL_MEMBER_REMOVED');
     assert.equal(removedEvent.memberRemoved.channelId, groupId);
@@ -602,6 +666,7 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
     };
 
     const roleGroup = crypto.randomUUID();
+    await connectPair(alice, carol);
     const created = await api('POST', '/v3.0/channels', {
       token: alice.accesskey,
       body: {
@@ -613,6 +678,9 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
       }
     });
     assert.equal(created.status, 201);
+    await Promise.all([bob, carol].map((user) => api(
+      'POST', `/v3.0/channels/${roleGroup}/invite/accept`, { token: user.accesskey, body: {} }
+    )));
 
     // alice promotes bob; both bob and carol hear the re-announcement
     const promoted = await api(

@@ -230,6 +230,57 @@ test('a DM envelope needs no channel row and fans out to the peer', async () => 
   });
 });
 
+// ---- the invite gate (decisions 219, 220; SYNC_PROTOCOL §21) -------------
+
+test('a DM between two people who have not connected is refused not_connected', async () => {
+  await withGateway(async ({
+    uri, publishedEnvelopes, setVerdict, gateAsked
+  }) => {
+    setVerdict(ALICE, BOB, 'not_connected');
+    const client = connect(uri, ALICE);
+    await client.opened;
+    // class KEY (3), SILENT: the class is what the gate is asked about
+    client.send(opFrame([envelope(ALICE, 1, { peer: BOB, flags: 7 })]));
+
+    const [ack] = (await client.next()).acks.acks;
+    assert.strictEqual(ack.outcome, ACK_OUTCOME.PERMANENT);
+    assert.strictEqual(ack.reason, REASON.NOT_CONNECTED);
+    assert.strictEqual(publishedEnvelopes().length, 0);
+    assert.deepStrictEqual(gateAsked, [{ from: ALICE, to: BOB, cls: 3 }]);
+    client.close();
+  });
+});
+
+test('a blocked sender is acked as usual and relayed nowhere', async () => {
+  await withGateway(async ({ uri, publishedEnvelopes, setVerdict }) => {
+    setVerdict(ALICE, BOB, 'blocked');
+    const client = connect(uri, ALICE);
+    await client.opened;
+    client.send(opFrame([
+      envelope(ALICE, 0, { peer: BOB, ephemeral: true }),
+      envelope(ALICE, 1, { peer: BOB })
+    ]));
+
+    const { acks } = (await client.next()).acks;
+    assert.strictEqual(acks.length, 1, 'typing is never acked');
+    assert.strictEqual(acks[0].outcome, ACK_OUTCOME.SUCCESS);
+    assert.ok(acks[0].serverTimestampMs > 0);
+    assert.strictEqual(publishedEnvelopes().length, 0);
+    client.close();
+  });
+});
+
+test('a group frame never asks the invite gate', async () => {
+  await withGateway(async ({ uri, gateAsked }) => {
+    const client = connect(uri, ALICE);
+    await client.opened;
+    client.send(opFrame([envelope(ALICE, 1)]));
+    assert.strictEqual((await client.next()).acks.acks[0].outcome, ACK_OUTCOME.SUCCESS);
+    assert.deepStrictEqual(gateAsked, []);
+    client.close();
+  });
+});
+
 test('a DM names a peer and no channel_id, a group the reverse; anything else is validation_failed', async () => {
   await withGateway(async ({ uri, publishedEnvelopes }) => {
     const client = connect(uri, ALICE);
