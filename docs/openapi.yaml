@@ -107,7 +107,7 @@ components:
           description: ms since epoch
     Invite:
       type: object
-      description: One pending invite (SYNC_PROTOCOL 21)
+      description: One pending invite (SYNC_PROTOCOL 23)
       properties:
         channel_id:
           type: string
@@ -332,7 +332,7 @@ tags:
       profile-ms.
   - name: v3.0 > Connecting
     description: >-
-      Invite-only (decisions 219-221, SYNC_PROTOCOL 21): nothing flows 1:1
+      Invite-only (decisions 219-221, SYNC_PROTOCOL 23): nothing flows 1:1
       until an invite is accepted (a 1:1 frame otherwise acks
       `not_connected`), and a group's newcomer is a member once they accept.
       Blocks and reports. Not queued and without `op_id`: each call is

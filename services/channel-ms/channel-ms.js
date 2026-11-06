@@ -643,7 +643,7 @@ class ChannelMs extends HttpServiceBase {
     return req.internal ? channel : channelView(channel, await this.invitedTo(channelId));
   }
 
-  // ---- connecting (decisions 219-221, SYNC_PROTOCOL §21) ------------------
+  // ---- connecting (decisions 219-221, SYNC_PROTOCOL §23) ------------------
 
   /** Who has a pending invite to `channelId`. */
   async invitedTo(channelId) {

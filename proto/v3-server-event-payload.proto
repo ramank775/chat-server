@@ -349,7 +349,7 @@ message Presence {
 }
 
 // -----------------------------------------------------------------------------
-// Invites (decisions 219-221, SYNC_PROTOCOL.md §21).
+// Invites (decisions 219-221, SYNC_PROTOCOL.md §23).
 // -----------------------------------------------------------------------------
 //
 // No message flows between two people until one has invited and the other

@@ -8,7 +8,7 @@ const { dmPairsOf } = require('../../../libs/delivery-manager/undelivered-queue'
 const { emptyQueue, closeQueues, idOf } = require('../../message-delivery/test/helper');
 const { DEVICE_1 } = require('../../connection-gateway/test/helper');
 
-// Decisions 219-221 (SYNC_PROTOCOL §21): invites, connections, blocks,
+// Decisions 219-221 (SYNC_PROTOCOL §23): invites, connections, blocks,
 // reports and the gate the gateway asks, on the TEST_DB backend.
 
 const ANNA = 'a1a1a1a1a';

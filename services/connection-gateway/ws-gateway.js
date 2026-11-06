@@ -650,7 +650,7 @@ class Gateway extends HttpServiceBase {
       // Both sides, so the sender's own other devices get it too (§8); the
       // sending device is what fanout excludes.
       recipients = [peer, userId];
-      // Decisions 219/220 (§21): nothing flows 1:1 before an accepted
+      // Decisions 219/220 (§23): nothing flows 1:1 before an accepted
       // invite, but co-members' keys, receipts and resend requests do. A
       // blocked sender is acked as usual and relayed nowhere, as WhatsApp's
       // single tick: they cannot tell.

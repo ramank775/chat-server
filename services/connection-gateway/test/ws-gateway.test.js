@@ -230,7 +230,7 @@ test('a DM envelope needs no channel row and fans out to the peer', async () => 
   });
 });
 
-// ---- the invite gate (decisions 219, 220; SYNC_PROTOCOL §21) -------------
+// ---- the invite gate (decisions 219, 220; SYNC_PROTOCOL §23) -------------
 
 test('a DM between two people who have not connected is refused not_connected', async () => {
   await withGateway(async ({

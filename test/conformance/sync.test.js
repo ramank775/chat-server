@@ -192,7 +192,7 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
     assert.equal(malformed.body.error.code, 'validation_failed');
   });
 
-  // -- 4b. invite-only (decision 219, SYNC_PROTOCOL §21) -------------------
+  // -- 4b. invite-only (decision 219, SYNC_PROTOCOL §23) -------------------
 
   it('connects a pair by an invite and an accept', async () => {
     const sent = await api('POST', '/v3.0/channels/invites', {
