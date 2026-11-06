@@ -18,9 +18,10 @@ const PER_USER_DAY = 20;
 const reportSchema = Joi.object({
   at: Joi.number().integer().min(0).required(),
   kind: Joi.string().valid('dart', 'android').required(),
-  build: Joi.string().max(40).required(),
-  android: Joi.string().max(40).required(),
-  model: Joi.string().max(80).required(),
+  // empty when the phone could not tell
+  build: Joi.string().max(40).allow('').required(),
+  android: Joi.string().max(40).allow('').required(),
+  model: Joi.string().max(80).allow('').required(),
   trace: Joi.string().max(16000).required()
 }).required();
 

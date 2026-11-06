@@ -247,6 +247,10 @@ split_part(trace, chr(10), 1), count(*) FROM crash_reports GROUP BY 1, 2
 ORDER BY 1 DESC, 3 DESC`. On a Mongo stack:
 `db.crash_reports.find().sort({ at: -1 }).limit(20)` in `mongosh`.
 
+An `android` trace from a release build has R8's short class names: read
+it with that build's `mapping.txt` (kept in the app's release artifact)
+and `retrace mapping.txt trace.txt` from the Android SDK's cmdline-tools.
+
 ## Never in production
 
 - The dev flags `--expose-dev-otp`, `PROFILE_DEV_FLAGS` and
