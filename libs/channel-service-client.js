@@ -7,6 +7,9 @@ class ChannelServiceClient {
   /** @type {Map<string, {members: Set<string>, expiry: number}>} */
   _membership = new Map();
 
+  /** `from>to:class` -> when its `ok` expires */
+  _verdicts = new Map();
+
   constructor(options) {
     this._client = new HttpClient(options.channelMsEndpoint)
     this._membershipTtlMs = (options.channelMembershipCacheSec || 30) * 1000;
@@ -46,6 +49,28 @@ class ChannelServiceClient {
     if (this._membership.size >= MEMBERSHIP_CACHE_MAX) this._membership.clear();
     this._membership.set(channelId, { members, expiry: Date.now() + this._membershipTtlMs });
     return members;
+  }
+
+  /**
+   * Decisions 219/220 — may `from`'s 1:1 frame of class `cls` reach `to`?
+   * `ok`, `blocked` (ack it, relay nothing) or `not_connected`. Only `ok`
+   * is cached, so an accept lets the next frame through at once; a block
+   * takes up to the membership TTL to catch a pair already cached.
+   * @param {string} from
+   * @param {string} to
+   * @param {number} cls the frame class
+   * @returns {Promise<'ok'|'blocked'|'not_connected'>}
+   */
+  async dmVerdict(from, to, cls) {
+    const key = `${from}>${to}:${cls}`;
+    const cached = this._verdicts.get(key);
+    if (cached && cached > Date.now()) return 'ok';
+    const { verdict } = await this._client.get(`/_internal/gate/${from}/${to}?class=${cls}`);
+    if (verdict === 'ok') {
+      if (this._verdicts.size >= MEMBERSHIP_CACHE_MAX) this._verdicts.clear();
+      this._verdicts.set(key, Date.now() + this._membershipTtlMs);
+    }
+    return verdict;
   }
 
   /**
