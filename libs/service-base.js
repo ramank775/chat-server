@@ -61,7 +61,9 @@ class ServiceBase {
         return typeof value === 'string' ? value.replace(/(\/\/[^:/@\s]+:)[^@\s]*@/, '$1*****@') : value;
       })}`
     );
-    this.init();
+    // awaited: a standalone http service listens right after, on the server
+    // its init creates (profile-ms runs its phone migration first)
+    await this.init();
     this.handleError();
     return this;
   }

@@ -340,3 +340,21 @@ describe('the app version check (decision 192)', () => {
     assert.deepEqual(alone, [true]);
   });
 });
+
+describe('a standalone service', () => {
+  it('listens only once its async init has made the server', async () => {
+    // profile-ms runs its phone migration before HttpServiceBase.init
+    const service = new HttpServiceBase({ options, log, statsClient });
+    const { init } = service;
+    service.init = async () => {
+      await new Promise((resolve) => { setImmediate(resolve); });
+      await init.call(service);
+    };
+    await service.run();
+    try {
+      assert.equal((await fetch(`${service.uri}/alive`)).status, 200);
+    } finally {
+      await service.shutdown();
+    }
+  });
+});
