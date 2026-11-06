@@ -155,6 +155,25 @@ describe('monolith mounting', () => {
     assert.equal(channelMiss.statusCode, 404);
     assert.equal(channelMiss.json().error.code, 'not_found');
   });
+
+  it('logs and counts a request once, not once per scope', async () => {
+    const lines = [];
+    const counted = [];
+    log.info = (line) => lines.push(line);
+    statsClient.increment = ({ stat }) => counted.push(stat);
+    try {
+      await inject({
+        method: 'GET',
+        url: '/v3.0/channels/abc',
+        headers: { authorization: 'Bearer good' }
+      });
+    } finally {
+      log.info = noop;
+      statsClient.increment = noop;
+    }
+    assert.deepEqual(lines, ['new request : /v3.0/channels/abc']);
+    assert.deepEqual(counted, ['http.request.count']);
+  });
 });
 
 describe('the in-process auth hook', () => {

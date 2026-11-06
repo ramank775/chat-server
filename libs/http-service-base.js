@@ -181,6 +181,35 @@ class HttpServiceBase extends ServiceBase {
         }
         done();
       });
+
+      // Logged and counted once, here at the root: a mounted service inherits
+      // these, and adding them again in its own scope logged every request twice.
+      this.server.addHook('onRequest', (req, _reply, done) => {
+        // `inject` never reaches the http server above, so it enters the store
+        // here: the rest of the lifecycle is driven from this `done()`.
+        als.run(als.getStore() || newStore(req), () => {
+          req.startTime = new Date();
+          this.statsClient.increment({
+            stat: 'http.request.count',
+            tags: {
+              url: req.url.split('?')[0],
+            }
+          })
+          this.log.info(`new request : ${req.url}`);
+          done();
+        });
+      });
+
+      this.server.addHook('onResponse', (req, _reply, done) => {
+        this.statsClient.timing({
+          stat: 'http.request.latency',
+          value: req.startTime,
+          tags: {
+            url: req.url.split('?')[0],
+          }
+        })
+        done();
+      });
     }
 
     // Everything below is fastify-encapsulated, so when mounted it covers this
@@ -188,22 +217,6 @@ class HttpServiceBase extends ServiceBase {
     this.server.setValidatorCompiler(({ schema }) => (data) =>
       schema.validate(data, { abortEarly: false })
     );
-
-    this.server.addHook('onRequest', (req, _reply, done) => {
-      // `inject` never reaches the http server above, so it enters the store
-      // here: the rest of the lifecycle is driven from this `done()`.
-      als.run(als.getStore() || newStore(req), () => {
-        req.startTime = new Date();
-        this.statsClient.increment({
-          stat: 'http.request.count',
-          tags: {
-            url: req.url.split('?')[0],
-          }
-        })
-        this.log.info(`new request : ${req.url}`);
-        done();
-      });
-    });
 
     this.server.addHook('onSend', (req, reply, payload, done) => {
       reply.header('cache-control', 'no-cache');
@@ -213,17 +226,6 @@ class HttpServiceBase extends ServiceBase {
         reply.header('accept-ranges', 'bytes');
       }
       done(null, payload);
-    });
-
-    this.server.addHook('onResponse', (req, _reply, done) => {
-      this.statsClient.timing({
-        stat: 'http.request.latency',
-        value: req.startTime,
-        tags: {
-          url: req.url.split('?')[0],
-        }
-      })
-      done();
     });
 
     // every non-envelope error (joi rejection, unknown route, crash) still leaves
