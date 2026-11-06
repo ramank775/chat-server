@@ -175,6 +175,15 @@ components:
         next:
           type: [string, 'null']
           description: Pass as `before` for the next page; null on the last
+    PresenceSetting:
+      type: string
+      enum: [everyone, contacts, nobody]
+      default: everyone
+      description: >-
+        Who sees the user's last seen and online (SYNC_PROTOCOL 21).
+        `contacts`: users who have each written to the other in a DM.
+        Reciprocal: one sees another's only while each shares with the
+        other.
     KeyRegistration:
       type: object
       additionalProperties: false
@@ -301,8 +310,63 @@ tags:
       DM's `peer` 5), a DM sends `peer` and no `channel_id`, and the sender
       is read from the op_id; `Envelope.flags` bit 0 (SILENT, set by the
       sender) decides the push wake, and bits 1-4 carry the frame class,
-      which sets a receipt's 7-day retention (decision 220).
+      which sets a receipt's 7-day retention (decision 220). Class 8
+      PRESENCE (SYNC_PROTOCOL 21) is ephemeral and between a phone and the
+      server only: a phone's presence op (`peer` = whom it watches, payload
+      `0x53` + `Presence{online}`) is never acked or fanned out, and the
+      server answers with, and pushes changes as, PRESENCE frames whose
+      `Presence{user_id, online, last_seen_ms}` the watched user's setting
+      allows.
+  - name: v3.0 > Users
+    description: >-
+      The account's own profile (AUTH_CONTRACT 4.4, 4.5). Only the
+      presence setting is described here.
 paths:
+  /v3.0/users/me:
+    get:
+      tags:
+        - v3.0 > Users
+      summary: The own profile, with who sees its last seen and online
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: AUTH_CONTRACT 4.4; never another user's
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  presence:
+                    $ref: '#/components/schemas/PresenceSetting'
+        '401':
+          $ref: '#/components/responses/AuthError'
+    patch:
+      tags:
+        - v3.0 > Users
+      summary: Change profile fields, among them the presence setting
+      description: >-
+        AUTH_CONTRACT 4.5 for the other fields. A new `presence` reaches
+        whoever watches this user at once (SYNC_PROTOCOL 21).
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                presence:
+                  $ref: '#/components/schemas/PresenceSetting'
+      responses:
+        '200':
+          description: The updated own profile, as GET
+        '400':
+          description: '`validation_failed`: not one of the three values'
+        '401':
+          $ref: '#/components/responses/AuthError'
+        '429':
+          description: Over the 50 per hour profile budget (AUTH_CONTRACT 10.6)
   /v3.0/auth/otp/resend:
     post:
       tags:
