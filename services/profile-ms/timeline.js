@@ -247,9 +247,16 @@ class Timeline {
     if (batch.length === SWEEP_BATCH) await this.sweepExpired(now);
   }
 
-  /** AUTH_CONTRACT 8.2: an account's posts go with it. */
+  /**
+   * AUTH_CONTRACT 8.2: an account's posts go with it. Best effort, like the
+   * account's other side stores: what is left expires with the retention.
+   */
   async eraseAuthor(author) {
-    await this.deletePhotos(await this.db.deleteAllBy(author));
+    try {
+      await this.deletePhotos(await this.db.deleteAllBy(author));
+    } catch (error) {
+      this.service.log.error(`Timeline erase failed for ${author}: ${error.message}`);
+    }
   }
 
   /** media-ms deletes a file only for its uploader: the poster. Best effort. */
