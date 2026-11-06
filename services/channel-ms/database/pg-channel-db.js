@@ -22,6 +22,8 @@ const SCHEMA = `
     created_at bigint,
     updated_at bigint
   );
+  -- who set avatar_url: only their own upload is deleted when it is replaced
+  ALTER TABLE channels ADD COLUMN IF NOT EXISTS avatar_by text;
   CREATE TABLE IF NOT EXISTS channel_members (
     channel_id text NOT NULL REFERENCES channels ON DELETE CASCADE,
     user_id text NOT NULL,
@@ -74,11 +76,12 @@ const INVITE = `SELECT channel_id AS "channelId", to_user AS "to", from_user AS 
 const pairOf = (a, b) => (a < b ? [a, b] : [b, a]);
 
 /** The fields `updateChannel` may set. */
-const EDITABLE = ['name', 'avatarUrl', 'updatedAt'];
+const EDITABLE = ['name', 'avatarUrl', 'avatarBy', 'updatedAt'];
 
 /** A channel as the mongo store returns it: only the live roster, in push order. */
 const CHANNEL = `
-  SELECT c.channel_id AS "channelId", c.kind, c.name, c.avatar_url AS "avatarUrl", c.owner,
+  SELECT c.channel_id AS "channelId", c.kind, c.name, c.avatar_url AS "avatarUrl",
+    c.avatar_by AS "avatarBy", c.owner,
     (SELECT COALESCE(json_agg(json_build_object(
         'user_id', m.user_id, 'role', m.role, 'joinedAt', m.joined_at, 'removedAt', m.removed_at
       ) ORDER BY m.pos), '[]')
@@ -125,8 +128,9 @@ class PgChannelDB extends IChannelDB {
     try {
       await this.#pool.query(
         `WITH created AS (
-           INSERT INTO channels (channel_id, kind, name, avatar_url, owner, created_at)
-           VALUES ($1, $${first}, $${first + 1}, $${first + 2}, $${first + 3}, $${first + 4})
+           INSERT INTO channels (channel_id, kind, name, avatar_url, avatar_by, owner, created_at)
+           VALUES ($1, $${first}, $${first + 1}, $${first + 2}, $${first + 3}, $${first + 4},
+             $${first + 5})
          )
          INSERT INTO channel_members (channel_id, user_id, role, joined_at, removed_at)
          VALUES ${values}`,
@@ -135,6 +139,7 @@ class PgChannelDB extends IChannelDB {
           channel.kind,
           channel.name,
           channel.avatarUrl,
+          channel.avatarBy,
           channel.owner,
           channel.createdAt
         ]

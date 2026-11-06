@@ -9,6 +9,7 @@ const PROJECTION = {
     kind: 1,
     name: 1,
     avatarUrl: 1,
+    avatarBy: 1,
     owner: 1,
     members: 1,
     createdAt: 1

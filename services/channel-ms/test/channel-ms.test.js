@@ -475,3 +475,62 @@ test('the last member out hard deletes the channel', async () => {
   const info = await harness.inject({ method: 'GET', url: `/_internal/${LAST}` });
   assert.strictEqual(info.statusCode, 404);
 });
+
+const PHOTO = '01efabcd-7000-8000-8abc-000000000104';
+const LONE = '01efabcd-7000-8000-8abc-000000000105';
+
+const editGroup = (channelId, actor, n, extra) => harness.inject({
+  method: 'PATCH',
+  url: `/${channelId}`,
+  headers: headers(actor),
+  payload: uop(actor, n, extra)
+});
+
+test('a replaced or cleared group photo is deleted as its setter\'s file', async () => {
+  harness.fileDeletes.length = 0;
+  await harness.inject({
+    method: 'POST',
+    url: '/',
+    headers: headers(ALICE),
+    payload: uop(ALICE, 1, {
+      channel_id: PHOTO, kind: 'group', name: 'Photo', avatar_url: 'f1', members: [ALICE, BOB]
+    })
+  });
+  await editGroup(PHOTO, ALICE, 2, { name: 'Renamed' });
+  await editGroup(PHOTO, ALICE, 3, { avatar_url: 'f1' });
+  assert.deepStrictEqual(harness.fileDeletes, [], 'a rename or the same photo deletes nothing');
+
+  await setRole(PHOTO, ALICE, BOB, 'admin', 4);
+  const replaced = await editGroup(PHOTO, BOB, 5, { avatar_url: 'f2#key' });
+  assert.strictEqual(replaced.statusCode, 200);
+  assert.strictEqual(body(replaced).avatar_url, 'f2#key');
+  assert.strictEqual(body(replaced).avatarBy, undefined, 'the setter stays server side');
+  await editGroup(PHOTO, ALICE, 6, { avatar_url: null });
+  assert.deepStrictEqual(harness.fileDeletes, [
+    { fileId: 'f1', owner: ALICE },
+    { fileId: 'f2', owner: BOB }
+  ]);
+});
+
+test('a deleted group takes its photo with it', async () => {
+  await editGroup(PHOTO, BOB, 7, { avatar_url: 'f3' });
+  harness.fileDeletes.length = 0;
+  const deleted = await harness.inject({
+    method: 'DELETE', url: `/${PHOTO}`, headers: headers(ALICE), payload: uop(ALICE, 8)
+  });
+  assert.strictEqual(deleted.statusCode, 204);
+
+  await harness.inject({
+    method: 'POST',
+    url: '/',
+    headers: headers(CARL),
+    payload: uop(CARL, 1, {
+      channel_id: LONE, kind: 'group', name: 'Lone', avatar_url: 'f4', members: [CARL]
+    })
+  });
+  await leaveChannel(LONE, CARL, 2);
+  assert.deepStrictEqual(harness.fileDeletes, [
+    { fileId: 'f3', owner: BOB },
+    { fileId: 'f4', owner: CARL }
+  ]);
+});

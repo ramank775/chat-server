@@ -6,6 +6,7 @@ const {
 } = require('../../libs/service-base');
 const { addHttpOptions, initHttpResource, HttpServiceBase } = require('../../libs/http-service-base');
 const { extractInfoFromRequest, schemas, errorEnvelope } = require('../../helper');
+const { HttpClient } = require('../../libs/http-client');
 const eventStore = require('../../libs/event-store');
 const MemCache = require('../../libs/cache');
 const {
@@ -68,15 +69,18 @@ function parseOptions(argv) {
   cmd = addDatabaseOptions(cmd);
   cmd = MemCache.addMemCacheOptions(cmd);
   cmd = eventStore.addEventStoreOptions(cmd);
-  cmd = cmd.option(
-    '--new-message-topic <new-message-topic>',
-    'Used by producer to publish the §10.2 server events for REST channel writes'
-  ).option(
-    '--invite-pending-max <count>',
-    'Pending 1:1 invites one user may have out at a time (decision 219)',
-    (value) => Number(value),
-    30
-  );
+  cmd = cmd
+    .option(
+      '--new-message-topic <new-message-topic>',
+      'Used by producer to publish the §10.2 server events for REST channel writes'
+    )
+    .option(
+      '--invite-pending-max <count>',
+      'Pending 1:1 invites one user may have out at a time (decision 219)',
+      (value) => Number(value),
+      30
+    )
+    .option('--media-ms-endpoint <media-ms-endpoint>', 'Base url for media service');
   return cmd.parse(argv).opts();
 }
 
@@ -151,6 +155,7 @@ class ChannelMs extends HttpServiceBase {
     /** @type {import('../../libs/event-store/iEventStore').IEventStore} */
     this.eventStore = this.context.eventStore;
     this.memCache = context.memCache;
+    this.mediaClient = new HttpClient(this.options.mediaMsEndpoint);
   }
 
   async init() {
@@ -447,6 +452,7 @@ class ChannelMs extends HttpServiceBase {
       kind,
       name: name || null,
       avatarUrl: avatarUrl || null,
+      avatarBy: avatarUrl ? user : null,
       owner: user,
       members: [memberRow(user, 'owner')],
       createdAt: Date.now()
@@ -581,9 +587,11 @@ class ChannelMs extends HttpServiceBase {
     }
     if (avatarUrl !== undefined) {
       updates.avatarUrl = avatarUrl;
+      updates.avatarBy = avatarUrl ? user : null;
       event.avatarUrl = avatarUrl || '';
     }
     const updated = await this.db.updateChannel(channelId, updates);
+    if (channel.avatarUrl !== updated.avatarUrl) await this.deleteGroupPhoto(channel);
     await this.fanout('CHANNEL_EDITED', channel, user, memberIds(channel), event);
     return this.accept(res, user, opId, 200, channelView(updated));
   }
@@ -611,6 +619,7 @@ class ChannelMs extends HttpServiceBase {
 
     const invited = await this.invitedTo(channelId);
     await this.db.deleteChannel(channelId);
+    await this.deleteGroupPhoto(channel);
     // its invitees too, so their pending invite goes (decision 221)
     await this.fanout('CHANNEL_DELETED', channel, user, [...memberIds(channel), ...invited], {
       channelId,
@@ -934,6 +943,7 @@ class ChannelMs extends HttpServiceBase {
     const remaining = channel.members.filter((m) => m.user_id !== userId);
     if (!remaining.length) {
       await this.db.deleteChannel(channel.channelId);
+      await this.deleteGroupPhoto(channel);
       await this.fanout('CHANNEL_DELETED', channel, actor, [userId], {
         channelId: channel.channelId,
         deletedAtMs: removedAtMs
@@ -951,6 +961,25 @@ class ChannelMs extends HttpServiceBase {
       await this.announceRole(
         channel, actor, heir.user_id, 'owner', remaining.map((m) => m.user_id)
       );
+    }
+  }
+
+  /**
+   * A replaced or deleted group's photo goes from storage, as a profile photo
+   * does (decision 195). media-ms deletes it only if whoever set it uploaded
+   * it, so an admin cannot name someone else's file and have it deleted. A
+   * row from before `avatarBy` was kept falls back to the group's owner.
+   * Best effort: the edit or delete has already happened.
+   */
+  async deleteGroupPhoto({ channelId, avatarUrl, avatarBy, owner }) {
+    if (!avatarUrl) return;
+    try {
+      await this.mediaClient.post('/_internal/files/delete', {
+        fileId: avatarUrl.split('#')[0],
+        owner: avatarBy || owner
+      });
+    } catch (error) {
+      this.log.error(`Group photo delete failed for ${channelId}: ${error.message}`);
     }
   }
 

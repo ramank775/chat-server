@@ -95,6 +95,12 @@ async function startChannelMs(dbName) {
 
   const context = await initResource(options);
   const service = new ChannelMs(context);
+  // media-ms's file delete (a replaced or deleted group's photo)
+  const fileDeletes = [];
+  service.mediaClient.post = async (_path, payload) => {
+    fileDeletes.push(payload);
+    return { deleted: true };
+  };
   await service.init();
   await service.server.ready();
 
@@ -102,6 +108,7 @@ async function startChannelMs(dbName) {
     server: service,
     db,
     eventStore: context.eventStore,
+    fileDeletes,
     /** @param {import('light-my-request').InjectOptions} request */
     inject: (request) => service.server.inject(request),
     /** Every `EnvelopeEvent` published to the new-message topic. */

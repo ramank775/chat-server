@@ -17,6 +17,7 @@ const REPORT_RETENTION_SEC = 90 * 24 * 60 * 60;
  * @property {'group'} kind — trim 4: a DM id is derived, never a row
  * @property {string|null} name
  * @property {string|null} avatarUrl
+ * @property {string|null} [avatarBy] who set avatarUrl (the uploader media-ms checks)
  * @property {string} owner creator's user_id
  * @property {Member[]} members active members only on every read
  * @property {number} createdAt
