@@ -297,7 +297,7 @@ describe('timeline (SYNC_PROTOCOL §10.6, §19 decision 1)', () => {
     assert.strictEqual(expiryOf({ serverTimestampMs: at, flags: receipt + 1 }).getTime(),
       at + 7 * day * 1000);
     [FRAME_CLASS.MESSAGE, FRAME_CLASS.MUTATION, FRAME_CLASS.KEY, FRAME_CLASS.RESEND,
-      FRAME_CLASS.EVENT].forEach((cls) => {
+      FRAME_CLASS.EVENT, FRAME_CLASS.LOCATION].forEach((cls) => {
       assert.strictEqual(expiryOf({ serverTimestampMs: at, flags: classFlags(cls) }).getTime(),
         at + TTL_SEC * 1000, `class ${cls}`);
     });
@@ -316,6 +316,14 @@ describe('timeline (SYNC_PROTOCOL §10.6, §19 decision 1)', () => {
     }));
 
     assert.deepStrictEqual(await opIdsFor(harness.queue, ALICE), ['mutation']);
+  });
+
+  test('expiry: a live-location position is kept its own 15 minutes (SYNC_PROTOCOL §21)', () => {
+    const at = 1700000000000;
+    const position = classFlags(FRAME_CLASS.LOCATION) + 1;
+    assert.strictEqual(FRAME_CLASS.LOCATION, 7);
+    assert.strictEqual(expiryOf({ serverTimestampMs: at, flags: position, ttlSec: 900 }).getTime(),
+      at + 900 * 1000);
   });
 
   test('fanout keeps an envelope for its sender\'s ttl_sec', async () => {

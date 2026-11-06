@@ -99,9 +99,14 @@ const SERVER_EVENT_MARKER = 0x53;
 /** `Envelope.flags` bits (proto §flags). */
 const ENVELOPE_FLAG = Object.freeze({ SILENT: 1 });
 
-/** The frame class, `Envelope.flags` bits 1-4 (decisions 218, 220; proto §flags). */
+/**
+ * The frame class, `Envelope.flags` bits 1-4 (decisions 218, 220; proto §flags).
+ * LOCATION: live location (SYNC_PROTOCOL §21, decision 223), positions and
+ * stops SILENT with a short ttl_sec, a remote on/off waking; nothing here
+ * treats it apart.
+ */
 const FRAME_CLASS = Object.freeze({
-  MESSAGE: 0, MUTATION: 1, RECEIPT: 2, KEY: 3, RESEND: 4, EVENT: 5
+  MESSAGE: 0, MUTATION: 1, RECEIPT: 2, KEY: 3, RESEND: 4, EVENT: 5, LOCATION: 7
 });
 
 /* eslint-disable no-bitwise -- flags is a bit set */
