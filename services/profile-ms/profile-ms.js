@@ -14,6 +14,7 @@ const { profileDB } = require('./database');
 const { addAuthProviderOptions, initializeAuthProvider, AuthError } = require('./auth-provider');
 const { SmsGatewayError, SmsGatewayUnavailableError } = require('./auth-provider/sms-sender');
 const { HttpClient } = require('../../libs/http-client');
+const { TTL_SEC } = require('../../libs/delivery-manager/undelivered-queue');
 const {
   EVENT_FLAGS, EnvelopeEvent, SERVER_EVENT_MARKER, serverNow
 } = require('../../libs/v3-envelope');
@@ -442,6 +443,14 @@ class ProfileMs extends HttpServiceBase {
       }
     });
 
+    // message-delivery's fanout in the microservice layout (the monolith
+    // calls fanoutDevices in process)
+    this.addInternalRoute('/devices', 'POST', (req) => this.fanoutDevices(req.payload.user_ids), {
+      validate: {
+        payload: Joi.object({ user_ids: Joi.array().items(Joi.string()).required() }).required()
+      }
+    });
+
     this.addRoute('/users/by-username/{username}', 'GET', this.guard(this.getUserByUsername), {
       pre: [this.authPre()],
       validate: {
@@ -491,6 +500,20 @@ class ProfileMs extends HttpServiceBase {
 
     this.timeline.addRoutes();
     this.crashReports.addRoutes();
+  }
+
+  /**
+   * The devices a fanout to [userIds] is for, from the session rows: a device
+   * counts from sign-in, before its first socket, and through a logout for as
+   * long as the timeline keeps frames, so it finds them when it signs back in.
+   * ponytail: a device replaced by a sign-in elsewhere, or an account deleted,
+   * keeps getting frames queued until the TTL; nobody pulls them. Record why a
+   * session was revoked if that waste ever shows.
+   * @param {string[]} userIds
+   * @returns {Promise<{user_id: string, deviceId: string}[]>}
+   */
+  fanoutDevices(userIds) {
+    return this.context.authDB.devicesOf(userIds, new Date(Date.now() - TTL_SEC * 1000));
   }
 
   /**

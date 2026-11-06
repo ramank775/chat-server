@@ -152,13 +152,11 @@ class DeliveryManager {
 
   /**
    * Expand member user_ids into `user_id:device_id` delivery subjects.
-   * With a `deviceDirectory` (the monolith: profile-ms's session rows) a
-   * device counts from sign-in and survives a restart. Without one, from the
-   * registry.
-   * ponytail: the registry knows a device from its first socket. Ceiling: a
-   * message sent between a login and that socket is dropped instead of
-   * queued; give the distributed deployment a directory call into profile-ms
-   * when it runs for real.
+   * With a `deviceDirectory` (profile-ms's session rows: in process in the
+   * monolith, `--profile-ms-endpoint` in message-delivery) a device counts
+   * from sign-in and survives a restart. Without one, from the registry,
+   * which knows a device from its first socket: a message sent between a
+   * login and that socket is dropped instead of queued.
    * @param {string[]} userIds
    * @returns {Promise<string[]>}
    */

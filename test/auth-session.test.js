@@ -72,6 +72,14 @@ describe('auth/session and the /auth subrequest', () => {
     const second = await revoke();
     assert.equal(second.statusCode, 200, 'revoking twice is a no-op');
 
+    // message-delivery's fanout in the microservice layout reads the same rows
+    const internal = await app.inject({
+      method: 'POST', url: '/_internal/devices', payload: { user_ids: [session.user_id] }
+    });
+    assert.equal(internal.statusCode, 200);
+    assert.deepEqual(JSON.parse(internal.payload), [{ user_id: session.user_id, deviceId: 'd1' }],
+      'a device counts from sign-in, before any socket, and through a logout');
+
     const me = await app.inject({ method: 'GET', url: '/users/me', headers: bearer(session.accesskey) });
     assert.equal(me.statusCode, 401);
     assert.equal(JSON.parse(me.payload).error.code, 'INVALID_ACCESSKEY');

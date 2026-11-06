@@ -277,15 +277,8 @@ async function initResources(options) {
   const profile = new profileMs.ProfileMs({ ...profileContext, ...mount(API) });
   // Fanout's devices come from the session rows, not the in-process registry,
   // which forgets every device on a restart and learns one only at its first
-  // socket: a device counts from sign-in, and through a logout for as long as
-  // the queue keeps frames, so it finds them when it signs back in.
-  // ponytail: a device replaced by a sign-in elsewhere, or an account deleted,
-  // keeps getting frames queued until the TTL; nobody pulls them. Record why a
-  // session was revoked if that waste ever shows.
-  shared.deliveryManager.deviceDirectory = (userIds) => profileContext.authDB.devicesOf(
-    userIds,
-    new Date(Date.now() - UndeliveredQueue.TTL_SEC * 1000)
-  );
+  // socket.
+  shared.deliveryManager.deviceDirectory = (userIds) => profile.fanoutDevices(userIds);
 
   const channelContext = await serviceContext(shared, [channelDb.initializeDatabase], {
     producer: true

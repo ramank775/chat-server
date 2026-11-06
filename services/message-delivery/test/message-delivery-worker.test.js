@@ -1,4 +1,5 @@
 const assert = require('node:assert');
+const http = require('node:http');
 const { test, describe, after } = require('node:test');
 const { MongoClient } = require('mongodb');
 const {
@@ -22,6 +23,8 @@ const {
   closeQueues
 } = require('./helper');
 const { TEST_DB } = require('../../../test/helpers/db');
+const { DeliveryManager } = require('../../../libs/delivery-manager');
+const { initDeviceDirectory } = require('../message-delivery-worker');
 
 const SENDER = '00000000a';
 const ALICE = '00000000b';
@@ -180,6 +183,33 @@ const names = async (queue, userId, since = 0, limit = undefined) => {
   const { envelopes, more } = await queue.pending(userId, DEVICE_1, since, limit);
   return { frames: envelopes.map(String), more };
 };
+
+test('--profile-ms-endpoint: fanout reads its devices from profile-ms', async () => {
+  const asked = [];
+  const profile = http.createServer((req, res) => {
+    let raw = '';
+    req.on('data', (chunk) => { raw += chunk; });
+    req.on('end', () => {
+      asked.push({ url: req.url, body: JSON.parse(raw) });
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify([{ user_id: ALICE, deviceId: 'signed-in-no-socket-yet' }]));
+    });
+  });
+  await new Promise((resolve) => { profile.listen(0, '127.0.0.1', resolve); });
+  try {
+    const context = initDeviceDirectory({
+      options: { profileMsEndpoint: `http://127.0.0.1:${profile.address().port}` },
+      deliveryManager: new DeliveryManager({ redis: {} })
+    });
+    assert.deepStrictEqual(
+      await context.deliveryManager.subjects([ALICE]),
+      [`${ALICE}:signed-in-no-socket-yet`]
+    );
+    assert.deepStrictEqual(asked, [{ url: '/_internal/devices', body: { user_ids: [ALICE] } }]);
+  } finally {
+    profile.close();
+  }
+});
 
 describe('timeline (SYNC_PROTOCOL §10.6, §19 decision 1)', () => {
   test('pages come in timestamp order, channels interleaved as they were stamped', async () => {

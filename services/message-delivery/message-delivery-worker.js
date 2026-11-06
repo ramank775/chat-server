@@ -6,6 +6,7 @@ const {
   resolveEnvVariables
 } = require('../../libs/service-base');
 const ChannelServiceClient = require('../../libs/channel-service-client');
+const { HttpClient } = require('../../libs/http-client');
 const DeliveryManager = require('../../libs/delivery-manager');
 const UndeliveredQueue = require('../../libs/delivery-manager/undelivered-queue');
 
@@ -32,10 +33,27 @@ async function prepareEventList(context) {
   return context;
 }
 
+/**
+ * Fanout's devices from profile-ms's session rows, as in the monolith: a
+ * device counts from sign-in, so a message sent before its first socket is
+ * queued for it instead of dropped. Without the endpoint, from the redis
+ * registry, which learns a device only at its first socket.
+ */
+function initDeviceDirectory(context) {
+  const { profileMsEndpoint } = context.options;
+  if (profileMsEndpoint) {
+    const profile = new HttpClient(profileMsEndpoint);
+    context.deliveryManager.deviceDirectory = (userIds) =>
+      profile.post('/_internal/devices', { user_ids: userIds });
+  }
+  return context;
+}
+
 async function initResources(options) {
   let context = await initDefaultResources(options)
     .then(ChannelServiceClient.init)
     .then(DeliveryManager.init)
+    .then(initDeviceDirectory)
     .then(UndeliveredQueue.init)
     .then(prepareEventList);
 
@@ -61,6 +79,10 @@ function parseOptions(argv) {
     .option(
       '--new-message-topic <new-message-topic>',
       'Used by consumer to consume for new message.'
+    )
+    .option(
+      '--profile-ms-endpoint <profile-ms-endpoint>',
+      'Base url for profile service: fanout reads its devices there (recommended)'
     )
     .option(
       '--message-max-retries <message-max-retries>',
@@ -191,5 +213,6 @@ module.exports = {
   MessageDeliveryWorker,
   parseOptions,
   initResources,
+  initDeviceDirectory,
   prepareEventList
 }
