@@ -177,6 +177,24 @@ delete. `server returned error: HTTP/1.1 404` means no account has that
 number and username: check both against the email. Then reply that it's
 done. The `/_internal` routes answer only inside the container.
 
+## Reports
+
+People report a user from Chat info in the app (decision 219), with the
+chat's last 5 messages if they chose to send them (the server cannot read
+chats, so this is all there is). There is no admin screen: read them from
+Postgres, newest first. Each is kept 90 days, then deleted.
+
+```bash
+docker compose -f docker-compose.prod.yml exec -T postgres sh -c \
+  'psql -U "$POSTGRES_USER" -d chat -c "SELECT id, created_at, reporter, reported,
+     jsonb_pretty(messages) FROM reports ORDER BY created_at DESC LIMIT 20"'
+```
+
+`reporter` and `reported` are user ids; `GET /v3.0/users/{id}` (or the
+`users` table) gives the username. Every message is `author`, `body`,
+`content_type` and `sent_at` (ms). On the Mongo dev stack it is the
+`reports` collection.
+
 ## Backups
 
 Media is in R2: the server deletes a message file 30 days after it was
