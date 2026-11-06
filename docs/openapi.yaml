@@ -98,6 +98,83 @@ components:
     UserId:
       type: string
       pattern: '^[0-9a-f]{9}$'
+    TimelinePhoto:
+      type: object
+      required: [fileId]
+      properties:
+        fileId:
+          type: string
+          description: >-
+            A media-ms upload (category `timeline`, not encrypted), fetched
+            with `GET /v3.0/assets/download/{fileId}/presigned_url`
+        width:
+          type: integer
+        height:
+          type: integer
+    TimelinePost:
+      type: object
+      description: A post as anyone in its audience sees it
+      properties:
+        postId:
+          type: string
+          format: uuid
+        author:
+          $ref: '#/components/schemas/UserId'
+        text:
+          type: [string, 'null']
+        photos:
+          type: array
+          items:
+            $ref: '#/components/schemas/TimelinePhoto'
+        createdAt:
+          type: integer
+          description: ms since epoch, server time
+        myReaction:
+          type: [string, 'null']
+          description: The caller's own reaction; nobody else's, and no count
+    OwnTimelinePost:
+      type: object
+      description: The poster's view of their own post
+      properties:
+        postId:
+          type: string
+          format: uuid
+        author:
+          $ref: '#/components/schemas/UserId'
+        text:
+          type: [string, 'null']
+        photos:
+          type: array
+          items:
+            $ref: '#/components/schemas/TimelinePhoto'
+        createdAt:
+          type: integer
+        audience:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserId'
+        reactions:
+          type: array
+          items:
+            $ref: '#/components/schemas/TimelineReaction'
+    TimelineReaction:
+      type: object
+      properties:
+        userId:
+          $ref: '#/components/schemas/UserId'
+        emoji:
+          type: string
+        at:
+          type: integer
+          description: ms since epoch
+    TimelinePage:
+      type: object
+      properties:
+        posts:
+          type: array
+        next:
+          type: [string, 'null']
+          description: Pass as `before` for the next page; null on the last
     KeyRegistration:
       type: object
       additionalProperties: false
@@ -199,6 +276,18 @@ tags:
       Group channels (SYNC_PROTOCOL 11.3). A DM has no row: its id is derived
       from the pair. Every write fans a server event (payload `0x53`) out on
       the sync wire to the affected members.
+  - name: v3.0 > Timeline
+    description: >-
+      The private timeline (decision 223): posts of text and/or photos to an
+      audience of user ids the phone resolves from its own labels (labels
+      never reach the server). Plain REST, not the sync wire, and not
+      end-to-end encrypted. Only the audience reads a post or reacts to it;
+      only the poster sees who reacted, and nobody gets a count; only the
+      poster deletes. A new post wakes nobody: the app refreshes the feed
+      when it opens. Posts and their photos are deleted
+      `--timeline-retention-days` (30) after they were posted, at once when
+      the poster deletes one, and with the poster's account. Served by
+      profile-ms.
   - name: v3.0 > Sync
     description: >-
       The REST half of the sync wire (`wss://<host>/wss` carries protobuf
@@ -848,6 +937,218 @@ paths:
           $ref: '#/components/responses/AuthError'
         '403':
           $ref: '#/components/responses/AuthError'
+  /v3.0/timeline/posts:
+    post:
+      tags:
+        - v3.0 > Timeline
+      summary: Post to the timeline
+      description: >-
+        The audience must be people the poster is connected to (decision
+        219); others are dropped and the stored audience is returned. A
+        retry with the same `postId` returns the stored post (200). 10 posts
+        per user per hour and 30 per day (`--timeline-post-hour`,
+        `--timeline-post-day`). Upload photos first through
+        `/v3.0/assets` with category `timeline`.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [postId, audience]
+              properties:
+                postId:
+                  type: string
+                  format: uuid
+                  description: Minted by the phone, so a retry is idempotent
+                text:
+                  type: [string, 'null']
+                  maxLength: 2000
+                photos:
+                  type: array
+                  maxItems: 10
+                  items:
+                    $ref: '#/components/schemas/TimelinePhoto'
+                audience:
+                  type: array
+                  minItems: 1
+                  maxItems: 256
+                  uniqueItems: true
+                  items:
+                    $ref: '#/components/schemas/UserId'
+      responses:
+        '201':
+          description: Posted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnTimelinePost'
+        '200':
+          description: A retry of a post already stored
+        '400':
+          description: EMPTY_POST (no text and no photo), or validation_failed
+        '401':
+          $ref: '#/components/responses/AuthError'
+        '403':
+          description: NOT_CONNECTED (nobody in the audience is), or USERNAME_REQUIRED
+        '409':
+          description: POST_EXISTS (another user's post has that id)
+        '429':
+          description: RATE_LIMITED
+  /v3.0/timeline/feed:
+    get:
+      tags:
+        - v3.0 > Timeline
+      summary: The posts shared with the caller, newest first
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: before
+          schema:
+            type: string
+          description: The previous page's `next`
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        '200':
+          description: '`{posts: TimelinePost[], next}`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TimelinePage'
+        '401':
+          $ref: '#/components/responses/AuthError'
+  /v3.0/timeline/posts/mine:
+    get:
+      tags:
+        - v3.0 > Timeline
+      summary: The caller's own posts, newest first, with who reacted
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: before
+          schema:
+            type: string
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        '200':
+          description: '`{posts: OwnTimelinePost[], next}`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TimelinePage'
+        '401':
+          $ref: '#/components/responses/AuthError'
+  /v3.0/timeline/posts/{postId}:
+    delete:
+      tags:
+        - v3.0 > Timeline
+      summary: Delete one of the caller's posts, and its photos
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: postId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          $ref: '#/components/responses/AuthError'
+        '404':
+          description: POST_NOT_FOUND (none, or not the caller's)
+  /v3.0/timeline/posts/{postId}/reaction:
+    put:
+      tags:
+        - v3.0 > Timeline
+      summary: Set the caller's one reaction to a post shared with them
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: postId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [emoji]
+              properties:
+                emoji:
+                  type: string
+                  maxLength: 16
+      responses:
+        '204':
+          description: Set; replaces the caller's earlier one
+        '401':
+          $ref: '#/components/responses/AuthError'
+        '404':
+          description: POST_NOT_FOUND (none, or the caller is not in its audience)
+    delete:
+      tags:
+        - v3.0 > Timeline
+      summary: Take the caller's reaction back
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: postId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Gone
+        '401':
+          $ref: '#/components/responses/AuthError'
+        '404':
+          description: POST_NOT_FOUND
+  /v3.0/timeline/posts/{postId}/reactions:
+    get:
+      tags:
+        - v3.0 > Timeline
+      summary: Who reacted to one of the caller's posts (poster only)
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: postId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: '`{reactions: TimelineReaction[]}`, oldest first'
+        '401':
+          $ref: '#/components/responses/AuthError'
+        '404':
+          description: POST_NOT_FOUND (none, or not the caller's)
   /v1.0/assets/upload/presigned_url:
     get:
       tags:

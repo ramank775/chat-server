@@ -16,6 +16,7 @@ const { errorEnvelope } = require('../helper');
 
 const profileMs = require('./profile-ms/profile-ms');
 const { profileDB } = require('./profile-ms/database');
+const timelineDB = require('./profile-ms/database/timeline');
 const { initializeAuthProvider, AuthError } = require('./profile-ms/auth-provider');
 const channelMs = require('./channel-ms/channel-ms');
 const channelDb = require('./channel-ms/database');
@@ -267,7 +268,7 @@ async function initResources(options) {
 
   const profileContext = await serviceContext(
     shared,
-    [profileDB.initializeDatabase, initializeAuthProvider],
+    [profileDB.initializeDatabase, timelineDB.initialize, initializeAuthProvider],
     { producer: true }
   );
   const profile = new profileMs.ProfileMs({ ...profileContext, ...mount(API) });

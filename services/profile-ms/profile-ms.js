@@ -28,6 +28,8 @@ const {
   pepperFingerprint,
   discoveryToken
 } = require('./phone-key');
+const { Timeline, addTimelineOptions } = require('./timeline');
+const timelineDB = require('./database/timeline');
 const { uuidv4, hashSecret, verifySecret, sha256, errorEnvelope } = require('../../helper');
 
 /**
@@ -91,6 +93,7 @@ function parseOptions(argv) {
   cmd = addMemCacheOptions(cmd);
   cmd = eventStore.addEventStoreOptions(cmd);
   cmd = addPhoneKeyOptions(cmd);
+  cmd = addTimelineOptions(cmd);
   cmd.option(
     '--new-message-topic <new-message-topic>',
     'Topic the REST-write fanout envelopes are published to (SYNC_PROTOCOL 10.2)'
@@ -145,6 +148,7 @@ async function initResource(options) {
   return await initDefaultResources(options)
     .then(initHttpResource)
     .then(profileDB.initializeDatabase)
+    .then(timelineDB.initialize)
     .then(initializeAuthProvider)
     .then(initMemCache)
     .then(eventStore.initializeEventStore({ producer: true }));
@@ -252,6 +256,7 @@ class ProfileMs extends HttpServiceBase {
     this.notificationClient = new HttpClient(this.options.notificationMsEndpoint);
     this.mediaClient = new HttpClient(this.options.mediaMsEndpoint);
     this.pepper = phonePepper(this.options);
+    this.timeline = new Timeline(this);
   }
 
   /** The stored form of a lookup hash (decision 223). */
@@ -462,6 +467,8 @@ class ProfileMs extends HttpServiceBase {
         }
       }
     );
+
+    this.timeline.addRoutes();
   }
 
   /**
@@ -1096,6 +1103,7 @@ class ProfileMs extends HttpServiceBase {
     await this.revokePushTopics(user.user_id);
     await this.leaveAllGroups(user.user_id);
     await this.deleteProfilePhoto(user.user_id, user.avatarUrl);
+    await this.timeline.eraseAuthor(user.user_id);
   }
 
   /** AUTH_CONTRACT 8.2 step 5 — channel-ms owns membership. Best effort, like the two above. */
@@ -1298,6 +1306,7 @@ class ProfileMs extends HttpServiceBase {
 
   async shutdown() {
     await super.shutdown();
+    this.timeline.stop();
     await this.profileDB.dispose();
     await this.authProvider.dispose();
   }
