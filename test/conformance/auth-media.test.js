@@ -373,7 +373,7 @@ describe('conformance: sessions, push and media', { skip: BASE ? false : 'CONFOR
       kind: 'group',
       name: 'photo',
       avatar_url: own,
-      members: [user.user_id, peer.user_id]
+      members: [user.user_id]
     });
     assert.equal(created.status, 201);
     // the owner points the group at someone else's upload, then clears it

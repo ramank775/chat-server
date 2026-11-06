@@ -496,6 +496,7 @@ test('a replaced or cleared group photo is deleted as its setter\'s file', async
       channel_id: PHOTO, kind: 'group', name: 'Photo', avatar_url: 'f1', members: [ALICE, BOB]
     })
   });
+  await accept(PHOTO, BOB);
   await editGroup(PHOTO, ALICE, 2, { name: 'Renamed' });
   await editGroup(PHOTO, ALICE, 3, { avatar_url: 'f1' });
   assert.deepStrictEqual(harness.fileDeletes, [], 'a rename or the same photo deletes nothing');
