@@ -225,6 +225,28 @@ docker compose -f docker-compose.prod.yml exec -T postgres sh -c \
 `docker compose -f docker-compose.prod.yml logs -f app` (or `caddy`, `postgres`).
 Each container keeps at most 5 × 50 MB.
 
+## Crash reports
+
+Phones send them only when their user agrees: a prompt after the app
+closed unexpectedly or hit an error, or Settings › Privacy › Send crash
+reports automatically. A report has the app build, Android version,
+device model, the error's type and stack frames (no message text) and
+when; not who sent it. They are kept 30 days (`--crash-report-days`), at
+most 20 a day per account. The newest:
+
+```bash
+docker compose -f docker-compose.prod.yml exec postgres sh -c \
+  'psql -U "$POSTGRES_USER" -d chat -c "SELECT at, kind, build, android, model,
+     split_part(trace, chr(10), 1) AS error FROM crash_reports
+     ORDER BY at DESC LIMIT 20"'
+```
+
+One in full: `... -x -c "SELECT * FROM crash_reports ORDER BY at DESC LIMIT 1"`.
+How often each error comes, newest build first: `SELECT build,
+split_part(trace, chr(10), 1), count(*) FROM crash_reports GROUP BY 1, 2
+ORDER BY 1 DESC, 3 DESC`. On a Mongo stack:
+`db.crash_reports.find().sort({ at: -1 }).limit(20)` in `mongosh`.
+
 ## Never in production
 
 - The dev flags `--expose-dev-otp`, `PROFILE_DEV_FLAGS` and
