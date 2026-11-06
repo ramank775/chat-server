@@ -1107,6 +1107,7 @@ paths:
       description: >-
         Kept 90 days; the operator reads them from the database (deployment
         README, "Reports"). "Report and block" is this and `POST /blocks`.
+        At most 10 reports a day per reporter.
       security:
         - bearerAuth: []
       requestBody:
@@ -1144,6 +1145,14 @@ paths:
           description: Filed
         '400':
           $ref: '#/components/responses/ChannelWriteError'
+        '429':
+          description: >-
+            `rate_limited`: more than 10 reports in a day, counted from the
+            reporter's first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
   /v3.0/sync/pending:
     get:
       tags:

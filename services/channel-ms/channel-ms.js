@@ -47,6 +47,12 @@ const INVITE_QUIET = INVITE_WAKES + ENVELOPE_FLAG.SILENT;
 /** How often the 90-day report retention runs on a store with no TTL of its own. */
 const REPORT_PURGE_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * Reports one user may file in a day, counted from their first: enough for
+ * anyone reporting the people bothering them, not for flooding the operator.
+ */
+const REPORTS_PER_DAY = 10;
+
 /** What a reporter's phone may attach: the chat's last 5 messages, as it shows them. */
 const REPORTED_MESSAGE = Joi.object({
   author: USER_ID.required(),
@@ -317,12 +323,13 @@ class ChannelMs extends HttpServiceBase {
       validate: { headers: schemas.authHeaders }
     });
 
-    // profile-ms: who a timeline post may go to, who sees one's presence
+    // profile-ms: who a timeline post may go to, who sees one's presence,
+    // who hears of a profile edit (no `users`: all of `user_id`'s connections)
     this.addInternalRoute('/connections/pairs', 'POST', this.pairs.bind(this), {
       validate: {
         payload: Joi.object({
           user_id: USER_ID.required(),
-          users: Joi.array().items(USER_ID).max(1000).required()
+          users: Joi.array().items(USER_ID).max(1000)
         })
       }
     });
@@ -881,18 +888,27 @@ class ChannelMs extends HttpServiceBase {
   async report(req, res) {
     const user = extractInfoFromRequest(req);
     const { user_id: reported, messages } = req.payload;
+    if (await this.memCache.incr(`report:rate:${user}:d`, 86400) > REPORTS_PER_DAY) {
+      return res.response(errorEnvelope(
+        'rate_limited', `at most ${REPORTS_PER_DAY} reports a day`, { retry_after_sec: 86400 }
+      )).code(429);
+    }
     await this.db.addReport({ reporter: user, reported, messages });
     return res.response({ reported }).code(201);
   }
 
   /**
-   * `POST /_internal/connections/pairs {user_id, users}` — of `users`, who
+   * `POST /_internal/connections/pairs {user_id, users?}` — of `users`, who
    * `user_id` is connected to with no block either way (`connected`: whom a
    * timeline post may reach, who are "contacts" for presence), and who has a
    * block with them either way (`blocked`: never shown their presence).
+   * Without `users`, of all their connections (whom a profile edit reaches).
+   * ponytail: one pair lookup per user; a join on connections and blocks if
+   * people ever count their connections in thousands.
    */
   async pairs(req) {
-    const { user_id: user, users } = req.payload;
+    const { user_id: user } = req.payload;
+    const users = req.payload.users || await this.db.connectionsOf(user);
     const pairs = await Promise.all(users.map((other) => this.db.pair(user, other)));
     const blocked = (p) => p.aBlockedB || p.bBlockedA;
     return {

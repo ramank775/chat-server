@@ -269,6 +269,18 @@ test('a report keeps up to the last 5 messages, 90 days', async () => {
   assert.strictEqual(await count(), 0);
 });
 
+test('reports are limited to 10 a day per reporter', async () => {
+  const report = (from) => call('POST', '/reports', from, { user_id: DEV });
+  for (let i = 0; i < 10; i += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    assert.strictEqual((await report(BEN)).statusCode, 201);
+  }
+  const over = await report(BEN);
+  assert.strictEqual(over.statusCode, 429);
+  assert.strictEqual(body(over).error.code, 'rate_limited');
+  assert.strictEqual((await report(CHLOE)).statusCode, 201, 'per reporter');
+});
+
 test('pairs: who a timeline post reaches, whose presence a block hides', async () => {
   // ANNA is connected with BEN, CHLOE, DEV (migration) and EVA
   const pairs = async (user, users) => body(await harness.inject({
@@ -282,6 +294,12 @@ test('pairs: who a timeline post reaches, whose presence a block hides', async (
   await call('DELETE', `/blocks/${ANNA}`, DEV);
   await call('DELETE', `/blocks/${CHLOE}`, ANNA);
   assert.deepStrictEqual(await pairs(ANNA, [CHLOE, DEV]), { connected: [CHLOE, DEV], blocked: [] });
+  // no `users`: all of ANNA's connections (a profile edit's audience)
+  await call('POST', '/blocks', BEN, { user_id: ANNA });
+  const all = await pairs(ANNA);
+  assert.deepStrictEqual(all.connected.sort(), [CHLOE, DEV, EVA]);
+  assert.deepStrictEqual(all.blocked, [BEN]);
+  await call('DELETE', `/blocks/${ANNA}`, BEN);
 });
 
 test('a deleted account takes its invites, connections and blocks with it', async () => {
