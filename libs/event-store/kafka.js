@@ -476,7 +476,7 @@ class KafkaEventStore extends IEventStore {
       await this.#createKakfaProducer();
     }
     if (options.consumer) {
-      await this.#createKafkaConsumer(options.decodeMessage);
+      await this.#createKafkaConsumer(options.decodeMessageCb);
     }
   }
 
