@@ -2,7 +2,9 @@ const test = require('node:test');
 const assert = require('node:assert');
 const crypto = require('crypto');
 const { WS_TYPE } = require('../../libs/v3-envelope');
-const { BASE, api, connect, pushTopic, signupWithUsername } = require('./helper');
+const {
+  BASE, api, connect, mintOpId, pushTopic, signupWithUsername
+} = require('./helper');
 
 /**
  * Session rotation / revocation (AUTH_CONTRACT 4.4-4.6, 6.3-6.5), push topic
@@ -327,5 +329,57 @@ describe('conformance: sessions, push and media', { skip: BASE ? false : 'CONFOR
       token: user.accesskey
     });
     assert.equal(unknown.status, 404);
+  });
+
+  // -- 13. a replaced group photo is deleted (decision 195 for groups) -----
+
+  it('deletes a group\'s replaced photo, never a file its setter did not upload', async () => {
+    const photo = async (owner) => {
+      const blob = crypto.randomBytes(64);
+      const presigned = await api(
+        'GET',
+        `/v3.0/assets/upload/presigned_url?ext=jpg&category=profile&size=${blob.length}`,
+        { token: owner.accesskey }
+      );
+      const put = await fetch(presigned.body.url, {
+        method: 'PUT',
+        headers: { 'content-type': presigned.body.contentType },
+        body: blob
+      });
+      assert.equal(put.status, 200, await put.text());
+      await api('PUT', `/v3.0/assets/${presigned.body.fileId}/status`, {
+        token: owner.accesskey,
+        body: { status: true }
+      });
+      return presigned.body.fileId;
+    };
+    const stored = async (id) => (await api('GET', `/v3.0/assets/download/${id}/presigned_url`, {
+      token: user.accesskey
+    })).status === 200;
+    let counter = 0;
+    const write = (method, path, body) => {
+      counter += 1;
+      return api(method, `/v3.0/channels${path}`, {
+        token: user.accesskey,
+        body: { op_id: mintOpId(user.user_id, { counter, rand: counter }), ...body }
+      });
+    };
+
+    const own = await photo(user);
+    const peers = await photo(peer);
+    const channelId = crypto.randomUUID();
+    const created = await write('POST', '', {
+      channel_id: channelId,
+      kind: 'group',
+      name: 'photo',
+      avatar_url: own,
+      members: [user.user_id, peer.user_id]
+    });
+    assert.equal(created.status, 201);
+    // the owner points the group at someone else's upload, then clears it
+    assert.equal((await write('PATCH', `/${channelId}`, { avatar_url: peers })).status, 200);
+    assert.equal((await write('PATCH', `/${channelId}`, { avatar_url: null })).status, 200);
+    assert.equal(await stored(own), false, 'the replaced photo is gone');
+    assert.equal(await stored(peers), true, 'not its setter\'s upload: left alone');
   });
 });
