@@ -11,8 +11,8 @@ on:
     branches:
       - "v3.0"
       - "master"
-  # ponytail: conformance needs the full compose stack (nats/kafka/minio/mongo/redis),
-  # too heavy to run on every push. Trigger it by hand from the Actions tab when needed.
+  # conformance (below) needs the whole microservice stack: by hand from the
+  # Actions tab, or on a v* tag
   workflow_dispatch:
 
 jobs:
@@ -121,23 +121,41 @@ jobs:
           push: true
           tags: ${{ vars.REGISTRY_IMAGE }}:${{ github.ref_name }}
 
-  # Manual only: exercises the real request/response contract (auth, sessions,
-  # push topics, presigned media) against the whole docker-compose.infra.yml
-  # stack instead of mocks. Needs secrets/topic env vars the compose file reads
-  # (TOPIC_NEW_MESSAGE etc., S3_*, MONGO_USER/PASSWORD) so it isn't safe to run
-  # on every PR from a fork.
-  #
-  # To run it here, this job would need to:
-  #   1. `docker compose --env-file deployment/.env.tmpl -f deployment/docker-compose.infra.yml up -d`
-  #      (plus building/starting the chat-server service images themselves,
-  #      which the infra compose file expects to already exist)
-  #   2. wait for the stack to be healthy (nats-init/minio-init complete)
-  #   3. `CONFORMANCE_BASE_URL=http://localhost:<gateway-port> npm run test:conformance`
-  #   4. `docker compose -f deployment/docker-compose.infra.yml down -v`
+  # The conformance suite (test/conformance) against the microservice layout
+  # (decision 191): this commit's image, docker-compose.infra.yml plus
+  # docker-compose.yml with .env.tmpl's dev settings (mock SMS, NATS, mongo,
+  # MinIO), every request through nginx. By hand, and on a v* tag; it does
+  # not hold up `publish`, which ships the monolith's image either way.
   conformance:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-26.04
+    env:
+      CHAT_SERVER_TAG: ci
+      COMPOSE: docker compose -p conformance --env-file .env.tmpl -f docker-compose.infra.yml -f docker-compose.yml
     steps:
-      - run: |
-          echo "See the comments above this job in ci.yml for the manual conformance run steps"
-          echo "(not implemented here - needs the full compose stack plus built service images)."
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: "npm"
+      - run: npm ci
+      - run: docker build -t ramank775/chatserver:ci .
+      - name: Start the microservice stack
+        working-directory: deployment
+        run: |
+          $COMPOSE up -d
+          for i in $(seq 1 90); do
+            # profile answers through nginx; give the services started beside it a moment
+            [ "$(curl -s -o /dev/null -w '%{http_code}' localhost:8085/v3.0/users/me)" = 401 ] && sleep 5 && exit 0
+            sleep 2
+          done
+          echo "the stack never answered" && $COMPOSE ps -a && exit 1
+      - run: npm run test:conformance
+      - name: Service logs
+        if: failure()
+        working-directory: deployment
+        run: $COMPOSE logs --no-color
+      - name: Stop the stack
+        if: always()
+        working-directory: deployment
+        run: $COMPOSE down -v

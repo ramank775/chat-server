@@ -9,10 +9,8 @@ and phones talk to R2 directly. Postgres is the only state on the server.
 
 `docker-compose.monolith.yml` (with `.env.tmpl`) is the local development stack. The
 microservice layout (`docker-compose.infra.yml` plus `docker-compose.yml`, and
-`helm/`) stays supported but has not caught up with 3.0 yet: the compose stack
-gives profile-ms no `OTP_ENCRYPTION_KEY` or `PHONE_PEPPER` (fine only with the
-mock SMS sender), and the helm chart is still v2 and does
-not render. Deploy 3.0 as the monolith.
+`helm/`) stays supported (decision 191); see "Microservice layout" below.
+Deploy 3.0 as the monolith.
 
 ## What you need
 
@@ -271,6 +269,33 @@ Push a `v*` tag and CI publishes `ramank775/chatserver:<tag>` to Docker Hub
 ```bash
 git tag v3.0.0 && git push origin v3.0.0
 ```
+
+## Microservice layout
+
+One container per service behind nginx (`config/nginx/nginx.docker.conf`),
+which runs the `/auth` check the monolith does in process. The event bus is
+NATS, or Kafka (`EVENT_STORE=kafka`, `BROKER_LIST=kafka:9092` and
+`--profile kafka`); the database mongo, or Postgres (`DB_BACKEND=pg` and
+`--profile pg`). It needs an image newer than `v3.0.0-rc.4`.
+
+```bash
+CHAT_SERVER_TAG=<tag> docker compose -p vartalap-ms --env-file .env.tmpl \
+  -f docker-compose.infra.yml -f docker-compose.yml up -d
+CONFORMANCE_BASE_URL=http://localhost:8085 npm run test:conformance   # from the repo root
+```
+
+- `.env.tmpl` is a dev setup (mock SMS, dev OTP endpoint, MinIO). Anywhere
+  real, set `OTP_ENCRYPTION_KEY` and `PHONE_PEPPER` exactly as for the
+  monolith (above), the same values for every profile instance, and empty
+  `PROFILE_DEV_FLAGS` and `S3_INTERNAL_ENDPOINT`.
+- **Keep one `ws-gateway`.** Presence (who is online, decision 223) lives
+  in the gateway process: with two, a user sees only the people on their
+  own gateway. Message delivery itself works across gateways (redis).
+- Host ports: `NGINX_PORT`, `MONGO_PORT`, `REDIS_PORT`, `MINIO_PORT`,
+  `PG_PORT`. Always pass `-p <name>`: without it compose names the project
+  after this directory.
+- The helm chart (`helm/`) runs the same services: `helm template` it with
+  your values; it brings no database, bus, redis or object store.
 
 ## Local development
 
