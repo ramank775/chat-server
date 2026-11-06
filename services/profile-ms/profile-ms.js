@@ -19,6 +19,15 @@ const {
 } = require('../../libs/v3-envelope');
 const { validateUsername } = require('./username');
 const { bundleSchema, publicBundle, publishKeys, claimKeys } = require('./device-keys');
+const {
+  DISCOVERABILITY,
+  DEFAULT_DISCOVERABILITY,
+  addPhoneKeyOptions,
+  phonePepper,
+  phoneKey,
+  pepperFingerprint,
+  discoveryToken
+} = require('./phone-key');
 const { uuidv4, hashSecret, verifySecret, sha256, errorEnvelope } = require('../../helper');
 
 /**
@@ -26,8 +35,9 @@ const { uuidv4, hashSecret, verifySecret, sha256, errorEnvelope } = require('../
  * keeps user_id and username, both reserved forever (8.3).
  */
 const ERASED = {
-  phone: null,
-  phoneHash: null,
+  phoneKey: null,
+  discoverability: null,
+  discoveryTokens: null,
   usernameKeyHash: null,
   usernameChangedAt: null,
   displayName: null,
@@ -44,6 +54,9 @@ const USER_ID_MAX_RETRY = 10;
 // decision 208: no daily budget; the app looks up only numbers it doesn't
 // know, each at most once per cooling period
 const CONTACT_LOOKUP_MAX = 5000;
+// decision 223: each entry costs a scrypt on every save, so a chosen list is
+// a circle of people, not an address book
+const CHOSEN_MAX = 500;
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 /** proto/v3-server-event-payload.proto `ServerEventType` */
 const SERVER_EVENT_TYPE = { PROFILE_EDITED: 6, USERNAME_CHANGED: 7 };
@@ -77,6 +90,7 @@ function parseOptions(argv) {
   cmd = addAuthProviderOptions(cmd);
   cmd = addMemCacheOptions(cmd);
   cmd = eventStore.addEventStoreOptions(cmd);
+  cmd = addPhoneKeyOptions(cmd);
   cmd.option(
     '--new-message-topic <new-message-topic>',
     'Topic the REST-write fanout envelopes are published to (SYNC_PROTOCOL 10.2)'
@@ -110,6 +124,19 @@ function parseOptions(argv) {
     'by-username lookups per ip per day',
     (c) => Number(c),
     5000
+  );
+  // decision 223: short windows only, never a daily budget (decision 208)
+  cmd.option(
+    '--phone-lookup-min <count>',
+    'contacts/lookup requests per user per minute',
+    (c) => Number(c),
+    20
+  );
+  cmd.option(
+    '--chosen-check-min <count>',
+    'chosen-list checks (one scrypt each) per user per minute; past it a match looks unknown',
+    (c) => Number(c),
+    300
   );
   return cmd.parse(argv).opts();
 }
@@ -175,18 +202,18 @@ function isUsernameGated(originalUri) {
 }
 
 /**
- * The owner view of a profile (AUTH_CONTRACT 4.4). The only shape allowed to
- * carry `phone`.
+ * The owner view of a profile (AUTH_CONTRACT 4.4). No `phone`: the server
+ * keeps only its key (decision 223); the app knows its own number.
  * @param {import('./database/profile/profile-db').User} user
  */
 function selfProfile(user) {
   return {
     user_id: user.user_id,
     username: user.username || null,
-    phone: user.phone,
     displayName: user.displayName || null,
     avatarUrl: user.avatarUrl || null,
     statusText: user.statusText || null,
+    discoverability: user.discoverability || DEFAULT_DISCOVERABILITY,
     createdAt: user.createdAt.getTime()
   };
 }
@@ -224,9 +251,24 @@ class ProfileMs extends HttpServiceBase {
     this.gatewayClient = new HttpClient(this.options.gatewayEndpoint);
     this.notificationClient = new HttpClient(this.options.notificationMsEndpoint);
     this.mediaClient = new HttpClient(this.options.mediaMsEndpoint);
+    this.pepper = phonePepper(this.options);
+  }
+
+  /** The stored form of a lookup hash (decision 223). */
+  keyOfHash(phoneHash) {
+    return phoneKey(this.pepper, phoneHash);
+  }
+
+  /** The stored form of an E.164 number from a request. */
+  keyOfPhone(phone) {
+    return this.keyOfHash(sha256(phone));
   }
 
   async init() {
+    await this.profileDB.migratePhones(
+      (phoneHash) => this.keyOfHash(phoneHash),
+      pepperFingerprint(this.pepper)
+    );
     await super.init();
 
     const payload = (schema) => ({ validate: { payload: schema.required() } });
@@ -266,7 +308,8 @@ class ProfileMs extends HttpServiceBase {
       '/auth/otp/resend',
       'POST',
       this.guard(this.otpResend),
-      payload(Joi.object({ sessionId: Joi.string().required() }))
+      // `phone` from decision 223 on; an older app sends none
+      payload(Joi.object({ sessionId: Joi.string().required(), phone: Joi.string() }))
     );
 
     this.addRoute(
@@ -342,6 +385,19 @@ class ProfileMs extends HttpServiceBase {
     this.addRoute('/users/username/check', 'POST', this.guard(this.usernameCheck), {
       pre: [this.authPre(false)],
       validate: { payload: Joi.object({ username: Joi.string().required() }).required() }
+    });
+
+    this.addRoute('/users/me/discoverability', 'PUT', this.guard(this.putDiscoverability), {
+      pre: [this.authPre()],
+      validate: {
+        payload: Joi.object({
+          mode: Joi.string().valid(...DISCOVERABILITY).required(),
+          phoneHashes: Joi.array()
+            .items(Joi.string().pattern(SHA256_HEX))
+            .max(CHOSEN_MAX)
+            .when('mode', { is: 'chosen', then: Joi.required(), otherwise: Joi.forbidden() })
+        }).required()
+      }
     });
 
     this.addRoute('/users/me/delete', 'POST', this.guard(this.deleteMe), {
@@ -492,11 +548,15 @@ class ProfileMs extends HttpServiceBase {
         .response(errorEnvelope('INVALID_PHONE_FORMAT', 'phone must be in E.164 format'))
         .code(400);
     }
-    await this.otpRateLimits(phone, clientIp(req));
+    const key = this.keyOfPhone(phone);
+    await this.otpRateLimits(key, clientIp(req));
 
-    const challenge = await this.sendOtp(() => this.authProvider.startOtp({ phone, deviceId }), res);
+    const challenge = await this.sendOtp(
+      () => this.authProvider.startOtp({ phone, phoneKey: key, deviceId }),
+      res
+    );
     if (!challenge.sessionId) return challenge;
-    const existing = await this.profileDB.getByPhone(phone);
+    const existing = await this.profileDB.getByPhoneKey(key);
     return {
       sessionId: challenge.sessionId,
       resendAfterSec: challenge.resendAfterSec,
@@ -506,16 +566,21 @@ class ProfileMs extends HttpServiceBase {
   }
 
   async otpResend(req, res) {
+    const { sessionId, phone } = req.payload;
+    // Decision 223: the server keeps no number to resend to. An app that
+    // sends none starts over with /otp/send, as for any 410.
+    if (!phone) throw new AuthError(410, 'RESEND_UNAVAILABLE', 'Request a new code');
+    const key = this.keyOfPhone(phone);
     // a resend is an SMS like any other: same budgets as /otp/send
     const challenge = await this.sendOtp(
       () =>
-        this.authProvider.resendOtp(req.payload.sessionId, (phone) =>
-          this.otpRateLimits(phone, clientIp(req))
+        this.authProvider.resendOtp(sessionId, { phone, phoneKey: key }, () =>
+          this.otpRateLimits(key, clientIp(req))
         ),
       res
     );
     if (!challenge.sessionId) return challenge;
-    const existing = await this.profileDB.getByPhone(challenge.phone);
+    const existing = await this.profileDB.getByPhoneKey(key);
     return {
       sessionId: challenge.sessionId,
       resendAfterSec: challenge.resendAfterSec,
@@ -527,10 +592,10 @@ class ProfileMs extends HttpServiceBase {
   async otpVerify(req) {
     const { sessionId, code, deviceId } = req.payload;
     const verified = await this.authProvider.verifyOtp({ sessionId, code, deviceId });
-    let user = await this.profileDB.getByPhone(verified.phone);
+    let user = await this.profileDB.getByPhoneKey(verified.phoneKey);
     const isNew = !user;
     if (isNew) {
-      user = await this.createUser(verified.phone);
+      user = await this.createUser(verified.phoneKey);
     }
     const issued = await this.authProvider.issueSession(user.user_id, deviceId);
     if (!isNew) await this.retireOtherDevices(user.user_id, deviceId);
@@ -538,7 +603,6 @@ class ProfileMs extends HttpServiceBase {
       status: true,
       user_id: user.user_id,
       username: user.username || null,
-      phone: user.phone,
       ...issued,
       isNew
     };
@@ -910,7 +974,9 @@ class ProfileMs extends HttpServiceBase {
 
   /**
    * AUTH_CONTRACT 7.2 — phone hash batch to `(user_id, username)`. Hashes with
-   * no live account are simply absent; negatives are never reported (7.1).
+   * no live account, or whose account may not be found by this caller
+   * (decision 223), are simply absent; negatives are never reported (7.1).
+   * Every phone lookup of the app comes here, a shared contact card too.
    */
   async contactsLookup(req, res) {
     const { user } = req.pre.auth;
@@ -920,17 +986,74 @@ class ProfileMs extends HttpServiceBase {
         .response(errorEnvelope('BATCH_TOO_LARGE', `At most ${CONTACT_LOOKUP_MAX} hashes per request`))
         .code(400);
     }
-    const matches = await this.profileDB.getByPhoneHashes([...new Set(phoneHashes)]);
+    await this.rateLimit(
+      `lookup:rate:${user.user_id}:m`,
+      this.options.phoneLookupMin,
+      60,
+      'user'
+    );
+    const hashOf = new Map(phoneHashes.map((hash) => [this.keyOfHash(hash), hash]));
+    const found = (await this.profileDB.getByPhoneKeys([...hashOf.keys()]))
+      // the caller's own number is in their own address book; nothing to chat about
+      .filter((match) => match.user_id !== user.user_id);
+    const findable = await this.findableBy(user, found);
     return {
-      matches: matches
-        // the caller's own number is in their own address book; nothing to chat about
-        .filter((match) => match.user_id !== user.user_id)
+      matches: found
+        .filter((_, i) => findable[i])
         .map((match) => ({
-          phoneHash: match.phoneHash,
+          phoneHash: hashOf.get(match.phoneKey),
           user_id: match.user_id,
           username: match.username || null
         }))
     };
+  }
+
+  /**
+   * Decision 223: may `searcher` find each of `owners` by phone? `nobody`
+   * never, `everyone` always, `chosen` when the searcher's own number is on
+   * the owner's list, checked by recomputing its token.
+   * ponytail: one scrypt per `chosen` match. Past the per-minute budget the
+   * rest answer no, which the app takes as unknown and asks again after its
+   * 15 minute cooldown. A cache per (owner, searcher) if real lists outgrow it.
+   * @param {import('./database/profile/profile-db').User} searcher
+   * @param {import('./database/profile/profile-db').User[]} owners
+   * @returns {Promise<boolean[]>}
+   */
+  async findableBy(searcher, owners) {
+    const chosen = owners.filter((owner) => owner.discoverability === 'chosen').length;
+    let budget = 0;
+    if (chosen) {
+      const used = await this.memCache.incr(`lookup:chosen:${searcher.user_id}:m`, 60, chosen);
+      budget = Math.max(0, this.options.chosenCheckMin - (used - chosen));
+    }
+    return Promise.all(owners.map(async (owner) => {
+      const mode = owner.discoverability || DEFAULT_DISCOVERABILITY;
+      if (mode !== 'chosen') return mode === 'everyone';
+      if (budget <= 0) return false;
+      budget -= 1;
+      const token = await discoveryToken(this.pepper, owner.user_id, searcher.phoneKey);
+      return this.profileDB.hasDiscoveryToken(owner.user_id, token);
+    }));
+  }
+
+  /**
+   * Decision 223: who may find this account by phone. `chosen` takes the
+   * whole list each time, as SHA-256 hashes like a lookup; only their tokens
+   * are kept, so the list cannot be read back (the app keeps its own copy).
+   */
+  async putDiscoverability(req) {
+    const { user } = req.pre.auth;
+    const { mode, phoneHashes = [] } = req.payload;
+    // each save is up to CHOSEN_MAX scrypts
+    await this.rateLimit(`discoverability:rate:${user.user_id}:h`, 20, 3600, 'user');
+    const tokens = await Promise.all([...new Set(phoneHashes)].map(
+      (hash) => discoveryToken(this.pepper, user.user_id, this.keyOfHash(hash))
+    ));
+    await this.profileDB.updateUser(user.user_id, {
+      discoverability: mode,
+      discoveryTokens: mode === 'chosen' ? tokens : null
+    });
+    return { mode, count: tokens.length };
   }
 
   async deleteMe(req, res) {
@@ -947,7 +1070,7 @@ class ProfileMs extends HttpServiceBase {
   /** The in-app delete, run by the operator for an email request (decision 197). */
   async deleteByPhone(req, res) {
     const { phone, username } = req.payload;
-    const user = await this.profileDB.getByPhone(phone);
+    const user = await this.profileDB.getByPhoneKey(this.keyOfPhone(phone));
     if (!user || (user.username || '').toLowerCase() !== (username || '').toLowerCase()) {
       return res
         .response(errorEnvelope('USER_NOT_FOUND', 'no account with that phone and username'))
@@ -1009,21 +1132,24 @@ class ProfileMs extends HttpServiceBase {
         .response(errorEnvelope('INVALID_PHONE_FORMAT', 'newPhone must be in E.164 format'))
         .code(400);
     }
-    if (newPhone === user.phone) {
+    const key = this.keyOfPhone(newPhone);
+    if (key === user.phoneKey) {
       return res
         .response(errorEnvelope('SAME_PHONE', 'newPhone is already bound to this account'))
         .code(409);
     }
-    if (await this.profileDB.getByPhone(newPhone)) {
+    // before the PHONE_TAKEN answer, which says whether a number has an account
+    await this.otpRateLimits(key, clientIp(req));
+    if (await this.profileDB.getByPhoneKey(key)) {
       return res
         .response(errorEnvelope('PHONE_TAKEN', 'newPhone is bound to another account'))
         .code(409);
     }
-    await this.otpRateLimits(newPhone, clientIp(req));
     const challenge = await this.sendOtp(
       () =>
         this.authProvider.startOtp({
           phone: newPhone,
+          phoneKey: key,
           deviceId: session.deviceId,
           userId: user.user_id
         }),
@@ -1056,13 +1182,10 @@ class ProfileMs extends HttpServiceBase {
     const phoneTaken = () =>
       res.response(errorEnvelope('PHONE_TAKEN', 'newPhone is bound to another account')).code(409);
     // 9.3 step 2: somebody may have signed up on it between start and verify
-    if (await this.profileDB.getByPhone(verified.phone)) return phoneTaken();
+    if (await this.profileDB.getByPhoneKey(verified.phoneKey)) return phoneTaken();
     let updated;
     try {
-      updated = await this.profileDB.updateUser(user.user_id, {
-        phone: verified.phone,
-        phoneHash: sha256(verified.phone)
-      });
+      updated = await this.profileDB.updateUser(user.user_id, { phoneKey: verified.phoneKey });
     } catch (error) {
       if (error.code === 'PHONE_TAKEN') return phoneTaken();
       throw error;
@@ -1074,8 +1197,7 @@ class ProfileMs extends HttpServiceBase {
     await this.revokeGatewaySessions(user.user_id, 'rebind');
     return {
       user_id: updated.user_id,
-      username: updated.username || null,
-      phone: updated.phone
+      username: updated.username || null
     };
   }
 
@@ -1114,14 +1236,14 @@ class ProfileMs extends HttpServiceBase {
   /**
    * The three SMS budgets of AUTH_CONTRACT 10.1, shared by a login challenge
    * and a rebind challenge (same gateway bill either way).
-   * @param {string} phone
+   * @param {string} key the number's phone key, so the cache holds no number either
    * @param {string} remoteAddress
    */
-  async otpRateLimits(phone, remoteAddress) {
+  async otpRateLimits(key, remoteAddress) {
     const { otpRatePhoneHour, otpRatePhoneDay, otpRateIpHour } = this.options;
-    const phoneKey = sha256(phone).slice(0, 32);
-    await this.rateLimit(`otp:rate:phone:${phoneKey}:h`, otpRatePhoneHour, 3600, 'phone');
-    await this.rateLimit(`otp:rate:phone:${phoneKey}:d`, otpRatePhoneDay, 86400, 'phone');
+    const phone = key.slice(0, 32);
+    await this.rateLimit(`otp:rate:phone:${phone}:h`, otpRatePhoneHour, 3600, 'phone');
+    await this.rateLimit(`otp:rate:phone:${phone}:d`, otpRatePhoneDay, 86400, 'phone');
     await this.rateLimit(`otp:rate:ip:${remoteAddress}:h`, otpRateIpHour, 3600, 'ip');
   }
 
@@ -1145,9 +1267,9 @@ class ProfileMs extends HttpServiceBase {
 
   /**
    * AUTH_CONTRACT 2.3: random 36 bit id, retry on collision, alarm on exhaustion.
-   * @param {string} phone
+   * @param {string} key the phone key
    */
-  async createUser(phone) {
+  async createUser(key) {
     for (let attempt = 0; attempt < USER_ID_MAX_RETRY; attempt += 1) {
       // eslint-disable-next-line no-bitwise
       const userId = crypto.randomInt(0, 2 ** 36).toString(16).padStart(9, '0');
@@ -1156,8 +1278,7 @@ class ProfileMs extends HttpServiceBase {
         // eslint-disable-next-line no-await-in-loop
         return await this.profileDB.createUser({
           user_id: userId,
-          phone,
-          phoneHash: sha256(phone),
+          phoneKey: key,
           username: null,
           usernameLower: null,
           usernameKeyHash: null,
@@ -1165,6 +1286,7 @@ class ProfileMs extends HttpServiceBase {
           displayName: null,
           avatarUrl: null,
           statusText: null,
+          discoverability: null,
           createdAt: new Date(),
           deletedAt: null
         });

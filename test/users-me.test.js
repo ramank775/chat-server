@@ -26,17 +26,17 @@ describe('users/me and username rules', () => {
       payload: { username }
     });
 
-  test('GET users/me returns the owner view with phone and a null username', async () => {
+  test('GET users/me returns the owner view, a null username and no phone', async () => {
     const session = await signup(app, { phone: '+919200000001' });
     const res = await me(session.accesskey);
     assert.equal(res.statusCode, 200);
     assert.deepEqual(JSON.parse(res.payload), {
       user_id: session.user_id,
       username: null,
-      phone: '+919200000001',
       displayName: null,
       avatarUrl: null,
       statusText: null,
+      discoverability: 'everyone',
       createdAt: JSON.parse(res.payload).createdAt
     });
     assert.ok(JSON.parse(res.payload).createdAt > 0);

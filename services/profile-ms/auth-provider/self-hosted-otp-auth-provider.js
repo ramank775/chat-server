@@ -45,9 +45,9 @@ class SelfHostedOtpAuthProvider extends IAuthProvider {
     }
   }
 
-  async startOtp({ phone, deviceId, userId = null }) {
+  async startOtp({ phone, phoneKey, deviceId, userId = null }) {
     const now = new Date();
-    const active = await this.#db.getActiveOtpSession(phone, deviceId, now);
+    const active = await this.#db.getActiveOtpSession(phoneKey, deviceId, now);
     // a login challenge is never reused as a rebind challenge (or the other
     // way round): the binding is what 9.3 step 1 checks
     if (active && (active.userId || null) === userId) {
@@ -55,8 +55,7 @@ class SelfHostedOtpAuthProvider extends IAuthProvider {
       return {
         sessionId: active.sessionId,
         resendAfterSec: secondsUntil(active.resendAfter, now),
-        expiresInSec: secondsUntil(active.expiresAt, now),
-        phone
+        expiresInSec: secondsUntil(active.expiresAt, now)
       };
     }
     const sessionId = uuidv4();
@@ -71,7 +70,7 @@ class SelfHostedOtpAuthProvider extends IAuthProvider {
     await this.#sms.send({ phone, code });
     await this.#db.createOtpSession({
       sessionId,
-      phone,
+      phoneKey,
       deviceId,
       userId,
       codeHash: await hashSecret(code),
@@ -85,14 +84,17 @@ class SelfHostedOtpAuthProvider extends IAuthProvider {
     return {
       sessionId,
       resendAfterSec: OTP_RESEND_AFTER_SEC,
-      expiresInSec: OTP_EXPIRES_IN_SEC,
-      phone
+      expiresInSec: OTP_EXPIRES_IN_SEC
     };
   }
 
-  async resendOtp(sessionId, beforeSend = async () => {}) {
+  async resendOtp(sessionId, { phone, phoneKey }, beforeSend = async () => {}) {
     const now = new Date();
     const session = await this.#liveOtpSession(sessionId, now);
+    // the code goes only to the number it was started for
+    if (session.phoneKey !== phoneKey) {
+      throw new AuthError(404, 'SESSION_NOT_FOUND', 'Unknown session');
+    }
     // no SMS for a code that can no longer be used
     if (session.attempts >= OTP_MAX_ATTEMPTS) {
       throw this.#lockedError(session, now);
@@ -101,8 +103,7 @@ class SelfHostedOtpAuthProvider extends IAuthProvider {
       return {
         sessionId,
         resendAfterSec: secondsUntil(session.resendAfter, now),
-        expiresInSec: secondsUntil(session.expiresAt, now),
-        phone: session.phone
+        expiresInSec: secondsUntil(session.expiresAt, now)
       };
     }
     let code;
@@ -120,16 +121,15 @@ class SelfHostedOtpAuthProvider extends IAuthProvider {
       // to /otp/send for a fresh code; the old one still verifies.
       throw new AuthError(410, 'RESEND_UNAVAILABLE', 'Request a new code');
     }
-    await beforeSend(session.phone);
-    await this.#sms.send({ phone: session.phone, code });
+    await beforeSend();
+    await this.#sms.send({ phone, code });
     await this.#db.updateOtpSession(sessionId, {
       resendAfter: new Date(now.getTime() + OTP_RESEND_AFTER_SEC * 1000)
     });
     return {
       sessionId,
       resendAfterSec: OTP_RESEND_AFTER_SEC,
-      expiresInSec: secondsUntil(session.expiresAt, now),
-      phone: session.phone
+      expiresInSec: secondsUntil(session.expiresAt, now)
     };
   }
 
@@ -150,7 +150,7 @@ class SelfHostedOtpAuthProvider extends IAuthProvider {
     if (!consumed) {
       throw new AuthError(410, 'SESSION_CONSUMED', 'This session was already verified');
     }
-    return { phone: session.phone, deviceId: session.deviceId, userId: session.userId || null };
+    return { phoneKey: session.phoneKey, deviceId: session.deviceId, userId: session.userId || null };
   }
 
   async issueSession(userId, deviceId) {

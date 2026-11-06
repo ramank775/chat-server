@@ -125,6 +125,7 @@ async function serviceHarness(t) {
     log: { info: noop, warn: noop, error: noop, debug: noop },
     statsClient: { increment: noop, timing: noop }, memCache: new LocalCache(),
     profileDB: {
+      migratePhones: async () => {},
       getByUserId: async (id) => users.get(id) || null,
       updateUser: async (id) => users.delete(id)
     },

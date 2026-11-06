@@ -3,7 +3,8 @@
 /**
  * @typedef {Object} OtpSession
  * @property {string} sessionId
- * @property {string} phone E.164
+ * @property {string} phoneKey the number's phone key (decision 223); the SMS
+ *   itself goes to the number in the request
  * @property {string} deviceId
  * @property {string} codeHash
  * @property {string} encryptedCode base64 AES-256-GCM nonce + ciphertext + tag, bound to sessionId
@@ -83,15 +84,15 @@ class IAuthDB {
 
   /**
    * @abstract
-   * Find the live OTP session of a (phone, deviceId) pair whose resend window has
+   * Find the live OTP session of a (phone key, deviceId) pair whose resend window has
    * not elapsed; used for the AUTH_CONTRACT 3.1 idempotency rule.
-   * @param {string} _phone
+   * @param {string} _phoneKey
    * @param {string} _deviceId
    * @param {Date} _now
    * @returns {Promise<OtpSession|null>}
    */
   // eslint-disable-next-line no-unused-vars
-  async getActiveOtpSession(_phone, _deviceId, _now) {
+  async getActiveOtpSession(_phoneKey, _deviceId, _now) {
     throw new Error('Method not implemented');
   }
 

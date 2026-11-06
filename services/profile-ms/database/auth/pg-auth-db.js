@@ -15,7 +15,7 @@ const SWEEP_MS = 60 * 1000;
 /** Document fields; each column is the field's snake_case (libs/pg-utils `column`). */
 const OTP_FIELDS = [
   'sessionId',
-  'phone',
+  'phoneKey',
   'deviceId',
   'userId',
   'codeHash',
@@ -48,7 +48,7 @@ const SCHEMA = `
   );
   CREATE TABLE IF NOT EXISTS otp_sessions (
     session_id text PRIMARY KEY,
-    phone text,
+    phone_key text,
     device_id text,
     user_id text,
     code_hash text,
@@ -59,7 +59,12 @@ const SCHEMA = `
     expires_at timestamptz,
     created_at timestamptz
   );
-  CREATE INDEX IF NOT EXISTS otp_sessions_phone_device ON otp_sessions (phone, device_id);
+  -- decision 223: a challenge keeps the phone key, never the number. One from
+  -- before holds a plain number: dropped, its owner asks for a new code.
+  ALTER TABLE otp_sessions ADD COLUMN IF NOT EXISTS phone_key text;
+  ALTER TABLE otp_sessions DROP COLUMN IF EXISTS phone;
+  DELETE FROM otp_sessions WHERE phone_key IS NULL;
+  CREATE INDEX IF NOT EXISTS otp_sessions_phone_key_device ON otp_sessions (phone_key, device_id);
   CREATE TABLE IF NOT EXISTS sessions (
     user_id text,
     device_id text,
@@ -106,12 +111,12 @@ class PgAuthDB extends IAuthDB {
     return this.#one(`SELECT ${OTP} FROM otp_sessions WHERE session_id = $1`, [sessionId]);
   }
 
-  async getActiveOtpSession(phone, deviceId, now) {
+  async getActiveOtpSession(phoneKey, deviceId, now) {
     return this.#one(
       `SELECT ${OTP} FROM otp_sessions
-       WHERE phone = $1 AND device_id = $2 AND NOT consumed AND resend_after > $3 AND expires_at > $3
+       WHERE phone_key = $1 AND device_id = $2 AND NOT consumed AND resend_after > $3 AND expires_at > $3
        LIMIT 1`,
-      [phone, deviceId, now]
+      [phoneKey, deviceId, now]
     );
   }
 

@@ -18,7 +18,6 @@
  * @property {string} sessionId
  * @property {number} resendAfterSec
  * @property {number} expiresInSec
- * @property {string} phone
  */
 
 /**
@@ -37,10 +36,11 @@ class IAuthProvider {
   }
 
   /**
-   * Start an OTP challenge, sending the code over SMS. `userId` binds the
+   * Start an OTP challenge, sending the code over SMS to `phone`. The
+   * challenge keeps only `phoneKey` (decision 223). `userId` binds the
    * challenge to an authenticated account (the phone rebind of
    * AUTH_CONTRACT 9.2); a plain login leaves it out.
-   * @param {{phone: string, deviceId: string, userId?: string}} _args
+   * @param {{phone: string, phoneKey: string, deviceId: string, userId?: string}} _args
    * @returns {Promise<OtpChallenge>}
    */
   // eslint-disable-next-line no-unused-vars
@@ -49,21 +49,23 @@ class IAuthProvider {
   }
 
   /**
-   * Re-send the code of an existing challenge
+   * Re-send the code of an existing challenge to the number the request
+   * names, which must be the one the challenge was started for
    * @param {string} _sessionId
-   * @param {(phone: string) => Promise<void>} [_beforeSend] runs only when an
+   * @param {{phone: string, phoneKey: string}} _to
+   * @param {() => Promise<void>} [_beforeSend] runs only when an
    *   SMS is about to go out; throwing stops it (the SMS budgets)
    * @returns {Promise<OtpChallenge>}
    */
   // eslint-disable-next-line no-unused-vars
-  async resendOtp(_sessionId, _beforeSend) {
+  async resendOtp(_sessionId, _to, _beforeSend) {
     throw new Error('Method not implemented');
   }
 
   /**
    * Verify an OTP code. One shot: a verified session can never be verified again.
    * @param {{sessionId: string, code: string, deviceId: string}} _args
-   * @returns {Promise<{phone: string, deviceId: string, userId: string|null}>}
+   * @returns {Promise<{phoneKey: string, deviceId: string, userId: string|null}>}
    * @throws {AuthError}
    */
   // eslint-disable-next-line no-unused-vars

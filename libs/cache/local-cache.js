@@ -32,19 +32,20 @@ class LocalCache {
    * redis cache for anything horizontally scaled (AUTH_CONTRACT 10.1).
    * @param {string} key
    * @param {number} [expireInSec]
+   * @param {number} [by]
    * @returns {Promise<number>} counter value after the increment
    */
-  async incr(key, expireInSec) {
+  async incr(key, expireInSec, by = 1) {
     const now = Date.now();
     const entry = this._counters[key];
     if (!entry || entry.expiresAt <= now) {
       this._counters[key] = {
-        count: 1,
+        count: by,
         expiresAt: expireInSec ? now + expireInSec * 1000 : Infinity,
       };
-      return 1;
+      return by;
     }
-    entry.count += 1;
+    entry.count += by;
     return entry.count;
   }
 

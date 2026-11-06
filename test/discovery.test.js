@@ -1,6 +1,7 @@
 const { test, before, after, describe } = require('node:test');
 const assert = require('node:assert/strict');
 const { sha256 } = require('../helper');
+const { TEST_DB } = require('./helpers/db');
 const { startProfileMs, signup, signupWithUsername, bearer } = require('./helpers/profile-ms');
 
 describe('contact discovery (AUTH_CONTRACT 7)', () => {
@@ -187,5 +188,113 @@ describe('contact discovery (AUTH_CONTRACT 7)', () => {
       const res = await lookup(reader.accesskey, batch);
       assert.equal(res.statusCode, 200, `lookup ${i}`);
     }
+  });
+
+  // ---- decision 223: discoverability -------------------------------------
+
+  const setMode = (accesskey, payload) =>
+    app.inject({ method: 'PUT', url: '/users/me/discoverability', headers: bearer(accesskey), payload });
+  const found = async (accesskey, phone) =>
+    JSON.parse((await lookup(accesskey, [sha256(phone)])).payload).matches.map((m) => m.user_id);
+  /** The stored chosen list, which no route returns. */
+  const tokensOf = async (userId) => {
+    if (TEST_DB === 'pg') {
+      const { rows } = await app.raw.query('SELECT discovery_tokens FROM users WHERE user_id = $1', [userId]);
+      return rows[0].discovery_tokens;
+    }
+    return (await app.raw.collection('users').findOne({ user_id: userId })).discoveryTokens;
+  };
+
+  test('nobody: not found by number, still found by username', async () => {
+    const owner = await signupWithUsername(app, { phone: '+919300000020', username: 'hidden_one' });
+    const reader = await signupWithUsername(app, { phone: '+919300000021', username: 'reader_nine' });
+    assert.deepEqual(await found(reader.accesskey, '+919300000020'), [owner.user_id],
+      'an account that never chose is found by everyone');
+
+    const res = await setMode(owner.accesskey, { mode: 'nobody' });
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(JSON.parse(res.payload), { mode: 'nobody', count: 0 });
+    const me = await app.inject({ method: 'GET', url: '/users/me', headers: bearer(owner.accesskey) });
+    assert.equal(JSON.parse(me.payload).discoverability, 'nobody');
+
+    assert.deepEqual(await found(reader.accesskey, '+919300000020'), []);
+    assert.equal((await byUsername(reader.accesskey, 'hidden_one')).statusCode, 200);
+  });
+
+  test('chosen: only the numbers on the list find the account, kept as tokens only', async () => {
+    const owner = await signupWithUsername(app, { phone: '+919300000030', username: 'choosy_one' });
+    const friend = await signupWithUsername(app, { phone: '+919300000031', username: 'friend_one' });
+    const stranger = await signupWithUsername(app, { phone: '+919300000032', username: 'stranger_one' });
+
+    const res = await setMode(owner.accesskey, {
+      mode: 'chosen',
+      // the second one is not on Vartalap yet
+      phoneHashes: [sha256('+919300000031'), sha256('+919300000039'), sha256('+919300000031')]
+    });
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(JSON.parse(res.payload), { mode: 'chosen', count: 2 });
+
+    assert.deepEqual(await found(friend.accesskey, '+919300000030'), [owner.user_id]);
+    assert.deepEqual(await found(stranger.accesskey, '+919300000030'), []);
+    const later = await signupWithUsername(app, { phone: '+919300000039', username: 'later_one' });
+    assert.deepEqual(await found(later.accesskey, '+919300000030'), [owner.user_id],
+      'a chosen number that joins later finds them too');
+
+    const tokens = await tokensOf(owner.user_id);
+    assert.equal(tokens.length, 2);
+    const plain = ['+919300000031', '+919300000039'].flatMap((p) => [p, sha256(p), app.server.keyOfPhone(p)]);
+    assert.equal(tokens.some((token) => plain.includes(token)), false, 'no number in any readable form');
+    const me = JSON.parse((await app.inject({
+      method: 'GET', url: '/users/me', headers: bearer(owner.accesskey)
+    })).payload);
+    assert.equal(me.discoverability, 'chosen');
+    assert.equal(Object.keys(me).some((field) => /token|chosen|hashes/i.test(field)), false);
+
+    // leaving `chosen` drops the list
+    await setMode(owner.accesskey, { mode: 'everyone' });
+    assert.equal(await tokensOf(owner.user_id), null);
+    assert.deepEqual(await found(stranger.accesskey, '+919300000030'), [owner.user_id]);
+  });
+
+  test('chosen takes a list of at most 500; the other modes take none', async () => {
+    const owner = await signupWithUsername(app, { phone: '+919300000040', username: 'rules_one' });
+    const bad = [
+      { mode: 'chosen' },
+      { mode: 'everyone', phoneHashes: [sha256('+919300000041')] },
+      { mode: 'friends' },
+      { mode: 'chosen', phoneHashes: ['not-a-hash'] },
+      { mode: 'chosen', phoneHashes: Array.from({ length: 501 }, (_, i) => sha256(`+9193001${i}`)) }
+    ];
+    const codes = await Promise.all(bad.map(async (payload) => (await setMode(owner.accesskey, payload)).statusCode));
+    assert.deepEqual(codes, bad.map(() => 400));
+    const empty = await setMode(owner.accesskey, { mode: 'chosen', phoneHashes: [] });
+    assert.deepEqual(JSON.parse(empty.payload), { mode: 'chosen', count: 0 }, 'an empty list is nobody by number');
+  });
+
+  test('past the per-minute chosen-check budget a match looks unknown', async () => {
+    const owner = await signupWithUsername(app, { phone: '+919300000050', username: 'budget_one' });
+    const friend = await signupWithUsername(app, { phone: '+919300000051', username: 'budget_two' });
+    await setMode(owner.accesskey, { mode: 'chosen', phoneHashes: [sha256('+919300000051')] });
+    const { chosenCheckMin } = app.server.options;
+    app.server.options.chosenCheckMin = 1;
+    try {
+      assert.deepEqual(await found(friend.accesskey, '+919300000050'), [owner.user_id]);
+      assert.deepEqual(await found(friend.accesskey, '+919300000050'), [], 'the next minute it is found again');
+    } finally {
+      app.server.options.chosenCheckMin = chosenCheckMin;
+    }
+  });
+
+  test('phone lookups: 20 requests a minute per user, then 429', async () => {
+    const reader = await signupWithUsername(app, { phone: '+919300000060', username: 'reader_ten' });
+    for (let i = 0; i < 20; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      assert.equal((await lookup(reader.accesskey, [sha256('+919300000020')])).statusCode, 200);
+    }
+    const limited = await lookup(reader.accesskey, [sha256('+919300000020')]);
+    assert.equal(limited.statusCode, 429);
+    const { error } = JSON.parse(limited.payload);
+    assert.equal(error.code, 'RATE_LIMITED');
+    assert.equal(error.retryAfterSec, 60);
   });
 });

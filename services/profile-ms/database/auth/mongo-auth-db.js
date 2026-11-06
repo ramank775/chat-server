@@ -33,9 +33,9 @@ class MongoAuthDB extends IAuthDB {
     return this.#otpSessions.findOne({ sessionId }, PROJECTION);
   }
 
-  async getActiveOtpSession(phone, deviceId, now) {
+  async getActiveOtpSession(phoneKey, deviceId, now) {
     return this.#otpSessions.findOne(
-      { phone, deviceId, consumed: false, resendAfter: { $gt: now }, expiresAt: { $gt: now } },
+      { phoneKey, deviceId, consumed: false, resendAfter: { $gt: now }, expiresAt: { $gt: now } },
       PROJECTION
     );
   }
@@ -155,7 +155,14 @@ class MongoAuthDB extends IAuthDB {
     this.#deviceKeys = db.collection('device_keys');
     await this.#deviceKeys.createIndex({ user_id: 1, deviceId: 1 }, { unique: true });
     await this.#otpSessions.createIndex({ sessionId: 1 }, { unique: true });
-    await this.#otpSessions.createIndex({ phone: 1, deviceId: 1 });
+    // decision 223: a challenge keeps the phone key, never the number. One
+    // from before holds a plain number: dropped, its owner asks for a new code.
+    await this.#otpSessions.deleteMany({ phone: { $exists: true } });
+    await this.#otpSessions.dropIndex('phone_1_deviceId_1').catch((error) => {
+      // 26 NamespaceNotFound, 27 IndexNotFound
+      if (![26, 27].includes(error.code)) throw error;
+    });
+    await this.#otpSessions.createIndex({ phoneKey: 1, deviceId: 1 });
     await this.#otpSessions.createIndex(
       { createdAt: 1 },
       { expireAfterSeconds: OTP_SESSION_TTL_SEC }

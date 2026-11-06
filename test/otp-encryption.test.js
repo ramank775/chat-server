@@ -26,9 +26,13 @@ function harness() {
   return { context, sessions, sends, provider: new OtpProvider(context) };
 }
 
+// decision 223: the challenge keeps the key, the SMS goes to the request's number
+const ONE = { phone: '+919000000001', phoneKey: 'key-one' };
+const TWO = { phone: '+919000000002', phoneKey: 'key-two' };
+
 test('same-code resend survives provider restart without changing attempts, hash or expiry', async () => {
   const { context, sessions, sends, provider } = harness();
-  const { sessionId } = await provider.startOtp({ phone: '+919000000001', deviceId: 'd1' });
+  const { sessionId } = await provider.startOtp({ ...ONE, deviceId: 'd1' });
   const session = sessions.get(sessionId);
   const { codeHash, expiresAt, encryptedCode } = session;
   const { code } = sends[0];
@@ -38,24 +42,33 @@ test('same-code resend survives provider restart without changing attempts, hash
   session.attempts = 2;
   const restarted = new OtpProvider(context);
   let budgets = 0;
-  await restarted.resendOtp(sessionId, async () => { budgets += 1; });
+  await restarted.resendOtp(sessionId, ONE, async () => { budgets += 1; });
   assert.deepEqual(sends[1], sends[0]);
   assert.equal(budgets, 1);
   assert.equal(session.codeHash, codeHash);
   assert.equal(session.encryptedCode, encryptedCode);
   assert.equal(session.expiresAt, expiresAt);
   assert.equal(session.attempts, 2);
-  await restarted.resendOtp(sessionId);
+  await restarted.resendOtp(sessionId, ONE);
   assert.equal(sends.length, 2, 'the new resend window suppresses another SMS');
   assert.deepEqual(await restarted.verifyOtp({ sessionId, code, deviceId: 'd1' }), {
-    phone: '+919000000001', deviceId: 'd1', userId: null
+    phoneKey: 'key-one', deviceId: 'd1', userId: null
   });
+  assert.equal(session.phone, undefined, 'the challenge never holds the number');
+});
+
+test('resend only to the number the challenge was started for', async () => {
+  const { sessions, sends, provider } = harness();
+  const { sessionId } = await provider.startOtp({ ...ONE, deviceId: 'd1' });
+  sessions.get(sessionId).resendAfter = new Date(0);
+  await assert.rejects(provider.resendOtp(sessionId, TWO), { code: 'SESSION_NOT_FOUND' });
+  assert.equal(sends.length, 1);
 });
 
 test('tampered ciphertext, tags and swapped sessions send no SMS', async () => {
   const { sessions, sends, provider } = harness();
-  const first = await provider.startOtp({ phone: '+919000000001', deviceId: 'd1' });
-  const second = await provider.startOtp({ phone: '+919000000002', deviceId: 'd2' });
+  const first = await provider.startOtp({ ...ONE, deviceId: 'd1' });
+  const second = await provider.startOtp({ ...TWO, deviceId: 'd2' });
   const session = sessions.get(first.sessionId);
   const original = session.encryptedCode;
   session.resendAfter = new Date(0);
@@ -65,56 +78,56 @@ test('tampered ciphertext, tags and swapped sessions send no SMS', async () => {
     damaged[offset] ^= 1; // eslint-disable-line no-bitwise
     session.encryptedCode = damaged.toString('base64');
     // eslint-disable-next-line no-await-in-loop
-    await assert.rejects(provider.resendOtp(first.sessionId));
+    await assert.rejects(provider.resendOtp(first.sessionId, ONE));
   }
   session.encryptedCode = sessions.get(second.sessionId).encryptedCode;
-  await assert.rejects(provider.resendOtp(first.sessionId));
+  await assert.rejects(provider.resendOtp(first.sessionId, ONE));
   assert.equal(sends.length, 2);
 });
 
 test('resend refuses expired, locked and consumed challenges', async () => {
   const { sessions, sends, provider } = harness();
-  const { sessionId } = await provider.startOtp({ phone: '+919000000001', deviceId: 'd1' });
+  const { sessionId } = await provider.startOtp({ ...ONE, deviceId: 'd1' });
   const session = sessions.get(sessionId);
   session.resendAfter = new Date(0);
   session.attempts = 5;
-  await assert.rejects(provider.resendOtp(sessionId), { code: 'SESSION_LOCKED' });
+  await assert.rejects(provider.resendOtp(sessionId, ONE), { code: 'SESSION_LOCKED' });
   session.attempts = 0;
   const { expiresAt } = session;
   session.expiresAt = new Date(0);
-  await assert.rejects(provider.resendOtp(sessionId), { code: 'SESSION_EXPIRED' });
+  await assert.rejects(provider.resendOtp(sessionId, ONE), { code: 'SESSION_EXPIRED' });
   session.expiresAt = expiresAt;
   session.consumed = true;
-  await assert.rejects(provider.resendOtp(sessionId), { code: 'SESSION_CONSUMED' });
+  await assert.rejects(provider.resendOtp(sessionId, ONE), { code: 'SESSION_CONSUMED' });
   assert.equal(sends.length, 1);
 });
 
 test('a wrong encryption key cannot resend but does not break hash verification', async () => {
   const { context, sessions, sends, provider } = harness();
-  const { sessionId } = await provider.startOtp({ phone: '+919000000001', deviceId: 'd1' });
+  const { sessionId } = await provider.startOtp({ ...ONE, deviceId: 'd1' });
   const session = sessions.get(sessionId);
   session.resendAfter = new Date(0);
   context.options.otpEncryptionKey = crypto.randomBytes(32).toString('hex');
   const changedKey = new OtpProvider(context);
   // 410 is what sends the app back to /otp/send for a fresh code
-  await assert.rejects(changedKey.resendOtp(sessionId), { status: 410, code: 'RESEND_UNAVAILABLE' });
+  await assert.rejects(changedKey.resendOtp(sessionId, ONE), { status: 410, code: 'RESEND_UNAVAILABLE' });
   assert.equal(sends.length, 1);
   await changedKey.verifyOtp({ sessionId, code: sends[0].code, deviceId: 'd1' });
 });
 
 test('failed budgets and failed SMS leave the challenge intact and retryable', async () => {
   const { context, sessions, sends, provider } = harness();
-  const { sessionId } = await provider.startOtp({ phone: '+919000000001', deviceId: 'd1' });
+  const { sessionId } = await provider.startOtp({ ...ONE, deviceId: 'd1' });
   const session = sessions.get(sessionId);
   session.resendAfter = new Date(0);
   const saved = { ...session };
-  await assert.rejects(provider.resendOtp(sessionId, async () => { throw new Error('budget'); }));
+  await assert.rejects(provider.resendOtp(sessionId, ONE, async () => { throw new Error('budget'); }));
   assert.equal(sends.length, 1);
   context.smsSender.send = async () => { throw new Error('gateway'); };
-  await assert.rejects(provider.resendOtp(sessionId), /gateway/);
+  await assert.rejects(provider.resendOtp(sessionId, ONE), /gateway/);
   assert.deepEqual(session, saved);
   context.smsSender.send = async (sms) => sends.push(sms);
-  await provider.resendOtp(sessionId);
+  await provider.resendOtp(sessionId, ONE);
   assert.deepEqual(sends[1], sends[0]);
 });
 

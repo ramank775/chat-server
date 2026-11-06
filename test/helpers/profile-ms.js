@@ -26,7 +26,7 @@ async function openStore(dbName) {
       sessions: pgAuthDb.SESSION_FIELDS,
       otp_sessions: pgAuthDb.OTP_FIELDS
     });
-    return { db, close: () => pool.end(), drop: () => dropPgDatabase(dbName) };
+    return { db, raw: pool, close: () => pool.end(), drop: () => dropPgDatabase(dbName) };
   }
   const client = new MongoClient(mongoUrlFor(dbName), { auth: null });
   await client.connect();
@@ -34,6 +34,7 @@ async function openStore(dbName) {
   await db.dropDatabase();
   return {
     db,
+    raw: db,
     close: async () => {
       await db.dropDatabase();
       await client.close();
@@ -48,11 +49,14 @@ async function openStore(dbName) {
  * sender and the in-memory event store. No socket is opened: drive it with
  * `inject`.
  * @param {string} dbName database name, unique per test file
+ * @param {{seed?: (raw: import('mongodb').Db | Pool) => Promise<void>}} [opts] `seed` writes
+ *   to the empty database before the service boots (the migration tests)
  */
-async function startProfileMs(dbName) {
+async function startProfileMs(dbName, { seed } = {}) {
   if (TEST_DB === 'pg') await freshPgDatabase(dbName);
   // Drop the test database before init creates the unique indexes used by atomic writes.
   const store = await openStore(dbName);
+  if (seed) await seed(store.raw);
   const options = parseOptions([
     'node',
     'profile-ms',
@@ -129,6 +133,7 @@ async function startProfileMs(dbName) {
   return {
     server: service,
     db,
+    raw: store.raw,
     /** @type {import('../../services/profile-ms/auth-provider/sms-sender/mock-sms-sender')} */
     sms: context.smsSender,
     eventStore: context.eventStore,

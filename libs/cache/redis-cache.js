@@ -79,11 +79,12 @@ class RedisCache {
    * limit. Move to a sorted set (sliding window) if that matters.
    * @param {string} key
    * @param {number} [expireInSec]
+   * @param {number} [by]
    * @returns {Promise<number>} counter value after the increment
    */
-  async incr(key, expireInSec) {
-    const count = await this._redis.incr(key);
-    if (expireInSec && count === 1) {
+  async incr(key, expireInSec, by = 1) {
+    const count = await this._redis.incrby(key, by);
+    if (expireInSec && count === by) {
       await this._redis.expire(key, expireInSec);
     }
     return count;

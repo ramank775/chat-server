@@ -1,6 +1,5 @@
 const { test, before, after, describe } = require('node:test');
 const assert = require('node:assert/strict');
-const { sha256 } = require('../helper');
 const { startProfileMs, signup, signupWithUsername, bearer } = require('./helpers/profile-ms');
 
 describe('account delete and phone rebind (AUTH_CONTRACT 8 and 9)', () => {
@@ -88,7 +87,7 @@ describe('account delete and phone rebind (AUTH_CONTRACT 8 and 9)', () => {
     assert.ok(row.deletedAt instanceof Date, 'the row is tombstoned, not removed');
     assert.equal(row.usernameLower, 'gone_soon', 'the handle stays reserved');
     // 8.2: the tombstone is user_id and username, nothing personal
-    ['phone', 'phoneHash', 'displayName', 'avatarUrl', 'statusText', 'createdAt'].forEach((field) =>
+    ['phoneKey', 'discoverability', 'displayName', 'avatarUrl', 'statusText', 'createdAt'].forEach((field) =>
       assert.equal(row[field] ?? null, null, `${field} is erased`));
     assert.deepEqual(app.groupRemovals.at(-1), { user_id: session.user_id }, 'it leaves every group');
 
@@ -150,7 +149,7 @@ describe('account delete and phone rebind (AUTH_CONTRACT 8 and 9)', () => {
     assert.deepEqual(JSON.parse(res.payload), { status: true, user_id: session.user_id });
     assert.equal((await me(session.accesskey)).statusCode, 401);
     const row = await app.db.collection('users').findOne({ user_id: session.user_id });
-    assert.equal(row.phone ?? null, null, 'erased like the in-app delete');
+    assert.equal(row.phoneKey ?? null, null, 'erased like the in-app delete');
     assert.deepEqual(app.groupRemovals.at(-1), { user_id: session.user_id });
 
     // an account that never picked a username is named by null
@@ -216,16 +215,14 @@ describe('account delete and phone rebind (AUTH_CONTRACT 8 and 9)', () => {
     assert.equal(verified.statusCode, 200);
     assert.deepEqual(JSON.parse(verified.payload), {
       user_id: session.user_id,
-      username: 'mover_one',
-      phone: '+919400000007'
+      username: 'mover_one'
     });
 
     const profile = await me(session.accesskey);
     assert.equal(profile.statusCode, 200, 'the accesskey survives the rebind (9.4)');
-    assert.equal(JSON.parse(profile.payload).phone, '+919400000007');
 
     const row = await app.db.collection('users').findOne({ user_id: session.user_id });
-    assert.equal(row.phoneHash, sha256('+919400000007'), 'discovery follows the new number');
+    assert.equal(row.phoneKey, app.server.keyOfPhone('+919400000007'), 'discovery follows the new number');
     assert.deepEqual(app.revokes.slice(revokedBefore), [
       { user_id: session.user_id, reason: 'rebind' }
     ]);

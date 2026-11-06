@@ -42,7 +42,7 @@ describe('auth/otp', () => {
     const body = JSON.parse(verified.payload);
     assert.equal(body.isNew, true);
     assert.equal(body.username, null);
-    assert.equal(body.phone, phone);
+    assert.equal(body.phone, undefined, 'the server no longer has the number to echo (223)');
     assert.match(body.user_id, /^[0-9a-f]{9}$/);
     assert.match(body.refreshToken, /^rt_[0-9a-f]{32}$/);
     assert.ok(body.accesskeyExpiresAt > Date.now());
@@ -165,10 +165,23 @@ describe('auth/otp', () => {
     const firstCode = app.sms.lastCode(phone);
     const sends = app.sms.sends.length;
 
-    const throttled = await app.inject({
+    const row = await app.db.collection('otp_sessions').findOne({ sessionId: challenge.sessionId });
+    assert.equal(row.phone, undefined, 'the challenge keeps no number (223)');
+    assert.match(row.phoneKey, /^[0-9a-f]{64}$/);
+
+    // an app from before decision 223 names no number: it starts over with /send
+    const legacy = await app.inject({
       method: 'POST',
       url: '/auth/otp/resend',
       payload: { sessionId: challenge.sessionId }
+    });
+    assert.equal(legacy.statusCode, 410);
+    assert.equal(JSON.parse(legacy.payload).error.code, 'RESEND_UNAVAILABLE');
+
+    const throttled = await app.inject({
+      method: 'POST',
+      url: '/auth/otp/resend',
+      payload: { sessionId: challenge.sessionId, phone }
     });
     assert.equal(throttled.statusCode, 200);
     assert.equal(JSON.parse(throttled.payload).sessionId, challenge.sessionId);
@@ -179,10 +192,18 @@ describe('auth/otp', () => {
       { sessionId: challenge.sessionId },
       { $set: { resendAfter: new Date(Date.now() - 1000) } }
     );
+    const elsewhere = await app.inject({
+      method: 'POST',
+      url: '/auth/otp/resend',
+      payload: { sessionId: challenge.sessionId, phone: '+919000000099' }
+    });
+    assert.equal(elsewhere.statusCode, 404, 'the code goes only to the number it was sent to');
+    assert.equal(app.sms.sends.length, sends);
+
     const resent = await app.inject({
       method: 'POST',
       url: '/auth/otp/resend',
-      payload: { sessionId: challenge.sessionId }
+      payload: { sessionId: challenge.sessionId, phone }
     });
     const body = JSON.parse(resent.payload);
     assert.equal(body.sessionId, challenge.sessionId, 'resend never allocates a new session');
@@ -206,7 +227,7 @@ describe('auth/otp', () => {
       app.inject({
         method: 'POST',
         url: '/auth/otp/resend',
-        payload: { sessionId: challenge.sessionId }
+        payload: { sessionId: challenge.sessionId, phone }
       });
     const openWindow = () =>
       app.db

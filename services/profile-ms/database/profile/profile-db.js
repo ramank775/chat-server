@@ -3,8 +3,8 @@
 /**
  * @typedef {Object} User
  * @property {string} user_id 9 lowercase hex chars (36 bit), server assigned, immutable
- * @property {string} phone E.164
- * @property {string} phoneHash sha256 of the canonical E.164 phone (contact discovery key)
+ * @property {string} phoneKey HMAC-SHA256(pepper, sha256 hex of the E.164 phone); the
+ *   only form of the number the server keeps (decision 223, services/profile-ms/phone-key.js)
  * @property {string?} username null until the mandatory username pick step (AUTH_CONTRACT 2.4)
  * @property {string?} usernameLower lower cased `username`, carries the unique index
  * @property {string?} usernameKeyHash hashed 4 digit discovery key
@@ -12,6 +12,10 @@
  * @property {string?} displayName
  * @property {string?} avatarUrl
  * @property {string?} statusText
+ * @property {('everyone'|'chosen'|'nobody')?} discoverability who may find this account by
+ *   phone; null = never chosen = `everyone`
+ * @property {string[]?} discoveryTokens the `chosen` list as scrypt tokens. Written through
+ *   `updateUser`, never read back by the other methods: `hasDiscoveryToken` checks one
  * @property {Date} createdAt
  * @property {Date?} deletedAt tombstone; every lookup filters it out
  */
@@ -68,12 +72,12 @@ class IProfileDB {
 
   /**
    * @abstract
-   * Find an active user by phone (E.164)
-   * @param {string} _phone
+   * Find an active user by phone key
+   * @param {string} _phoneKey
    * @returns {Promise<User|null>}
    */
   // eslint-disable-next-line no-unused-vars
-  async getByPhone(_phone) {
+  async getByPhoneKey(_phoneKey) {
     throw new Error('Method not implemented');
   }
 
@@ -102,13 +106,39 @@ class IProfileDB {
 
   /**
    * @abstract
-   * Find the active users behind a batch of phone hashes (AUTH_CONTRACT 7.2).
-   * Hashes with no account are simply absent from the result.
-   * @param {string[]} _phoneHashes
+   * Find the active users behind a batch of phone keys (AUTH_CONTRACT 7.2).
+   * Keys with no account are simply absent from the result.
+   * @param {string[]} _phoneKeys
    * @returns {Promise<User[]>}
    */
   // eslint-disable-next-line no-unused-vars
-  async getByPhoneHashes(_phoneHashes) {
+  async getByPhoneKeys(_phoneKeys) {
+    throw new Error('Method not implemented');
+  }
+
+  /**
+   * @abstract
+   * Is `_token` on the active user's `chosen` list?
+   * @param {string} _userId
+   * @param {string} _token
+   * @returns {Promise<boolean>}
+   */
+  // eslint-disable-next-line no-unused-vars
+  async hasDiscoveryToken(_userId, _token) {
+    throw new Error('Method not implemented');
+  }
+
+  /**
+   * @abstract
+   * Boot step (decision 223). Records the pepper's fingerprint on first run
+   * and throws if the database was keyed with another pepper. Then turns
+   * every row still holding the plain number (`phone`, `phoneHash`) into its
+   * phone key and erases the plain fields.
+   * @param {(phoneHash: string) => string} _keyOf
+   * @param {string} _fingerprint
+   */
+  // eslint-disable-next-line no-unused-vars
+  async migratePhones(_keyOf, _fingerprint) {
     throw new Error('Method not implemented');
   }
 
