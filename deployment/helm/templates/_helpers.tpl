@@ -1,106 +1,149 @@
-{{/*
-Expand the name of the chart.
-*/}}
 {{- define "chatserver.name" -}}
-{{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
+{{- .Chart.Name | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
-{{/*
-Create a default fully qualified app name.
-We truncate at 63 chars because some Kubernetes name fields are limited to this (by the DNS naming spec).
-If release name contains chart name it will be used as a full name.
-*/}}
-{{- define "chatserver.fullname" -}}
-{{- if .Values.fullnameOverride }}
-{{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
-{{- else }}
-{{- $name := default .Chart.Name .Values.nameOverride }}
-{{- if contains $name .Release.Name }}
-{{- .Release.Name | trunc 63 | trimSuffix "-" }}
-{{- else }}
-{{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" }}
-{{- end }}
-{{- end }}
-{{- end }}
-
-{{/*
-Create chart name and version as used by the chart label.
-*/}}
-{{- define "chatserver.chart" -}}
-{{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
-{{- end }}
-
-{{/*
-Common labels
-*/}}
-{{- define "chatserver.labels" -}}
-chatserver.sh/chart: {{ include "chatserver.chart" . }}
-{{ include "chatserver.selectorLabels" . }}
-{{- if .Chart.AppVersion }}
-app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
-{{- end }}
-app.kubernetes.io/managed-by: {{ .Release.Service }}
-{{- end }}
-
-{{/*
-Selector labels
-*/}}
 {{- define "chatserver.selectorLabels" -}}
 app.kubernetes.io/name: {{ include "chatserver.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
-{{- /*
-Merges the global annotations with the service-specific annotations,
-giving precedence to the service-specific annotations.
-*/ -}}
-{{- define "chatserver.annotations" -}}
-{{- $serviceAnnotations := . -}}
-{{- $globalAnnotations := .Values.podAnnotations -}}
-{{- $result := dict -}}
-{{- $result = merge $result $globalAnnotations -}}
-{{- $result = merge $result $serviceAnnotations -}}
-{{- $result -}}
-{{- end -}}
+{{- define "chatserver.labels" -}}
+helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+{{ include "chatserver.selectorLabels" . }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end }}
 
+{{/* Flags every http service takes. Takes (dict "root" $ "port" n). */}}
+{{- define "chatserver.httpArgs" -}}
+- --host=0.0.0.0
+- --port={{ .port }}
+- --min-app-build={{ .root.Values.minAppBuild }}
+- --latest-app-build={{ .root.Values.latestAppBuild }}
+{{- end }}
+
+{{/* The event bus. Takes (dict "root" $ "group" consumer-group-or-empty). */}}
+{{- define "chatserver.busArgs" -}}
+{{- $v := .root.Values }}
+- --event-store={{ $v.eventStore }}
+- --new-message-topic=new-message
+- --offline-message-topic=offline-message
+{{- if eq $v.eventStore "kafka" }}
+- --kafka-broker-list={{ $v.kafka.brokers }}
+- --kafka-client-id=$(POD_NAME)
+{{- with .group }}
+- --kafka-consumer-group={{ . }}
+{{- end }}
+{{- else }}
+- --nats-server-list={{ $v.nats.servers }}
+{{- with .group }}
+- --nats-consumer-group={{ . }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{/* The database. Takes (dict "root" $ "stores" (list "profile-db" ...)). */}}
+{{- define "chatserver.dbArgs" -}}
+{{- $v := .root.Values }}
+{{- range .stores }}
+- --{{ . }}={{ $v.dbBackend }}
+{{- end }}
+{{- if eq $v.dbBackend "pg" }}
+- --pg-url=postgres://{{ $v.pg.user }}:$(DB_PASSWORD)@{{ $v.pg.host }}/{{ $v.pg.database }}
+{{- else }}
+- --mongo-url={{ $v.mongo.url }}
+{{- with $v.mongo.user }}
+- --mongo-user={{ . }}
+- --mongo-password=$(DB_PASSWORD)
+- --mongo-auth
+{{- end }}
+{{- end }}
+{{- end }}
 
 {{/*
-Event Store common option
+One service: a Deployment, and a Service named as docker-compose.yml names
+it when it listens. Takes (dict "root" $ "name" n "script" path "port" n
+"replicas" n "args" rendered-arg-lines).
 */}}
-{{- define "eventBroker.options" -}}
---event-store={{ .values.eventStore }}
-{{- if eq $.Values.eventStore "kafka" -}}
---kafka-broker-list={{ .Values.kafka.brokers }}
---kafka-security-protocol={{ .Values.kafka.security.protocol }}
---kafka-sasl-username={{ .Values.kafka.sasl.username }}
---kafka-sasl-password={{ .Values.kafka.sasl.password }}
---kafka-client-id="${hostname}"
---kafka-consumer-group={{ .Args.consumerGroup }}
-{{- end -}}
-{{- if eq $.Values.eventStore "nats" -}}
---nats-server-list={{ .Values.nats.servers }}
---nats-auth-type={{ .Values.nats.auth.type }}
---nats-auth-user={{ .Values.nats.auth.user }}
---nats-auth-pass={{ .Values.nats.auth.pass }}
---nats-auth-token={{ .Values.nats.auth.token }}
---nats-auth-nkey={{ .Values.nats.auth.nkey }}
---nats-auth-jwt={{ .Values.nats.auth.jwt }}
---nats-consumer-group={{ .Args.consumerGroup }}
-{{- end -}}
-{{ -end- }}
-
-{{/*
-Mongo Auth options
-*/}}
-{{- define "mongo.options" -}}
-{{- if .Values.mongo.srv -}}
---mongo-url=mongodb+srv://{{ .Values.mongo.host }}:{{ .Values.mongo.port }}/{{ .Values.mongo.db }}?authSource=admin
-{{- else -}}
---mongo-url=mongodb://{{ .Values.mongo.host }}:{{ .Values.mongo.port }}/{{ .Values.mongo.db }}
-{{- end -}}
-{{- if .Values.mongo.auth -}}
---mongo-user={{ .Values.mongo.user }}
---mongo-password={{ .Values.mongo.pass }}
---mongo-auth
-{{- end -}}
-
+{{- define "chatserver.service" -}}
+{{- $root := .root }}
+{{- $v := $root.Values }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .name }}
+  labels:
+    {{- include "chatserver.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ .name }}
+spec:
+  replicas: {{ .replicas }}
+  selector:
+    matchLabels:
+      {{- include "chatserver.selectorLabels" $root | nindent 6 }}
+      app.kubernetes.io/component: {{ .name }}
+  template:
+    metadata:
+      labels:
+        {{- include "chatserver.selectorLabels" $root | nindent 8 }}
+        app.kubernetes.io/component: {{ .name }}
+      {{- with $v.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with $v.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ .name }}
+          image: "{{ $v.image.repository }}:{{ $v.image.tag | default $root.Chart.AppVersion }}"
+          imagePullPolicy: {{ $v.image.pullPolicy }}
+          command: [node]
+          args:
+            - {{ .script }}
+            - --app-name={{ .name }}
+            {{- .args | nindent 12 }}
+            {{- range $v.extraArgs }}
+            - {{ . | quote }}
+            {{- end }}
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          envFrom:
+            - secretRef:
+                name: {{ $v.secretName }}
+          {{- if .port }}
+          ports:
+            - name: http
+              containerPort: {{ .port }}
+          readinessProbe:
+            httpGet:
+              path: /alive
+              port: http
+          {{- end }}
+          {{- with $v.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+{{- if .port }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .name }}
+  labels:
+    {{- include "chatserver.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ .name }}
+spec:
+  selector:
+    {{- include "chatserver.selectorLabels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ .name }}
+  ports:
+    - name: http
+      port: {{ .port }}
+      targetPort: http
+{{- end }}
+{{- end }}

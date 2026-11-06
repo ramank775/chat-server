@@ -1,0 +1,98 @@
+{{- /* The services of docker-compose.yml, with the same names and ports. */ -}}
+{{- $v := .Values }}
+{{- $redis := printf "- --cache-type=redis\n- --redis-endpoint=%s" $v.redis }}
+{{- define "chatserver.gatewayArgs" -}}
+{{ include "chatserver.httpArgs" (dict "root" . "port" 8000) }}
+- --gateway-name=$(POD_NAME)
+- --channel-ms-endpoint=http://channel:4002
+- --profile-ms-endpoint=http://profile:4000
+{{ include "chatserver.busArgs" (dict "root" . "group" "gateway") }}
+{{- end }}
+{{- define "chatserver.deliveryArgs" -}}
+- --channel-ms-endpoint=http://channel:4002
+- --profile-ms-endpoint=http://profile:4000
+- --redis-endpoint={{ .Values.redis }}
+{{ include "chatserver.busArgs" (dict "root" . "group" "message-delivery") }}
+{{ include "chatserver.dbArgs" (dict "root" . "stores" (list "undelivered-queue")) }}
+{{- end }}
+{{- define "chatserver.messageArgs" -}}
+{{ include "chatserver.httpArgs" (dict "root" . "port" 4003) }}
+{{ include "chatserver.dbArgs" (dict "root" . "stores" (list "undelivered-queue")) }}
+{{- end }}
+{{- define "chatserver.channelArgs" -}}
+{{ include "chatserver.httpArgs" (dict "root" . "port" 4002) }}
+- --media-ms-endpoint=http://media-metadata-ms:4001
+{{ include "chatserver.busArgs" (dict "root" . "group" "") }}
+{{ include "chatserver.dbArgs" (dict "root" . "stores" (list "channel-db")) }}
+{{- end }}
+{{- define "chatserver.profileArgs" -}}
+{{ include "chatserver.httpArgs" (dict "root" . "port" 4000) }}
+- --channel-ms-endpoint=http://channel:4002
+- --gateway-endpoint=http://ws-gateway:8000
+- --notification-ms-endpoint=http://notification:4004
+- --media-ms-endpoint=http://media-metadata-ms:4001
+- --auth-provider=self-hosted-otp
+- --sms-sender={{ .Values.sms.sender }}
+{{- if eq .Values.sms.sender "sms-gate-app" }}
+- --sms-gate-url={{ .Values.sms.gateUrl }}
+- --sms-gate-user=$(SMS_GATE_USER)
+- --sms-gate-password=$(SMS_GATE_PASSWORD)
+{{- else if eq .Values.sms.sender "telegram" }}
+- --telegram-bot-token=$(TELEGRAM_BOT_TOKEN)
+- --telegram-chat-id=$(TELEGRAM_CHAT_ID)
+{{- end }}
+{{ include "chatserver.busArgs" (dict "root" . "group" "") }}
+{{ include "chatserver.dbArgs" (dict "root" . "stores" (list "auth-db" "profile-db")) }}
+{{- end }}
+{{- define "chatserver.notificationArgs" -}}
+{{ include "chatserver.httpArgs" (dict "root" . "port" 4004) }}
+- --pn-service=webpush
+- --vapid-public-key={{ .Values.vapid.publicKey }}
+- --vapid-private-key=$(VAPID_PRIVATE_KEY)
+- --vapid-subject={{ .Values.vapid.subject }}
+{{ include "chatserver.busArgs" (dict "root" . "group" "notification-ms") }}
+{{ include "chatserver.dbArgs" (dict "root" . "stores" (list "notification-db")) }}
+{{- end }}
+{{- define "chatserver.mediaArgs" -}}
+{{ include "chatserver.httpArgs" (dict "root" . "port" 4001) }}
+- --media-storage=s3
+- --s3-endpoint={{ .Values.s3.endpoint }}
+{{- with .Values.s3.internalEndpoint }}
+- --s3-internal-endpoint={{ . }}
+{{- end }}
+- --s3-region={{ .Values.s3.region }}
+- --s3-bucket-name={{ .Values.s3.bucket }}
+- --s3-access-key-id=$(S3_ACCESS_KEY_ID)
+- --s3-secret-access-key=$(S3_SECRET_ACCESS_KEY)
+- --s3-force-path-style
+- --base-upload-dir={{ .Values.s3.baseDir }}
+- --url-expire-time=3600
+{{ include "chatserver.dbArgs" (dict "root" . "stores" (list "media-metadata-db")) }}
+{{- end }}
+{{ include "chatserver.service" (dict "root" . "name" "ws-gateway" "port" 8000 "replicas" 1
+  "script" "/app/services/connection-gateway/ws-gateway.js"
+  "args" (printf "%s\n%s" (include "chatserver.gatewayArgs" .) $redis)) }}
+---
+{{ include "chatserver.service" (dict "root" . "name" "message-delivery" "port" 0 "replicas" $v.replicas.messageDelivery
+  "script" "/app/services/message-delivery/message-delivery-worker.js"
+  "args" (include "chatserver.deliveryArgs" .)) }}
+---
+{{ include "chatserver.service" (dict "root" . "name" "message" "port" 4003 "replicas" $v.replicas.message
+  "script" "/app/services/message-ms/message-ms.js"
+  "args" (include "chatserver.messageArgs" .)) }}
+---
+{{ include "chatserver.service" (dict "root" . "name" "channel" "port" 4002 "replicas" $v.replicas.channel
+  "script" "/app/services/channel-ms/channel-ms.js"
+  "args" (printf "%s\n%s" (include "chatserver.channelArgs" .) $redis)) }}
+---
+{{ include "chatserver.service" (dict "root" . "name" "profile" "port" 4000 "replicas" $v.replicas.profile
+  "script" "/app/services/profile-ms/profile-ms.js"
+  "args" (printf "%s\n%s" (include "chatserver.profileArgs" .) $redis)) }}
+---
+{{ include "chatserver.service" (dict "root" . "name" "notification" "port" 4004 "replicas" $v.replicas.notification
+  "script" "/app/services/notification-ms/notification-ms.js"
+  "args" (include "chatserver.notificationArgs" .)) }}
+---
+{{ include "chatserver.service" (dict "root" . "name" "media-metadata-ms" "port" 4001 "replicas" $v.replicas.media
+  "script" "/app/services/media-ms/media-metadata-ms.js"
+  "args" (include "chatserver.mediaArgs" .)) }}

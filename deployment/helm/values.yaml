@@ -1,138 +1,108 @@
+# The microservice layout (decision 191) of docker-compose.yml, on
+# Kubernetes. The chart runs the services and nginx only: bring your own
+# database (mongo or postgres), event bus (NATS JetStream or Kafka), redis
+# and S3-compatible store, and point the values below at them.
+
 image:
-  registry: docker.io
-  repository: ramank775/vartalap
-  pullPolicy: IfNotPresent
-  # Overrides the image tag whose default is the chart appVersion.
+  repository: ramank775/chatserver
+  # defaults to the chart's appVersion
   tag: ""
+  pullPolicy: IfNotPresent
 
 imagePullSecrets: []
-nameOverride: ""
-fullnameOverride: ""
 
+# A Secret you create in the release's namespace; every service gets its
+# keys as env vars:
+#   OTP_ENCRYPTION_KEY, PHONE_PEPPER  required unless sms.sender is mock
+#                                     (deployment/README.md; never change PHONE_PEPPER)
+#   VAPID_PRIVATE_KEY                 required
+#   S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY  required
+#   DB_PASSWORD                       with mongo.user or pg.host set
+#   SMS_GATE_USER, SMS_GATE_PASSWORD  with sms.sender sms-gate-app
+#   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID  with sms.sender telegram
+#   FCM_SERVICE_ACCOUNT_KEY           optional: push for Play builds
+secretName: vartalap
+
+# mongo or pg, for every store and the timeline
+dbBackend: pg
+mongo:
+  # no credentials here: mongo.user plus DB_PASSWORD
+  url: mongodb://mongo:27017/chat?authSource=admin
+  user: ""
+pg:
+  host: postgres:5432
+  user: postgres
+  database: chat
+
+# nats or kafka. NATS needs JetStream streams `new-message` and
+# `offline-message` (subjects `<name>.>`), Kafka those two topics: the
+# services never create them (docker-compose.infra.yml shows how).
+eventStore: nats
+nats:
+  servers: nats://nats:4222
+kafka:
+  brokers: kafka:9092
+
+redis: redis:6379
+
+s3:
+  # what phones reach: it is signed into every upload and download link
+  endpoint: ""
+  # where media-ms reaches the store, when that differs from `endpoint`
+  internalEndpoint: ""
+  region: auto
+  bucket: vartalap
+  baseDir: media
+
+# mock, sms-gate-app or telegram (README, Testing without a SIM)
+sms:
+  sender: sms-gate-app
+  gateUrl: https://api.sms-gate.app
+
+vapid:
+  publicKey: ""
+  # a mailto: or https: contact
+  subject: ""
+
+# decision 192 (README, Forcing an app update); 0 turns each off
+minAppBuild: 85
+latestAppBuild: 0
+
+# appended to every service's flags, e.g. NATS or Kafka auth:
+# ["--nats-auth-type=token", "--nats-auth-token=$(NATS_TOKEN)"]
+# with NATS_TOKEN in the Secret
+extraArgs: []
+
+# ws-gateway stays at one: presence (who is online) lives in its process,
+# so with two a user would only see the people on their own gateway.
+replicas:
+  profile: 1
+  channel: 1
+  message: 1
+  notification: 1
+  media: 1
+  messageDelivery: 1
+
+resources: {}
 podAnnotations: {}
 
-podSecurityContext: {}
-# fsGroup: 2000
-
-securityContext: {}
-# capabilities:
-#   drop:
-#   - ALL
-# readOnlyRootFilesystem: true
-# runAsNonRoot: true
-# runAsUser: 1000
-
-service:
-  type: ClusterIP
-  port: 80
+# nginx, the only thing to expose: it runs the /auth check in front of
+# every service, as config/nginx/nginx.docker.conf does in compose
+nginx:
+  image: nginx:stable
+  # the cluster's dns, which nginx re-resolves the services through
+  resolver: kube-dns.kube-system.svc.cluster.local
+  clusterDomain: cluster.local
+  service:
+    type: ClusterIP
+    port: 80
 
 ingress:
   enabled: false
   className: ""
   annotations: {}
-  # kubernetes.io/ingress.class: nginx
-  # kubernetes.io/tls-acme: "true"
-  hosts:
-    - host: chart-example.local
-      paths:
-        - path: /
-          pathType: ImplementationSpecific
+  host: chat.example.com
   tls: []
-  #  - secretName: chart-example-tls
+  #  - secretName: chat-example-tls
   #    hosts:
-  #      - chart-example.local
-
-resources: {}
-# We usually recommend not to specify default resources and to leave this as a conscious
-# choice for the user. This also increases chances charts run on environments with little
-# resources, such as Minikube. If you do want to specify resources, uncomment the following
-# lines, adjust them as necessary, and remove the curly braces after 'resources:'.
-# limits:
-#   cpu: 100m
-#   memory: 128Mi
-# requests:
-#   cpu: 100m
-#   memory: 128Mi
-
-autoscaling:
-  enabled: false
-  minReplicas: 1
-  maxReplicas: 100
-  targetCPUUtilizationPercentage: 80
-  # targetMemoryUtilizationPercentage: 80
-
-nodeSelector: {}
-
-tolerations: []
-
-affinity: {}
-
-s3:
-  bucket:
-  secretAccesskey:
-  accessKeyId:
-
-firebase:
-  projectId:
-  adminCredentialPath:
-
-topic:
-  connectionState:
-  sendMessage:
-  ack:
-  systemMessage:
-  offlineMessage:
-  login:
-
-# Services configuration
-
-nginx:
-  enabled: true
-  configPath:
-  podAnnotations: {}
-
-gateway:
-  enabled: true
-  podAnnotations: {}
-
-# PostgreSQL connection string, read by every store (and the undelivered
-# queue) set to `pg`. The *DBType / dbType values below take mongo or pg.
-pg:
-  url: ""
-
-fileMs:
-  enabled: true
-  storageType: s3
-  uploadDir: /
-  urlExpiryTime: 3600
-  metadataDBType: mongo
-
-deliveryMs:
-  enabled: true
-  cacheType: redis
-  redis: redis:6379
-  dbType: mongo
-  # where the undelivered queue lives: mongo or pg (DECISIONS row 129)
-  undeliveredQueue: mongo
-
-profileMs:
-  enabled: true
-  authProvider: firebase
-  authDBType: mongo
-  profileDBType: mongo
-
-groupMs:
-  enabled: true
-  dbType: mongo
-
-notificationMs:
-  enabled: true
-  dbType: mongo
-  pushNotificationProvider: webpush
-  # AUTH_CONTRACT 5: the VAPID key pair (npx web-push generate-vapid-keys).
-  # The private key lives in a Secret under the key `privateKey`.
-  vapid:
-    publicKey: ""
-    subject: ""
-    privateKeySecret: notification-vapid
-  offlineMessagePrefix: persistence-message
+  #      - chat.example.com
