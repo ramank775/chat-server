@@ -16,7 +16,7 @@ const { SmsGatewayError, SmsGatewayUnavailableError } = require('./auth-provider
 const { HttpClient } = require('../../libs/http-client');
 const { TTL_SEC } = require('../../libs/delivery-manager/undelivered-queue');
 const {
-  EVENT_FLAGS, EnvelopeEvent, SERVER_EVENT_MARKER, serverNow
+  EVENT_FLAGS, EnvelopeEvent, SERVER_EVENT_MARKER, dmChannelId, opIdFor, serverNow
 } = require('../../libs/v3-envelope');
 const { validateUsername } = require('./username');
 const { PRESENCE, canSee } = require('./presence');
@@ -878,9 +878,10 @@ class ProfileMs extends HttpServiceBase {
 
   /**
    * SYNC_PROTOCOL 10.2/10.3 - a profile or username edit reaches every user
-   * sharing at least one channel with the editor, as a server-event envelope
-   * on the same topic (and so the same delivery path) as chat. Best effort:
-   * an edit already written is not failed by a fanout that could not publish.
+   * sharing at least one channel with the editor, and every connection with
+   * no block either way (decision 219), as a server-event envelope on the
+   * same topic (and so the same delivery path) as chat. Best effort: an edit
+   * already written is not failed by a fanout that could not publish.
    * @param {import('./database/profile/profile-db').User} user
    * @param {Partial<import('./database/profile/profile-db').User>} updates
    * @param {Date} now
@@ -910,11 +911,19 @@ class ProfileMs extends HttpServiceBase {
     }
     if (!events.length || !this.newMessageTopic) return;
     try {
-      const { recipients, channelId } = await this.coMembers(user.user_id);
-      if (!recipients.length) return;
+      const { recipients, channelId, connections } = await this.coMembers(user.user_id);
       for (let i = 0; i < events.length; i += 1) {
         // eslint-disable-next-line no-await-in-loop
-        await this.publishServerEvent(events[i], recipients, channelId);
+        if (recipients.length) await this.publishServerEvent(events[i], recipients, channelId);
+        // A connection in no group with the editor gets it addressed like a
+        // 1:1 frame (as an invite is, §23.3): their phone derives the pair's
+        // channel from the actor in the op_id and itself as the peer.
+        // ponytail: one envelope per such connection; one shared envelope
+        // needs a channel every recipient has, which a DM is not.
+        // eslint-disable-next-line no-await-in-loop
+        await Promise.all(connections.map((id) => this.publishServerEvent(
+          events[i], [id], dmChannelId(user.user_id, id), { peer: id, actor: user.user_id }
+        )));
       }
     } catch (error) {
       this.log.error(`Profile fanout failed for ${user.user_id}: ${error.message}`);
@@ -925,16 +934,20 @@ class ProfileMs extends HttpServiceBase {
    * Every user sharing a channel with `userId`, and one of those channels to
    * carry the envelope. A profile edit is not channel scoped but `Envelope`
    * is, so every recipient gets the same arbitrary shared channel id; the
-   * client only uses it to record the op id (SYNC_PROTOCOL 10.2).
+   * client only uses it to record the op id (SYNC_PROTOCOL 10.2). Plus
+   * `connections`: who `userId` is connected with, no block either way, and
+   * shares no group with (decision 219).
    * @param {string} userId
    */
   async coMembers(userId) {
     // the internal list: this runs on the user's behalf, not on a request of
     // theirs, so it must not go through the authenticated prefix. Groups are
     // the only rows left (trim 4), so one call is the whole set.
-    const channels = await this.channelClient.get('/_internal/', {
-      headers: { 'x-user': userId }
-    });
+    const [channels, { connected }] = await Promise.all([
+      this.channelClient.get('/_internal/', { headers: { 'x-user': userId } }),
+      // no `users`: all of their connections
+      this.channelClient.post('/_internal/connections/pairs', { user_id: userId })
+    ]);
     const members = new Set();
     let channelId = null;
     // the same view the client gets: `channel_id`, and members as user ids
@@ -944,7 +957,11 @@ class ProfileMs extends HttpServiceBase {
     });
     // 10.3 rule 4: the editor does not receive their own fanout
     members.delete(userId);
-    return { recipients: [...members], channelId };
+    return {
+      recipients: [...members],
+      channelId,
+      connections: connected.filter((id) => !members.has(id) && id !== userId)
+    };
   }
 
   /**
@@ -953,12 +970,15 @@ class ProfileMs extends HttpServiceBase {
    * @param {object} body populated `ServerEventPayload`
    * @param {string[]} recipients
    * @param {string} channelId
+   * @param {{peer?: string, actor?: string}} [dm] a 1:1 addressed event: the
+   *   op_id carries the actor's user bits, `peer` is its one recipient
    */
-  async publishServerEvent(body, recipients, channelId) {
+  async publishServerEvent(body, recipients, channelId, { peer = '', actor = '' } = {}) {
     const nowMs = serverNow();
     const envelope = {
-      opId: uuidv4(),
+      opId: actor ? opIdFor(actor) : uuidv4(),
       channelId,
+      peer,
       payload: encodeServerEvent(body),
       senderUserId: '', // server authored
       serverTimestampMs: nowMs,

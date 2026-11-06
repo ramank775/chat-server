@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const { join } = require('path');
 const protobufjs = require('protobufjs');
 const {
-  EVENT_FLAGS, EnvelopeEvent, SERVER_EVENT_MARKER
+  EVENT_FLAGS, EnvelopeEvent, SERVER_EVENT_MARKER, dmChannelId, opIdUserBits
 } = require('../libs/v3-envelope');
 const { startProfileMs, signupWithUsername, bearer } = require('./helpers/profile-ms');
 
@@ -43,6 +43,8 @@ describe('REST-write fanout (SYNC_PROTOCOL 10.2)', () => {
       return {
         recipients,
         channelId: envelope.channelId,
+        peer: envelope.peer,
+        opId: envelope.opId,
         serverTimestampMs: envelope.serverTimestampMs,
         body: ServerEventPayload.toObject(
           ServerEventPayload.decode(envelope.payload.subarray(1)),
@@ -163,6 +165,35 @@ describe('REST-write fanout (SYNC_PROTOCOL 10.2)', () => {
     from = app.eventStore.events.length;
     assert.equal((await patch(editor.accesskey, { usernameKey: '1234' })).statusCode, 200);
     assert.deepEqual(emitted(from), []);
+  });
+
+  test('a profile edit reaches connections too, addressed 1:1, never across a block', async () => {
+    const editor = await signupWithUsername(app, { phone: '+919500000010', username: 'editor_five' });
+    const friend = await signupWithUsername(app, { phone: '+919500000011', username: 'friend_five' });
+    const mate = await signupWithUsername(app, { phone: '+919500000012', username: 'mate_five' });
+    const blocked = await signupWithUsername(app, { phone: '+919500000013', username: 'blocked_five' });
+    app.connect(editor, friend);
+    app.connect(editor, mate);
+    app.connect(editor, blocked);
+    app.block(blocked, editor);
+    const group = '01efabcd-7000-8000-8abc-000000000006';
+    app.stubChannels([{ channel_id: group, members: [editor.user_id, mate.user_id] }]);
+
+    const from = app.eventStore.events.length;
+    const res = await patch(editor.accesskey, { avatarUrl: 'http://a/new' });
+    assert.equal(res.statusCode, 200);
+
+    const events = emitted(from);
+    assert.equal(events.length, 2, 'the group once, the friend once; the blocker never');
+    assert.deepEqual(events[0].recipients, [mate.user_id]);
+    assert.equal(events[0].channelId, group, 'a co-member hears it on the group, once');
+    assert.deepEqual(events[1].recipients, [friend.user_id]);
+    assert.equal(events[1].peer, friend.user_id, 'addressed like a 1:1 frame');
+    assert.equal(events[1].channelId, dmChannelId(editor.user_id, friend.user_id),
+      'the pair\'s derived channel, which the wire leaves to the phone');
+    assert.equal(opIdUserBits(events[1].opId), parseInt(editor.user_id, 16),
+      'the actor in the op_id: the phone derives the pair\'s channel from it');
+    assert.equal(events[1].body.profileEdited.avatarUrl, 'http://a/new');
   });
 
   test('a channel-ms outage does not fail the edit', async () => {

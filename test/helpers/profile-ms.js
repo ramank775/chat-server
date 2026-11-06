@@ -129,9 +129,14 @@ async function startProfileMs(dbName, { seed } = {}) {
   service.channelClient.post = async (path, payload) => {
     if (path === '/_internal/connections/pairs') {
       const pair = (other) => linkOf(payload.user_id, other);
+      // no `users`: all of their connections
+      const users = payload.users || [...links]
+        .map((link) => link.split(':'))
+        .filter((ids) => ids.includes(payload.user_id))
+        .map(([a, b]) => (a === payload.user_id ? b : a));
       return {
-        connected: payload.users.filter((o) => links.has(pair(o)) && !blocks.has(pair(o))),
-        blocked: payload.users.filter((o) => blocks.has(pair(o)))
+        connected: users.filter((o) => links.has(pair(o)) && !blocks.has(pair(o))),
+        blocked: users.filter((o) => blocks.has(pair(o)))
       };
     }
     groupRemovals.push(payload);
