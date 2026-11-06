@@ -312,6 +312,16 @@ class ChannelMs extends HttpServiceBase {
       validate: { headers: schemas.authHeaders }
     });
 
+    // profile-ms' timeline: who a post may go to
+    this.addInternalRoute('/connections/reach', 'POST', this.reach.bind(this), {
+      validate: {
+        payload: Joi.object({
+          user_id: USER_ID.required(),
+          users: Joi.array().items(USER_ID).max(1000).required()
+        })
+      }
+    });
+
     this.addInternalRoute('/members/remove', 'POST', this.removeEverywhere.bind(this), {
       validate: { payload: Joi.object({ user_id: USER_ID.required() }) }
     });
@@ -864,6 +874,19 @@ class ChannelMs extends HttpServiceBase {
     const { user_id: reported, messages } = req.payload;
     await this.db.addReport({ reporter: user, reported, messages });
     return res.response({ reported }).code(201);
+  }
+
+  /**
+   * `POST /_internal/connections/reach {user_id, users}` — of `users`, those
+   * `user_id` is connected to with no block either way: who a timeline post
+   * may go to (decision 223).
+   */
+  async reach(req) {
+    const { user_id: user, users } = req.payload;
+    const pairs = await Promise.all(users.map((other) => this.db.pair(user, other)));
+    return {
+      users: users.filter((_, i) => pairs[i].connected && !pairs[i].aBlockedB && !pairs[i].bBlockedA)
+    };
   }
 
   /**

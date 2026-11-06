@@ -121,7 +121,13 @@ async function startProfileMs(dbName, { seed } = {}) {
   // channel-ms's remove-everywhere and media-ms's file delete (AUTH_CONTRACT 8.2)
   const groupRemovals = [];
   const fileDeletes = [];
-  service.channelClient.post = async (_path, payload) => {
+  // and channel-ms's connections, for the timeline's audience (decision 219)
+  const links = new Set();
+  const linkOf = (a, b) => (a < b ? `${a}:${b}` : `${b}:${a}`);
+  service.channelClient.post = async (path, payload) => {
+    if (path === '/_internal/connections/reach') {
+      return { users: payload.users.filter((other) => links.has(linkOf(payload.user_id, other))) };
+    }
     groupRemovals.push(payload);
     return { removed: 0 };
   };
@@ -147,6 +153,10 @@ async function startProfileMs(dbName, { seed } = {}) {
      */
     stubChannels(rows) {
       channels = rows;
+    },
+    /** Stand in for an accepted invite between two users (decision 219). */
+    connect(a, b) {
+      links.add(linkOf(a.user_id, b.user_id));
     },
     /**
      * @param {import('light-my-request').InjectOptions} request

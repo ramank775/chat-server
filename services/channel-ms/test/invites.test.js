@@ -269,6 +269,19 @@ test('a report keeps up to the last 5 messages, 90 days', async () => {
   assert.strictEqual(await count(), 0);
 });
 
+test('a timeline post reaches connections only, and no one blocked either way', async () => {
+  // ANNA is connected with BEN, CHLOE, DEV (migration) and EVA
+  const reach = async (user, users) => body(await harness.inject({
+    method: 'POST', url: '/_internal/connections/reach', payload: { user_id: user, users }
+  })).users;
+  await call('POST', '/blocks', DEV, { user_id: ANNA });
+  await call('POST', '/blocks', ANNA, { user_id: CHLOE });
+  assert.deepStrictEqual(await reach(ANNA, [BEN, CHLOE, DEV, EVA, ANNA, 'f0f0f0f0f']), [BEN, EVA]);
+  await call('DELETE', `/blocks/${ANNA}`, DEV);
+  await call('DELETE', `/blocks/${CHLOE}`, ANNA);
+  assert.deepStrictEqual(await reach(ANNA, [CHLOE, DEV]), [CHLOE, DEV]);
+});
+
 test('a deleted account takes its invites, connections and blocks with it', async () => {
   await call('POST', '/blocks', EVA, { user_id: DEV });
   const removed = await harness.inject({

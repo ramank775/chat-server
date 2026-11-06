@@ -151,16 +151,13 @@ class Timeline {
 
   /**
    * Of `users`, the ones `poster` may share with. Decision 219: people they
-   * are connected to.
-   * ponytail: DMs leave no row on the server (trim 4), so until the invites
-   * track's connections land this only drops ids that are no live account;
-   * swap the filter for their connection check, one line.
+   * are connected to, with no block either way (channel-ms keeps both).
    */
   async connectedTo(poster, users) {
-    const live = await Promise.all(
-      users.map((user) => this.service.profileDB.getByUserId(user))
+    const { users: reach } = await this.service.channelClient.post(
+      '/_internal/connections/reach', { user_id: poster, users }
     );
-    return users.filter((user, i) => user !== poster && live[i]);
+    return reach;
   }
 
   async createPost(req, res) {

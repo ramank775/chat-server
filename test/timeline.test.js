@@ -20,6 +20,9 @@ describe('timeline', () => {
     asha = await signupWithUsername(app, { phone: '+919300000001', username: 'tl_asha' });
     ravi = await signupWithUsername(app, { phone: '+919300000002', username: 'tl_ravi' });
     meena = await signupWithUsername(app, { phone: '+919300000003', username: 'tl_meena' });
+    app.connect(asha, ravi);
+    app.connect(asha, meena);
+    app.connect(meena, ravi);
   });
 
   after(async () => {
@@ -112,9 +115,20 @@ describe('timeline', () => {
       assert.equal((await feed(ravi)).posts.filter((p) => p.postId === postId).length, 1);
     });
 
+  test('a post goes only to connections: a stranger is dropped (decision 219)', async () => {
+    const stranger = await signupWithUsername(app, { phone: '+919300000008', username: 'tl_stranger' });
+    const res = await post(asha, { text: 'family only', audience: [ravi.user_id, stranger.user_id] });
+    assert.equal(res.statusCode, 201);
+    assert.deepEqual(body(res).audience, [ravi.user_id]);
+    assert.equal((await feed(stranger)).posts.length, 0);
+    const alone = await post(stranger, { text: 'hello?', audience: [asha.user_id] });
+    assert.equal(body(alone).error.code, 'NOT_CONNECTED');
+  });
+
   test('the feed pages newest first', async () => {
     const pager = await signupWithUsername(app, { phone: '+919300000004', username: 'tl_pager' });
     const reader = await signupWithUsername(app, { phone: '+919300000005', username: 'tl_reader' });
+    app.connect(pager, reader);
     const texts = ['one', 'two', 'three'];
     for (let i = 0; i < texts.length; i += 1) {
       // eslint-disable-next-line no-await-in-loop
@@ -129,6 +143,7 @@ describe('timeline', () => {
 
   test('posting is rate limited', async () => {
     const busy = await signupWithUsername(app, { phone: '+919300000006', username: 'tl_busy' });
+    app.connect(busy, ravi);
     const codes = [];
     for (let i = 0; i < 11; i += 1) {
       // eslint-disable-next-line no-await-in-loop
@@ -139,6 +154,7 @@ describe('timeline', () => {
 
   test('a post and its photos go after the retention, and with the account', async () => {
     const old = await signupWithUsername(app, { phone: '+919300000007', username: 'tl_old' });
+    app.connect(old, ravi);
     await post(old, { photos: [{ fileId: 'f-old' }], audience: [ravi.user_id] });
     await app.server.timeline.sweepExpired(Date.now() - 24 * 60 * 60 * 1000);
     assert.equal(body(await call(old, 'GET', '/timeline/posts/mine')).posts.length, 1,
