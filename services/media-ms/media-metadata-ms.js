@@ -149,6 +149,9 @@ class MediaMetadataMS extends HttpServiceBase {
    * photo of a post that failed, and one whose delete failed. Profile and
    * group photos never expire. A failed delete stays marked and is retried
    * by the next sweep.
+   * ponytail: an orphaned timeline photo waits out the whole retention; if
+   * that ever matters, have createPost claim its photos and sweep unclaimed
+   * ones after an hour.
    */
   async sweepExpired(now = Date.now()) {
     const { mediaTtlDays, timelineRetentionDays } = this.options;

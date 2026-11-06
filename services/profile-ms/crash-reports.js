@@ -81,18 +81,24 @@ function pgStore(context) {
   };
 }
 
+/** The store, on the backend `--profile-db` picks, as `crashReportDB`. */
+async function initialize(context) {
+  const db = (context.options.profileDb === 'pg' ? pgStore : mongoStore)(context);
+  await db.init();
+  context.crashReportDB = db;
+  return context;
+}
+
 class CrashReports {
   /** @param {import('./profile-ms').ProfileMs} service */
   constructor(service) {
     this.service = service;
     this.options = service.options;
+    this.db = service.context.crashReportDB;
   }
 
-  /** On the backend `--profile-db` picks, sharing its client. */
-  async addRoutes() {
+  addRoutes() {
     const s = this.service;
-    this.db = (this.options.profileDb === 'pg' ? pgStore : mongoStore)(s.context);
-    await this.db.init();
     // ungated: a crash before the username is picked is reported too
     s.addRoute('/crash-reports', 'POST', s.guard(this.report.bind(this)), {
       pre: [s.authPre(false)],
@@ -119,4 +125,4 @@ class CrashReports {
   }
 }
 
-module.exports = { CrashReports, addCrashReportOptions };
+module.exports = { CrashReports, addCrashReportOptions, initialize };
