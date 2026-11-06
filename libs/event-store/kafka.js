@@ -1,4 +1,5 @@
 const fs = require('fs');
+const { Option } = require('commander');
 const { Kafka, logLevel } = require('kafkajs');
 const { IEventStore } = require('./iEventStore');
 
@@ -56,10 +57,15 @@ function addStandardKafkaOptions(cmd) {
       60000
     )
     .option(
-      '--kafka-max-in-flight-reqeusts <max-in-flight-request>',
-      'Max number of requests that may be in progress at any time. If falsey then no limit',
-      (c) => Number(c),
-      0
+      '--kafka-max-in-flight-requests <max-in-flight-requests>',
+      'Max number of requests that may be in progress at any time (default no limit)',
+      (c) => Number(c)
+    )
+    // the flag's old, misspelt name: still accepted, never read before
+    .addOption(
+      new Option('--kafka-max-in-flight-reqeusts <max-in-flight-requests>')
+        .argParser((c) => Number(c))
+        .hideHelp()
     )
     .option(
       '--kafka-session-timeout <session-timeout>',
@@ -205,6 +211,11 @@ function parseKafkaSSLOptions(options) {
 
 }
 
+/** Either spelling of the flag; undefined is kafkajs' no limit. */
+function maxInFlightRequests(options) {
+  return options.kafkaMaxInFlightRequests ?? options.kafkaMaxInFlightReqeusts;
+}
+
 /**
  * Prepare Producer options.
  * @param {Object} options
@@ -215,7 +226,7 @@ function parseKakfaProducerOptions(options) {
     metadataMaxAge: options.kafkaMetadataMaxAge,
     allowAutoTopicCreation: false,
     transactionTimeout: options.kafkaTransactionTimeout,
-    maxInFlightRequests: options.kafkaMaxInFlightRequests
+    maxInFlightRequests: maxInFlightRequests(options)
   };
   return kafkaProducerOptions;
 }
@@ -233,10 +244,10 @@ function parseKakfaConsumerOptions(options) {
     heartbeatInterval: options.kafkaHeartbeatInterval,
     metadataMaxAge: options.kafkaMetadataMaxAge,
     allowAutoTopicCreation: false,
-    maxInFlightRequests: options.kafkaMaxInFlightRequests,
+    maxInFlightRequests: maxInFlightRequests(options),
     maxBytesPerPartition: options.kafkaMaxBytesPerPartition,
     minBytes: options.kafkaMinBytes,
-    maxBytes: options.kafakMaxBytes,
+    maxBytes: options.kafkaMaxBytes,
     maxWaitTimeInMs: options.kafkaMaxWaitTime
   };
   return kafkaConsumerOptions;
@@ -558,5 +569,7 @@ async function initialize(context, options) {
 module.exports = {
   code: 'kafka',
   initOptions,
-  initialize
+  initialize,
+  parseKakfaProducerOptions,
+  parseKakfaConsumerOptions
 };

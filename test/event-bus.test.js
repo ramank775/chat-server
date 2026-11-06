@@ -1,6 +1,10 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { MemoryEventBus } = require('../libs/event-store/memory');
+const { initDefaultOptions } = require('../libs/service-base');
+const {
+  initOptions, parseKakfaProducerOptions, parseKakfaConsumerOptions
+} = require('../libs/event-store/kafka');
 
 const { describe, it } = test;
 
@@ -79,5 +83,27 @@ describe('the in-process event bus', () => {
     unsubscribe();
     await bus.publish('topic', 'two', 'key', noError);
     assert.deepEqual(log, ['consumer:topic:one']);
+  });
+});
+
+describe('the kafka flags', () => {
+  const parse = (...flags) => initOptions(initDefaultOptions()).parse(['node', 'x', ...flags]).opts();
+
+  it('reads --kafka-max-bytes and --kafka-max-in-flight-requests', () => {
+    const options = parse('--kafka-max-bytes=2048', '--kafka-max-in-flight-requests=4');
+    assert.equal(parseKakfaConsumerOptions(options).maxBytes, 2048);
+    assert.equal(parseKakfaConsumerOptions(options).maxInFlightRequests, 4);
+    assert.equal(parseKakfaProducerOptions(options).maxInFlightRequests, 4);
+  });
+
+  it('still accepts the old misspelt in-flight flag', () => {
+    const options = parse('--kafka-max-in-flight-reqeusts=2');
+    assert.equal(parseKakfaProducerOptions(options).maxInFlightRequests, 2);
+  });
+
+  it('leaves both at kafkajs defaults when unset', () => {
+    const consumer = parseKakfaConsumerOptions(parse());
+    assert.equal(consumer.maxBytes, 10485760);
+    assert.equal(consumer.maxInFlightRequests, undefined);
   });
 });
