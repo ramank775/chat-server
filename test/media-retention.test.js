@@ -32,7 +32,7 @@ before(async () => {
   service = new MediaMetadataMS({
     ...context,
     // no timer: the test runs the sweep itself
-    options: { ...options, port: 0, host: '127.0.0.1', mediaTtlDays: 0 },
+    options: { ...options, port: 0, host: '127.0.0.1', mediaTtlDays: 0, timelineRetentionDays: 0 },
     log: { info: noop, error: noop, debug: noop },
     statsClient: { increment: noop, timing: noop },
     storage: {
@@ -47,6 +47,7 @@ before(async () => {
   });
   await service.init();
   service.options.mediaTtlDays = 30;
+  service.options.timelineRetentionDays = 30;
 });
 
 after(async () => {
@@ -104,4 +105,14 @@ test('the internal delete removes only the named owner\'s file', async () => {
   assert.deepEqual(await remove(OWNER), { deleted: true });
   assert.equal(await service.db.getRecord(photo), null);
   assert.deepEqual(deleted.at(-1), { fileId: photo, category: 'profile' });
+});
+
+test('a timeline photo goes a day after the timeline retention, posted or not', async () => {
+  const photo = await stored(undefined, 'timeline');
+  const at = Date.now();
+  await service.sweepExpired(at + 30 * DAY_MS);
+  assert.ok(await service.db.getRecord(photo), 'kept while a post may still name it');
+  await service.sweepExpired(at + 31 * DAY_MS + 1000);
+  assert.equal(await service.db.getRecord(photo), null);
+  assert.ok(deleted.some((f) => f.fileId === photo && f.category === 'timeline'));
 });

@@ -33,6 +33,13 @@ function parseOptions(argv) {
     (c) => Number(c),
     30
   );
+  // the same flag as profile-ms', which deletes the posts
+  cmd.option(
+    '--timeline-retention-days <days>',
+    'Delete a timeline photo a day after this many days (0 = keep forever)',
+    (c) => Number(c),
+    30
+  );
   return cmd.parse(argv).opts();
 }
 
@@ -113,7 +120,7 @@ class MediaMetadataMS extends HttpServiceBase {
       }
     });
 
-    if (this.options.mediaTtlDays > 0) {
+    if (this.options.mediaTtlDays > 0 || this.options.timelineRetentionDays > 0) {
       this.sweepTimer = setInterval(() => {
         this.sweepExpired().catch((error) => this.log.error(`Media sweep failed: ${error.message}`));
       }, SWEEP_EVERY_MS).unref();
@@ -137,14 +144,24 @@ class MediaMetadataMS extends HttpServiceBase {
 
   /**
    * A message file is deleted --media-ttl-days after anyone last sent it
-   * (reuse restarts the clock). Profile and group photos never expire. A
-   * failed delete stays marked and is retried by the next sweep.
+   * (reuse restarts the clock). A timeline photo goes a day after the
+   * timeline's retention, when any post naming it is gone: this takes the
+   * photo of a post that failed, and one whose delete failed. Profile and
+   * group photos never expire. A failed delete stays marked and is retried
+   * by the next sweep.
    */
   async sweepExpired(now = Date.now()) {
-    const cutoff = new Date(now - this.options.mediaTtlDays * DAY_MS);
-    const batch = await this.db.markExpired('message', cutoff, SWEEP_BATCH);
+    const { mediaTtlDays, timelineRetentionDays } = this.options;
+    if (mediaTtlDays > 0) await this.sweep('message', new Date(now - mediaTtlDays * DAY_MS));
+    if (timelineRetentionDays > 0) {
+      await this.sweep('timeline', new Date(now - (timelineRetentionDays + 1) * DAY_MS));
+    }
+  }
+
+  async sweep(category, cutoff) {
+    const batch = await this.db.markExpired(category, cutoff, SWEEP_BATCH);
     await Promise.all(batch.map((file) => this.deleteFile(String(file._id), file.category)));
-    if (batch.length === SWEEP_BATCH) await this.sweepExpired(now);
+    if (batch.length === SWEEP_BATCH) await this.sweep(category, cutoff);
   }
 
   async updateFileUploadStatus(req, h) {
