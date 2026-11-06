@@ -182,6 +182,13 @@ tags:
   - name: v1.0
   - name: v1.0 > Assets
     description: File service endpoint to upload and download files
+  - name: v3.0 > Discovery
+    description: >-
+      Finding people (AUTH_CONTRACT 7, decision 223). The server keeps a phone
+      number only as its phone key, HMAC-SHA256 under the server secret
+      `PHONE_PEPPER` of the SHA-256 hex of the E.164 number, which is also what
+      the app sends to look a number up. Username lookups are unaffected by
+      discoverability.
   - name: v3.0 > Push
     description: >-
       Web Push (RFC 8030) endpoint registration, AUTH_CONTRACT 5. Every wake is
@@ -207,6 +214,129 @@ tags:
       sender) decides the push wake, and bits 1-4 carry the frame class,
       which sets a receipt's 7-day retention (decision 220).
 paths:
+  /v3.0/auth/otp/resend:
+    post:
+      tags:
+        - v3.0 > Discovery
+      summary: Send the same code of a pending challenge again
+      description: >-
+        AUTH_CONTRACT 3.3. The server keeps no number to send to (decision
+        223), so the request names it; it must be the number the challenge
+        was started for (else 404 `SESSION_NOT_FOUND`, and no SMS). Without
+        `phone` (an app from before) the answer is 410 `RESEND_UNAVAILABLE`
+        and the app starts over with `/auth/otp/send`. Verify, rebind verify
+        and `GET /users/me` no longer echo `phone`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sessionId]
+              properties:
+                sessionId:
+                  type: string
+                phone:
+                  type: string
+                  description: E.164
+      responses:
+        '200':
+          description: '{sessionId, resendAfterSec, expiresInSec, isExistingAccount}'
+        '404':
+          description: SESSION_NOT_FOUND
+        '410':
+          description: RESEND_UNAVAILABLE, SESSION_EXPIRED or SESSION_CONSUMED
+        '423':
+          description: SESSION_LOCKED
+        '429':
+          description: OTP_RATE_LIMITED
+  /v3.0/contacts/lookup:
+    post:
+      tags:
+        - v3.0 > Discovery
+      summary: Which of these phone numbers may the caller find
+      description: >-
+        AUTH_CONTRACT 7.2. Every phone lookup of the app, a shared contact
+        card included. A match is left out, exactly like an unknown number,
+        when its account is discoverable by `nobody`, or by `chosen` and the
+        caller's own number is not on its list. At most 5,000 hashes a
+        request and 20 requests a minute per account, no daily budget
+        (decision 208). Checking a `chosen` account costs a scrypt: past 300
+        such checks a minute per caller the rest are left out too, and the
+        app asks again after its 15 minute cooldown.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phoneHashes]
+              properties:
+                phoneHashes:
+                  type: array
+                  minItems: 1
+                  maxItems: 5000
+                  items:
+                    type: string
+                    pattern: '^[0-9a-f]{64}$'
+                    description: SHA-256 hex of the E.164 number
+      responses:
+        '200':
+          description: '{matches: [{phoneHash, user_id, username}]}'
+        '400':
+          description: BATCH_TOO_LARGE or validation_failed
+        '401':
+          $ref: '#/components/responses/AuthError'
+        '403':
+          $ref: '#/components/responses/AuthError'
+        '429':
+          description: RATE_LIMITED (retryAfterSec 60)
+  /v3.0/users/me/discoverability:
+    put:
+      tags:
+        - v3.0 > Discovery
+      summary: Who may find this account by phone number
+      description: >-
+        Decision 223. `everyone`: anyone with the number. `chosen`: only the
+        numbers in `phoneHashes` (the whole list each time, at most 500).
+        `nobody`: only by username. An account that never chose is
+        `everyone`; `GET /users/me` returns the current `discoverability`.
+        The list is stored only as tokens, scrypt(user_id + phone key,
+        salt PHONE_PEPPER), so it cannot be read back: the app keeps its own
+        copy. Leaving `chosen` deletes the tokens. 20 saves an hour.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mode]
+              properties:
+                mode:
+                  type: string
+                  enum: [everyone, chosen, nobody]
+                phoneHashes:
+                  type: array
+                  maxItems: 500
+                  description: Required with `chosen`, refused otherwise
+                  items:
+                    type: string
+                    pattern: '^[0-9a-f]{64}$'
+      responses:
+        '200':
+          description: '{mode, count}: count is the number of distinct entries kept'
+        '400':
+          description: validation_failed
+        '401':
+          $ref: '#/components/responses/AuthError'
+        '403':
+          $ref: '#/components/responses/AuthError'
+        '429':
+          description: RATE_LIMITED
   /v3.0/keys/me:
     put:
       summary: Register or replenish this authenticated device's public E2EE keys

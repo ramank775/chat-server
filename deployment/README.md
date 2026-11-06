@@ -49,6 +49,8 @@ not render. Deploy 3.0 as the monolith.
      the OTP copy used by Resend; verification still checks the hash. Changing
      it prevents resending pending codes for up to 10 minutes; their original
      codes can still verify. This fresh release expects a new database schema.
+   - `PHONE_PEPPER`: `openssl rand -hex 32`, generated on the server, never
+     committed. See "Phone pepper" below before you ever touch it again.
    - VAPID keys: generate once and keep them. A new pair silences push on every installed phone until it re-registers.
      ```bash
      docker run --rm --entrypoint npx ramank775/chatserver:<tag> web-push generate-vapid-keys
@@ -108,6 +110,26 @@ docker compose -f docker-compose.prod.yml up -d
 Phones reconnect by themselves. Nothing is lost while the server is down: senders keep messages
 queued, and what the server already acknowledged is in Postgres.
 
+## Phone pepper
+
+The server never stores a phone number (decision 223). It keeps
+HMAC-SHA256(`PHONE_PEPPER`, SHA-256 of the number): login, contact lookup
+and the "who can find me" lists all match on that, and the first start of a
+release with it rewrites older rows the same way and drops the plain number.
+
+- Generate it once on the server (`openssl rand -hex 32`) into `.env`.
+  Never commit it, never paste it anywhere else. Back it up with the
+  database: a restored dump is useless without the pepper it was keyed with.
+- **Rotation is not supported.** With the numbers gone, the server cannot
+  re-key them: a new pepper would make every existing account unfindable
+  and sign each returning user up as a new account. The database records a
+  fingerprint of the pepper, and the app refuses to start with another one
+  ("PHONE_PEPPER differs from the one this database was keyed with").
+  If the pepper leaks, it alone reveals nothing; with a copy of the
+  database it lets someone test numbers against the stored keys. A real
+  rotation would need every user to log in again with an OTP, which hands
+  the server the number to re-key; it is not built.
+
 ## Forcing an app update
 
 Two `.env` values steer old apps (decision 192). Both are Android
@@ -137,7 +159,8 @@ it within 30 days of the email:
 3. Go on only when the reply carries that code. Someone who no longer has
    the number must get it back from their carrier first.
 4. Run this with the number and username from the email (`null`, unquoted,
-   for an account that never picked a username):
+   for an account that never picked a username). The server matches the
+   number by its keyed hash; it has no plain numbers to search:
 
 ```bash
 docker compose -f docker-compose.prod.yml exec app wget -qO- \
