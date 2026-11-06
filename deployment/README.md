@@ -10,7 +10,8 @@ and phones talk to R2 directly. Postgres is the only state on the server.
 `docker-compose.monolith.yml` (with `.env.tmpl`) is the local development stack. The
 microservice layout (`docker-compose.infra.yml` plus `docker-compose.yml`, and
 `helm/`) stays supported but has not caught up with 3.0 yet: the compose stack
-gives profile-ms no `OTP_ENCRYPTION_KEY`, and the helm chart is still v2 and does
+gives profile-ms no `OTP_ENCRYPTION_KEY` or `PHONE_PEPPER` (fine only with the
+mock SMS sender), and the helm chart is still v2 and does
 not render. Deploy 3.0 as the monolith.
 
 ## What you need
@@ -116,6 +117,8 @@ The server never stores a phone number (decision 223). It keeps
 HMAC-SHA256(`PHONE_PEPPER`, SHA-256 of the number): login, contact lookup
 and the "who can find me" lists all match on that, and the first start of a
 release with it rewrites older rows the same way and drops the plain number.
+Take a dump first (Backups): an older image cannot run on the rewritten
+database, so going back means restoring that dump.
 
 - Generate it once on the server (`openssl rand -hex 32`) into `.env`.
   Never commit it, never paste it anywhere else. Back it up with the
