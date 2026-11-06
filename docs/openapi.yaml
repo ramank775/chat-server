@@ -180,7 +180,7 @@ components:
       enum: [everyone, contacts, nobody]
       default: everyone
       description: >-
-        Who sees the user's last seen and online (SYNC_PROTOCOL 21).
+        Who sees the user's last seen and online (SYNC_PROTOCOL 22).
         `contacts`: users who have each written to the other in a DM.
         Reciprocal: one sees another's only while each shares with the
         other.
@@ -311,7 +311,7 @@ tags:
       is read from the op_id; `Envelope.flags` bit 0 (SILENT, set by the
       sender) decides the push wake, and bits 1-4 carry the frame class,
       which sets a receipt's 7-day retention (decision 220). Class 8
-      PRESENCE (SYNC_PROTOCOL 21) is ephemeral and between a phone and the
+      PRESENCE (SYNC_PROTOCOL 22) is ephemeral and between a phone and the
       server only: a phone's presence op (`peer` = whom it watches, payload
       `0x53` + `Presence{online}`) is never acked or fanned out, and the
       server answers with, and pushes changes as, PRESENCE frames whose
@@ -347,7 +347,7 @@ paths:
       summary: Change profile fields, among them the presence setting
       description: >-
         AUTH_CONTRACT 4.5 for the other fields. A new `presence` reaches
-        whoever watches this user at once (SYNC_PROTOCOL 21).
+        whoever watches this user at once (SYNC_PROTOCOL 22).
       security:
         - bearerAuth: []
       requestBody:
