@@ -22,6 +22,10 @@ class MongoProfileDB extends IProfileDB {
   /** @type { import('mongodb').Collection } */
   #collection;
 
+  /** SYNC_PROTOCOL §22: `{user_id, peer}`, `user_id` wrote to `peer` in a DM. */
+  /** @type { import('mongodb').Collection } */
+  #dmContacts;
+
   constructor(context) {
     super(context);
     this.#client = initMongoClient(context);
@@ -137,8 +141,33 @@ class MongoProfileDB extends IProfileDB {
     }
   }
 
+  async addDmContact(userId, peer) {
+    await this.#dmContacts.updateOne(
+      { user_id: userId, peer },
+      { $setOnInsert: { user_id: userId, peer } },
+      { upsert: true }
+    );
+  }
+
+  async mutualDmContacts(userId, others) {
+    const written = await this.#dmContacts
+      .find({ user_id: userId, peer: { $in: others } }, PROJECTION)
+      .toArray();
+    const back = await this.#dmContacts
+      .find({ user_id: { $in: written.map((row) => row.peer) }, peer: userId }, PROJECTION)
+      .toArray();
+    return back.map((row) => row.user_id);
+  }
+
+  async deleteDmContacts(userId) {
+    await this.#dmContacts.deleteMany({ $or: [{ user_id: userId }, { peer: userId }] });
+  }
+
   async init() {
     await this.#client.connect();
+    this.#dmContacts = this.#client.db().collection('dm_contacts');
+    await this.#dmContacts.createIndex({ user_id: 1, peer: 1 }, { unique: true });
+    await this.#dmContacts.createIndex({ peer: 1 });
     this.#collection = this.#client.db().collection('users');
     // user_id stays unique across tombstones: a deleted id is never reassigned
     await this.#collection.createIndex({ user_id: 1 }, { unique: true });

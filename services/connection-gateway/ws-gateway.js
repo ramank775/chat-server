@@ -17,16 +17,25 @@ const MemCache = require('../../libs/cache');
 const ChannelServiceClient = require('../../libs/channel-service-client');
 const DeliveryManager = require('../../libs/delivery-manager');
 const { ConnectionStateEvent } = require('../../libs/event-args');
+const { HttpClient } = require('../../libs/http-client');
+const { serverEventPayload } = require('../channel-ms/server-event');
 const {
   WS_TYPE,
   ACK_OUTCOME,
   REASON,
   SERVER_EVENT_MARKER,
+  ENVELOPE_FLAG,
+  FRAME_CLASS,
   EnvelopeEvent,
   decodeWsEnvelope,
   ackFrame,
+  pushFrame,
   reauthFrame,
   errorFrame,
+  frameClass,
+  classFlags,
+  toWire,
+  opIdFor,
   opIdUserBits,
   serverNow,
   dmChannelId,
@@ -52,6 +61,42 @@ const RATE_LIMIT = {                        // §14.1 / §19 decision 4
   ip: { capacity: 100, refillPerSec: 100 }
 };
 const HEARTBEAT_MS = 30 * 1000;             // §5.10
+
+/** proto/v3-server-event-payload.proto `ServerEventType` PRESENCE (decision 223, track F). */
+const PRESENCE_EVENT = 50;
+/** `noteDm` remembers this many pairs, then starts over. */
+const DM_NOTED_MAX = 10000;
+
+/**
+ * SYNC_PROTOCOL §22 — `target`'s presence as `viewer` may see it: an
+ * ephemeral PRESENCE push that reads as a DM frame from `target`. Online
+ * false and no last seen means "show nothing".
+ */
+function presenceFrame(target, viewer, online, lastSeenMs) {
+  const definition = serverEventPayload();
+  const bytes = definition.encode(definition.fromObject({
+    version: 1, type: PRESENCE_EVENT, presence: { userId: target, online, lastSeenMs }
+  })).finish();
+  return pushFrame(toWire({
+    opId: opIdFor(target),
+    peer: viewer,
+    payload: Buffer.concat([Buffer.from([SERVER_EVENT_MARKER]), bytes]),
+    ephemeral: true,
+    flags: classFlags(FRAME_CLASS.PRESENCE) + ENVELOPE_FLAG.SILENT,
+    serverTimestampMs: serverNow()
+  }));
+}
+
+/** A client presence op's `online` (the app on screen); null for any other payload. */
+function presenceOnline(payload) {
+  if (!payload.length || payload[0] !== SERVER_EVENT_MARKER) return null;
+  try {
+    const { presence } = serverEventPayload().decode(payload.subarray(1));
+    return presence ? !!presence.online : null;
+  } catch (e) {
+    return null;
+  }
+}
 
 /** AUTH_CONTRACT.md §6.5 — the only application close codes this server may use. */
 const REVOKE_REASON = {
@@ -106,6 +151,7 @@ function parseOptions(argv) {
       '--offline-message-topic <offline-message-topic>',
       'Used by producer to wake a device whose socket died under a push'
     )
+    .option('--profile-ms-endpoint <profile-ms-endpoint>', 'Base url for profile service')
     .option(
       '--reauth-grace-ms <reauth-grace-ms>',
       'Grace period between WS_REAUTH_REQUIRED and the close frame',
@@ -154,6 +200,21 @@ class Gateway extends HttpServiceBase {
     /** @type { import('../../libs/delivery-manager').DeliveryManager } */
     this.deliveryManager = context.deliveryManager;
     this.reauthGraceMs = this.options.reauthGraceMs ?? 5000;
+    /**
+     * SYNC_PROTOCOL §22: user_id -> the sockets watching that user's
+     * presence. A socket watches one user at most (`ws.watching`), and is
+     * online while its app is on screen (`ws.here`).
+     * ponytail: in process. Ceiling: with several gateways a watcher hears
+     * only about sockets on its own gateway; keep `here` and the watchers
+     * in redis and publish changes if a second gateway ever runs.
+     */
+    this.watchers = new Map();
+    /** `from:to` DM pairs already sent to profile-ms (`noteDm`). */
+    this.dmNoted = new Set();
+    /** Null without `--profile-ms-endpoint`: no presence then. */
+    this.profileClient = this.options.profileMsEndpoint
+      ? new HttpClient(this.options.profileMsEndpoint)
+      : null;
   }
 
   async init() {
@@ -167,6 +228,10 @@ class Gateway extends HttpServiceBase {
           reason: Joi.string().valid(...Object.keys(REVOKE_REASON)).required()
         })
       }
+    });
+    // §22: profile-ms, after a user changed who sees their presence
+    this.addInternalRoute('/presence/refresh', 'POST', this.refreshPresence.bind(this), {
+      validate: { payload: Joi.object({ user_id: Joi.string().required() }) }
     });
     // SYNC_PROTOCOL §5.11 — the socket's frames over https, for a phone
     // with no socket: a push wake, a send after the app was closed.
@@ -239,7 +304,9 @@ class Gateway extends HttpServiceBase {
     const key = sessionKey(userId, deviceId);
     const previous = this.sessions.get(key);
     if (previous && previous !== ws) {
-      // One active socket per (user_id, deviceId); the newer one wins.
+      // One active socket per (user_id, deviceId); the newer one wins,
+      // still on screen if the old one was: the app says so again anyway.
+      ws.here = previous.here;
       this._unregister(previous);
       previous.close(1000, 'replaced');
     }
@@ -270,6 +337,7 @@ class Gateway extends HttpServiceBase {
     });
     // the route is per device; the connection-state event is per user
     await this.deliveryManager.userLeft(userId, deviceId);
+    if (ws.here && !this.isOnline(userId)) await this.presenceChanged(userId);
     await this.wakeIfLost(ws, code);
     if (this.userSessions.has(userId)) return; // another device is still online
     await this.publishEvent(
@@ -324,7 +392,108 @@ class Gateway extends HttpServiceBase {
     const known = sockets ? sockets.delete(ws) : false;
     if (sockets && !sockets.size) this.userSessions.delete(userId);
     if (this.sessions.get(key) === ws) this.sessions.delete(key);
+    this.watch(ws, null);
     return known;
+  }
+
+  // ---- presence (SYNC_PROTOCOL §22) ------------------------------------
+
+  /** Online: a socket of theirs whose app is on screen. */
+  isOnline(userId) {
+    return [...(this.userSessions.get(userId) || [])].some((ws) => ws.here);
+  }
+
+  /** `ws` now watches `target` (null: nobody). */
+  watch(ws, target) {
+    if (ws.watching === target) return;
+    const watching = this.watchers.get(ws.watching);
+    if (watching) {
+      watching.delete(ws);
+      if (!watching.size) this.watchers.delete(ws.watching);
+    }
+    ws.watching = target;
+    ws.shown = false;
+    if (!target) return;
+    if (!this.watchers.has(target)) this.watchers.set(target, new Set());
+    this.watchers.get(target).add(ws);
+  }
+
+  /**
+   * A client's presence op: its app is (not) on screen, and it watches
+   * `target` (its own id: nobody), which is answered at once.
+   */
+  async presenceOp(session, target, payload) {
+    const ws = session;
+    // over https there is no socket to be online on or to answer
+    if (this.sessions.get(sessionKey(ws.userId, ws.deviceId)) !== ws) return;
+    const here = presenceOnline(payload);
+    if (here === null) return;
+    this.watch(ws, target === ws.userId ? null : target);
+    const wasOnline = this.isOnline(ws.userId);
+    ws.here = here;
+    if (wasOnline !== this.isOnline(ws.userId)) await this.presenceChanged(ws.userId);
+    if (ws.watching) await this.tellPresence(ws.watching, [ws], false);
+  }
+
+  /** `userId` came online or left: stamp their last seen, tell who watches. */
+  async presenceChanged(userId) {
+    await this.tellPresence(userId, [...(this.watchers.get(userId) || [])], true);
+  }
+
+  /** profile-ms: `user_id` changed who may see their presence. */
+  async refreshPresence(req) {
+    const userId = req.payload.user_id;
+    await this.tellPresence(userId, [...(this.watchers.get(userId) || [])], false);
+    return { status: true };
+  }
+
+  /**
+   * Ask profile-ms which of `sockets`' users may see `target` (and, with
+   * `stamp`, record `target`'s last seen as now), then push each its view.
+   * One who may not gets "nothing" only when it asked (no `stamp`) or was
+   * shown something before: never on a change it may not see, which would
+   * give the change away by its timing.
+   */
+  async tellPresence(target, sockets, stamp) {
+    if (!this.profileClient || (!stamp && !sockets.length)) return;
+    let answer;
+    try {
+      answer = await this.profileClient.post('/_internal/presence', {
+        user_id: target,
+        viewers: [...new Set(sockets.map((ws) => ws.userId))],
+        seen: stamp
+      });
+    } catch (e) {
+      this.log.error('Presence lookup failed', { err: e, user: target });
+      return;
+    }
+    const allowed = new Set(answer.viewers);
+    const online = this.isOnline(target);
+    sockets.forEach((ws) => {
+      if (allowed.has(ws.userId)) {
+        ws.shown = true;
+        this.send(ws, presenceFrame(target, ws.userId, online, answer.last_seen_ms));
+      } else if (!stamp || ws.shown) {
+        ws.shown = false;
+        this.send(ws, presenceFrame(target, ws.userId, false, 0));
+      }
+    });
+  }
+
+  /**
+   * §22 "My contacts" for now: users who have each written to the other in
+   * a DM. Each direction is sent to profile-ms once per process.
+   */
+  noteDm(from, to) {
+    const key = `${from}:${to}`;
+    if (!this.profileClient || this.dmNoted.has(key)) return;
+    if (this.dmNoted.size >= DM_NOTED_MAX) this.dmNoted.clear();
+    this.dmNoted.add(key);
+    this.profileClient.post('/_internal/presence/contact', { user_id: from, peer: to })
+      .catch((e) => {
+        this.dmNoted.delete(key);
+        this.log.error('Recording a DM contact failed', { err: e, user: from });
+      });
   }
 
   // ---- client -> server ------------------------------------------------
@@ -511,6 +680,16 @@ class Gateway extends HttpServiceBase {
       if (!isMember) return this.rejectPermanent(dedupKey, opId, wire.opId, REASON.FORBIDDEN);
     }
 
+    // §22 — a presence op is for the server itself: never acked, never
+    // fanned out. Only ephemeral, so no client waits on an ack for one.
+    if (frameClass(wire.flags) === FRAME_CLASS.PRESENCE) {
+      if (!wire.ephemeral) {
+        return this.rejectPermanent(dedupKey, opId, wire.opId, REASON.VALIDATION_FAILED);
+      }
+      if (isDm) await this.presenceOp(session, peer, wire.payload);
+      return null;
+    }
+
     // §10.2 / §19 decision 15 — a 0x53 payload is a server-authored event.
     // Clients may not mint one. This is the ONLY byte of `payload` we look
     // at; §6a.2 forbids parsing the rest.
@@ -553,6 +732,7 @@ class Gateway extends HttpServiceBase {
       };
     }
 
+    if (isDm && frameClass(wire.flags) === FRAME_CLASS.MESSAGE) this.noteDm(userId, peer);
     const ack = { outcome: ACK_OUTCOME.SUCCESS, serverTimestampMs };
     await this.memCache.dedupPut(
       dedupKey, opId, JSON.stringify(ack), DEDUP_MAX_ENTRIES, DEDUP_TTL_SEC

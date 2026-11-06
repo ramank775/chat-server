@@ -87,6 +87,8 @@ message ServerEventPayload {
     UsernameChanged username_changed = 16;
     MessageStateChanged message_state_changed = 17;
     Typing typing = 18;
+    // 140-149: presence (decision 223, track F; SYNC_PROTOCOL §22).
+    Presence presence = 140;
   }
 }
 
@@ -101,6 +103,8 @@ enum ServerEventType {
   USERNAME_CHANGED = 7;
   MESSAGE_STATE_CHANGED = 8;
   TYPING = 9;
+  // 50-59: presence (decision 223, track F).
+  PRESENCE = 50;
 }
 
 // Receipt lifecycle a message can transition through after the author's
@@ -172,10 +176,11 @@ message ChannelMemberAdded {
   // When the server applied the add, ms since epoch.
   uint64 added_at_ms = 3;
 
-  // The role every `members` entry holds after this event: `owner`,
-  // `admin` or `member` (DECISIONS row 80). Role changes and owner
-  // succession re-announce the affected member here rather than adding an
-  // event type; recipients upsert the role.
+  // Decision 80: the role every user in `members` now holds —
+  // "owner" | "admin" | "member". Empty on a plain add_members
+  // announce (recipients default to "member"). A role change and an
+  // owner succession are fanned out as a RE-announce of the one
+  // affected member carrying the new role; recipients UPSERT it.
   string role = 4;
 }
 
@@ -310,4 +315,29 @@ message MessageStateChanged {
   // For per-recipient granularity in group DMs (v3.1+). Empty in v3.0
   // one-to-one channels.
   string recipient_user_id = 5;
+}
+
+// EPHEMERAL, frame class 8 PRESENCE (decision 223, track F; SYNC_PROTOCOL
+// §22). Never stored, never pushed to a phone that is offline.
+//
+// Server to client: whether `user_id` is online and when it was last
+// seen, as the owner's "Last seen and online" setting allows this viewer
+// (with WhatsApp's reciprocity). Rides an ephemeral envelope whose op_id
+// carries `user_id`'s bits and whose `peer` is the viewer, so a receiver
+// reads it as a DM frame from `user_id`. Sent in answer to a client's
+// presence op and whenever the watched user comes online or leaves. A
+// viewer who may not see it gets one with only `user_id` set (online
+// false, last_seen_ms 0: show nothing), and only in answer to its own
+// op, or once when it may no longer see what it was shown.
+//
+// Client to server: the payload of a client's presence op (an ephemeral
+// envelope of class 8 to `peer`, the user whose presence it wants; its
+// own user_id for nobody), with only `online` set: whether the app is on
+// screen. The server reads it and fans nothing out.
+message Presence {
+  string user_id = 1;
+  bool online = 2;
+  // When `user_id` last left the app, ms since epoch; 0 when unknown or
+  // not to be shown.
+  uint64 last_seen_ms = 3;
 }

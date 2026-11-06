@@ -127,7 +127,8 @@ async function serviceHarness(t) {
     profileDB: {
       migratePhones: async () => {},
       getByUserId: async (id) => users.get(id) || null,
-      updateUser: async (id) => users.delete(id)
+      updateUser: async (id) => users.delete(id),
+      deleteDmContacts: async () => {}
     },
     authProvider: {
       verifyAccessKey: async (token) => {

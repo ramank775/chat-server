@@ -37,6 +37,7 @@ describe('users/me and username rules', () => {
       avatarUrl: null,
       statusText: null,
       discoverability: 'everyone',
+      presence: 'everyone',
       createdAt: JSON.parse(res.payload).createdAt
     });
     assert.ok(JSON.parse(res.payload).createdAt > 0);

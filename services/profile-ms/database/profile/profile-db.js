@@ -16,6 +16,8 @@
  *   phone; null = never chosen = `everyone`
  * @property {string[]?} discoveryTokens the `chosen` list as scrypt tokens. Written through
  *   `updateUser`, never read back by the other methods: `hasDiscoveryToken` checks one
+ * @property {string?} presence who sees last seen and online: everyone (null), contacts, nobody
+ * @property {Date?} lastSeenAt when the user last came online or left (SYNC_PROTOCOL §22)
  * @property {Date} createdAt
  * @property {Date?} deletedAt tombstone; every lookup filters it out
  */
@@ -153,6 +155,39 @@ class IProfileDB {
    */
   // eslint-disable-next-line no-unused-vars
   async updateUser(_userId, _updates) {
+    throw new Error('Method not implemented');
+  }
+
+  /**
+   * @abstract
+   * SYNC_PROTOCOL §22: record that `userId` wrote to `peer` in a DM. Idempotent.
+   * @param {string} _userId
+   * @param {string} _peer
+   */
+  // eslint-disable-next-line no-unused-vars
+  async addDmContact(_userId, _peer) {
+    throw new Error('Method not implemented');
+  }
+
+  /**
+   * @abstract
+   * The users among `_others` who and `_userId` have each written to the other.
+   * @param {string} _userId
+   * @param {string[]} _others
+   * @returns {Promise<string[]>}
+   */
+  // eslint-disable-next-line no-unused-vars
+  async mutualDmContacts(_userId, _others) {
+    throw new Error('Method not implemented');
+  }
+
+  /**
+   * @abstract
+   * Forget every DM contact of `_userId`, both ways (account deletion).
+   * @param {string} _userId
+   */
+  // eslint-disable-next-line no-unused-vars
+  async deleteDmContacts(_userId) {
     throw new Error('Method not implemented');
   }
 

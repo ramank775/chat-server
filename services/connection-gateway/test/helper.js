@@ -175,8 +175,14 @@ function connect(uri, userId, deviceId = DEVICE_1, accesskey = ACCESSKEY, option
     next(timeoutMs = 3000) {
       if (queue.length) return Promise.resolve(queue.shift());
       return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error('timed out waiting for a frame')), timeoutMs);
-        waiters.push((item) => { clearTimeout(timer); resolve(item); });
+        let timer;
+        const waiter = (item) => { clearTimeout(timer); resolve(item); };
+        // a waiter that timed out must not swallow the next frame
+        timer = setTimeout(() => {
+          waiters.splice(waiters.indexOf(waiter), 1);
+          reject(new Error('timed out waiting for a frame'));
+        }, timeoutMs);
+        waiters.push(waiter);
       });
     },
     close() { socket.close(); }

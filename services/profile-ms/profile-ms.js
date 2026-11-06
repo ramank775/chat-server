@@ -18,6 +18,7 @@ const {
   EVENT_FLAGS, EnvelopeEvent, SERVER_EVENT_MARKER, serverNow
 } = require('../../libs/v3-envelope');
 const { validateUsername } = require('./username');
+const { PRESENCE, canSee } = require('./presence');
 const { bundleSchema, publicBundle, publishKeys, claimKeys } = require('./device-keys');
 const {
   DISCOVERABILITY,
@@ -45,6 +46,8 @@ const ERASED = {
   displayName: null,
   avatarUrl: null,
   statusText: null,
+  presence: null,
+  lastSeenAt: null,
   createdAt: null
 };
 
@@ -218,6 +221,8 @@ function selfProfile(user) {
     avatarUrl: user.avatarUrl || null,
     statusText: user.statusText || null,
     discoverability: user.discoverability || DEFAULT_DISCOVERABILITY,
+    // SYNC_PROTOCOL §22: who sees my last seen and online
+    presence: user.presence || 'everyone',
     createdAt: user.createdAt.getTime()
   };
 }
@@ -377,6 +382,7 @@ class ProfileMs extends HttpServiceBase {
           displayName: Joi.string().allow(null, ''),
           avatarUrl: Joi.string().allow(null, ''),
           statusText: Joi.string().allow(null, ''),
+          presence: Joi.string().valid(...PRESENCE),
           // SYNC_PROTOCOL 11.4: the client's outbound queue adds these; a
           // profile edit is a plain overwrite, so a replay needs no dedup
           op_id: Joi.string().uuid(),
@@ -384,6 +390,25 @@ class ProfileMs extends HttpServiceBase {
         })
           .min(1)
           .required()
+      }
+    });
+
+    // SYNC_PROTOCOL §22: the gateway's questions about presence
+    this.addInternalRoute('/presence', 'POST', this.guard(this.presence), {
+      validate: {
+        payload: Joi.object({
+          user_id: Joi.string().required(),
+          viewers: Joi.array().items(Joi.string()).max(1000).default([]),
+          seen: Joi.boolean().default(false)
+        }).required()
+      }
+    });
+    this.addInternalRoute('/presence/contact', 'POST', this.guard(this.presenceContact), {
+      validate: {
+        payload: Joi.object({
+          user_id: Joi.string().required(),
+          peer: Joi.string().required()
+        }).required()
       }
     });
 
@@ -704,6 +729,7 @@ class ProfileMs extends HttpServiceBase {
     ['displayName', 'avatarUrl', 'statusText'].forEach((field) => {
       if (has(field)) updates[field] = payload[field] || null;
     });
+    if (has('presence')) updates.presence = payload.presence;
 
     if (has('username') && (payload.username || null) !== (user.username || null)) {
       const next = payload.username;
@@ -799,7 +825,42 @@ class ProfileMs extends HttpServiceBase {
       await this.deleteProfilePhoto(user.user_id, user.avatarUrl);
     }
     await this.fanoutProfileChange(updated, updates, now);
+    if (has('presence') && user.presence !== updated.presence) {
+      // §22: whoever watches this user sees the new setting now
+      try {
+        await this.gatewayClient.post('/_internal/presence/refresh', { user_id: user.user_id });
+      } catch (error) {
+        this.log.error(`Presence refresh failed for ${user.user_id}: ${error.message}`);
+      }
+    }
     return selfProfile(updated);
+  }
+
+  /**
+   * SYNC_PROTOCOL §22, from the gateway: `user_id`'s last seen, and which of
+   * `viewers` may see their presence. `seen`: they just came online or
+   * left, so their last seen is now.
+   */
+  async presence(req) {
+    const { user_id: userId, viewers, seen } = req.payload;
+    const target = seen
+      ? await this.profileDB.updateUser(userId, { lastSeenAt: new Date() })
+      : await this.profileDB.getByUserId(userId);
+    if (!target) return { last_seen_ms: 0, viewers: [] };
+    const [users, contacts] = await Promise.all([
+      Promise.all(viewers.map((id) => this.profileDB.getByUserId(id))),
+      this.profileDB.mutualDmContacts(userId, viewers)
+    ]);
+    return {
+      last_seen_ms: target.lastSeenAt ? new Date(target.lastSeenAt).getTime() : 0,
+      viewers: viewers.filter((id, i) => users[i] && canSee(target, users[i], contacts.includes(id)))
+    };
+  }
+
+  /** §22, from the gateway: `user_id` wrote to `peer` in a DM. */
+  async presenceContact(req) {
+    await this.profileDB.addDmContact(req.payload.user_id, req.payload.peer);
+    return { status: true };
   }
 
   /**
@@ -1096,6 +1157,7 @@ class ProfileMs extends HttpServiceBase {
   async eraseAccount(user) {
     // 8.2 steps 1-2: the row stays as the tombstone, only user_id and username
     await this.profileDB.updateUser(user.user_id, { ...ERASED, deletedAt: new Date() });
+    await this.profileDB.deleteDmContacts(user.user_id);
     await this.authProvider.revokeAll(user.user_id);
     await this.context.authDB.deleteDeviceKeys(user.user_id);
     await this.revokeGatewaySessions(user.user_id, 'revoked');

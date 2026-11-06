@@ -106,7 +106,9 @@ const ENVELOPE_FLAG = Object.freeze({ SILENT: 1 });
  * treats it apart.
  */
 const FRAME_CLASS = Object.freeze({
-  MESSAGE: 0, MUTATION: 1, RECEIPT: 2, KEY: 3, RESEND: 4, EVENT: 5, LOCATION: 7
+  MESSAGE: 0, MUTATION: 1, RECEIPT: 2, KEY: 3, RESEND: 4, EVENT: 5, LOCATION: 7,
+  // ephemeral, between a client and the server only (SYNC_PROTOCOL §22)
+  PRESENCE: 8
 });
 
 /* eslint-disable no-bitwise -- flags is a bit set */

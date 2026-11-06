@@ -81,6 +81,7 @@ function parseOptions(argv) {
   // decision 71: the internal calls stay http, they just all land back here
   options.channelMsEndpoint = options.selfUrl;
   options.gatewayEndpoint = options.selfUrl;
+  options.profileMsEndpoint = options.selfUrl;
   options.notificationMsEndpoint = options.selfUrl;
   options.mediaMsEndpoint = options.selfUrl;
   options.gatewayName = options.gatewayName || 'monolith-gateway';
