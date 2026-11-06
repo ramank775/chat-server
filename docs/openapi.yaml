@@ -214,9 +214,9 @@ components:
       default: everyone
       description: >-
         Who sees the user's last seen and online (SYNC_PROTOCOL 22).
-        `contacts`: users who have each written to the other in a DM.
+        `contacts`: users connected by an accepted invite (decision 219).
         Reciprocal: one sees another's only while each shares with the
-        other.
+        other. A block, either way, hides it whatever the setting.
     KeyRegistration:
       type: object
       additionalProperties: false

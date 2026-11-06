@@ -64,12 +64,6 @@ const SCHEMA = `
   CREATE TABLE IF NOT EXISTS profile_meta (key text PRIMARY KEY, value text);
   ALTER TABLE users ADD COLUMN IF NOT EXISTS presence text;
   ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at timestamptz;
-  CREATE TABLE IF NOT EXISTS dm_contacts (
-    user_id text NOT NULL,
-    peer text NOT NULL,
-    PRIMARY KEY (user_id, peer)
-  );
-  CREATE INDEX IF NOT EXISTS dm_contacts_peer ON dm_contacts (peer);
 `;
 
 class PgProfileDB extends IProfileDB {
@@ -197,27 +191,6 @@ class PgProfileDB extends IProfileDB {
       }
       throw error;
     }
-  }
-
-  async addDmContact(userId, peer) {
-    await this.#pool.query(
-      'INSERT INTO dm_contacts (user_id, peer) VALUES ($1, $2) ON CONFLICT DO NOTHING',
-      [userId, peer]
-    );
-  }
-
-  async mutualDmContacts(userId, others) {
-    const { rows } = await this.#pool.query(
-      `SELECT a.peer FROM dm_contacts a
-       JOIN dm_contacts b ON b.user_id = a.peer AND b.peer = a.user_id
-       WHERE a.user_id = $1 AND a.peer = ANY($2)`,
-      [userId, others]
-    );
-    return rows.map((row) => row.peer);
-  }
-
-  async deleteDmContacts(userId) {
-    await this.#pool.query('DELETE FROM dm_contacts WHERE user_id = $1 OR peer = $1', [userId]);
   }
 
   async init() {

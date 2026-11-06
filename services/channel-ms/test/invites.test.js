@@ -269,17 +269,19 @@ test('a report keeps up to the last 5 messages, 90 days', async () => {
   assert.strictEqual(await count(), 0);
 });
 
-test('a timeline post reaches connections only, and no one blocked either way', async () => {
+test('pairs: who a timeline post reaches, whose presence a block hides', async () => {
   // ANNA is connected with BEN, CHLOE, DEV (migration) and EVA
-  const reach = async (user, users) => body(await harness.inject({
-    method: 'POST', url: '/_internal/connections/reach', payload: { user_id: user, users }
-  })).users;
+  const pairs = async (user, users) => body(await harness.inject({
+    method: 'POST', url: '/_internal/connections/pairs', payload: { user_id: user, users }
+  }));
   await call('POST', '/blocks', DEV, { user_id: ANNA });
   await call('POST', '/blocks', ANNA, { user_id: CHLOE });
-  assert.deepStrictEqual(await reach(ANNA, [BEN, CHLOE, DEV, EVA, ANNA, 'f0f0f0f0f']), [BEN, EVA]);
+  assert.deepStrictEqual(await pairs(ANNA, [BEN, CHLOE, DEV, EVA, ANNA, 'f0f0f0f0f']), {
+    connected: [BEN, EVA], blocked: [CHLOE, DEV]
+  });
   await call('DELETE', `/blocks/${ANNA}`, DEV);
   await call('DELETE', `/blocks/${CHLOE}`, ANNA);
-  assert.deepStrictEqual(await reach(ANNA, [CHLOE, DEV]), [CHLOE, DEV]);
+  assert.deepStrictEqual(await pairs(ANNA, [CHLOE, DEV]), { connected: [CHLOE, DEV], blocked: [] });
 });
 
 test('a deleted account takes its invites, connections and blocks with it', async () => {

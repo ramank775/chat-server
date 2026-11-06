@@ -403,14 +403,6 @@ class ProfileMs extends HttpServiceBase {
         }).required()
       }
     });
-    this.addInternalRoute('/presence/contact', 'POST', this.guard(this.presenceContact), {
-      validate: {
-        payload: Joi.object({
-          user_id: Joi.string().required(),
-          peer: Joi.string().required()
-        }).required()
-      }
-    });
 
     this.addRoute('/users/username/check', 'POST', this.guard(this.usernameCheck), {
       pre: [this.authPre(false)],
@@ -847,20 +839,18 @@ class ProfileMs extends HttpServiceBase {
       ? await this.profileDB.updateUser(userId, { lastSeenAt: new Date() })
       : await this.profileDB.getByUserId(userId);
     if (!target) return { last_seen_ms: 0, viewers: [] };
-    const [users, contacts] = await Promise.all([
+    // decision 219: "contacts" are connections; a block hides it both ways
+    const [users, { connected, blocked }] = await Promise.all([
       Promise.all(viewers.map((id) => this.profileDB.getByUserId(id))),
-      this.profileDB.mutualDmContacts(userId, viewers)
+      viewers.length
+        ? this.channelClient.post('/_internal/connections/pairs', { user_id: userId, users: viewers })
+        : { connected: [], blocked: [] }
     ]);
     return {
       last_seen_ms: target.lastSeenAt ? new Date(target.lastSeenAt).getTime() : 0,
-      viewers: viewers.filter((id, i) => users[i] && canSee(target, users[i], contacts.includes(id)))
+      viewers: viewers.filter((id, i) => users[i]
+        && canSee(target, users[i], connected.includes(id), blocked.includes(id)))
     };
-  }
-
-  /** §22, from the gateway: `user_id` wrote to `peer` in a DM. */
-  async presenceContact(req) {
-    await this.profileDB.addDmContact(req.payload.user_id, req.payload.peer);
-    return { status: true };
   }
 
   /**
@@ -1157,7 +1147,6 @@ class ProfileMs extends HttpServiceBase {
   async eraseAccount(user) {
     // 8.2 steps 1-2: the row stays as the tombstone, only user_id and username
     await this.profileDB.updateUser(user.user_id, { ...ERASED, deletedAt: new Date() });
-    await this.profileDB.deleteDmContacts(user.user_id);
     await this.authProvider.revokeAll(user.user_id);
     await this.context.authDB.deleteDeviceKeys(user.user_id);
     await this.revokeGatewaySessions(user.user_id, 'revoked');

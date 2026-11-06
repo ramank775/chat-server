@@ -41,8 +41,7 @@ const {
   dmChannelId,
   uuidText,
   userIdText,
-  isUuid,
-  frameClass
+  isUuid
 } = require('../../libs/v3-envelope');
 
 const asMain = require.main === module;
@@ -65,8 +64,6 @@ const HEARTBEAT_MS = 30 * 1000;             // §5.10
 
 /** proto/v3-server-event-payload.proto `ServerEventType` PRESENCE (decision 223, track F). */
 const PRESENCE_EVENT = 50;
-/** `noteDm` remembers this many pairs, then starts over. */
-const DM_NOTED_MAX = 10000;
 
 /**
  * SYNC_PROTOCOL §22 — `target`'s presence as `viewer` may see it: an
@@ -210,8 +207,6 @@ class Gateway extends HttpServiceBase {
      * in redis and publish changes if a second gateway ever runs.
      */
     this.watchers = new Map();
-    /** `from:to` DM pairs already sent to profile-ms (`noteDm`). */
-    this.dmNoted = new Set();
     /** Null without `--profile-ms-endpoint`: no presence then. */
     this.profileClient = this.options.profileMsEndpoint
       ? new HttpClient(this.options.profileMsEndpoint)
@@ -481,22 +476,6 @@ class Gateway extends HttpServiceBase {
     });
   }
 
-  /**
-   * §22 "My contacts" for now: users who have each written to the other in
-   * a DM. Each direction is sent to profile-ms once per process.
-   */
-  noteDm(from, to) {
-    const key = `${from}:${to}`;
-    if (!this.profileClient || this.dmNoted.has(key)) return;
-    if (this.dmNoted.size >= DM_NOTED_MAX) this.dmNoted.clear();
-    this.dmNoted.add(key);
-    this.profileClient.post('/_internal/presence/contact', { user_id: from, peer: to })
-      .catch((e) => {
-        this.dmNoted.delete(key);
-        this.log.error('Recording a DM contact failed', { err: e, user: from });
-      });
-  }
-
   // ---- client -> server ------------------------------------------------
 
   async onMessage(ws, payload, isBinary) {
@@ -648,9 +627,11 @@ class Gateway extends HttpServiceBase {
     }
 
     // §10.2 / §19 decision 15 — a 0x53 payload is a server-authored event.
-    // Clients may not mint one. This is the ONLY byte of `payload` we look
-    // at; §6a.2 forbids parsing the rest. Malformed, so before any lookup.
-    if (wire.payload.length && wire.payload[0] === SERVER_EVENT_MARKER) {
+    // Clients may not mint one, but for a presence op (§22), which is for
+    // the server and goes nowhere. This is the ONLY byte of `payload` we
+    // look at; §6a.2 forbids parsing the rest. Malformed, so before any lookup.
+    if (wire.payload.length && wire.payload[0] === SERVER_EVENT_MARKER
+      && frameClass(wire.flags) !== FRAME_CLASS.PRESENCE) {
       return this.rejectPermanent(dedupKey, opId, wire.opId, REASON.VALIDATION_FAILED);
     }
 
@@ -755,7 +736,6 @@ class Gateway extends HttpServiceBase {
       };
     }
 
-    if (isDm && frameClass(wire.flags) === FRAME_CLASS.MESSAGE) this.noteDm(userId, peer);
     const ack = { outcome: ACK_OUTCOME.SUCCESS, serverTimestampMs };
     await this.memCache.dedupPut(
       dedupKey, opId, JSON.stringify(ack), DEDUP_MAX_ENTRIES, DEDUP_TTL_SEC

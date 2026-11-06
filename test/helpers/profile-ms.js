@@ -121,12 +121,18 @@ async function startProfileMs(dbName, { seed } = {}) {
   // channel-ms's remove-everywhere and media-ms's file delete (AUTH_CONTRACT 8.2)
   const groupRemovals = [];
   const fileDeletes = [];
-  // and channel-ms's connections, for the timeline's audience (decision 219)
+  // and channel-ms's connections and blocks, for the timeline's audience and
+  // presence's contacts (decision 219)
   const links = new Set();
+  const blocks = new Set();
   const linkOf = (a, b) => (a < b ? `${a}:${b}` : `${b}:${a}`);
   service.channelClient.post = async (path, payload) => {
-    if (path === '/_internal/connections/reach') {
-      return { users: payload.users.filter((other) => links.has(linkOf(payload.user_id, other))) };
+    if (path === '/_internal/connections/pairs') {
+      const pair = (other) => linkOf(payload.user_id, other);
+      return {
+        connected: payload.users.filter((o) => links.has(pair(o)) && !blocks.has(pair(o))),
+        blocked: payload.users.filter((o) => blocks.has(pair(o)))
+      };
     }
     groupRemovals.push(payload);
     return { removed: 0 };
@@ -157,6 +163,10 @@ async function startProfileMs(dbName, { seed } = {}) {
     /** Stand in for an accepted invite between two users (decision 219). */
     connect(a, b) {
       links.add(linkOf(a.user_id, b.user_id));
+    },
+    /** Stand in for a block, either way (decision 219). */
+    block(a, b) {
+      blocks.add(linkOf(a.user_id, b.user_id));
     },
     /**
      * @param {import('light-my-request').InjectOptions} request

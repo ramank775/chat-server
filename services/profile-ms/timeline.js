@@ -154,10 +154,10 @@ class Timeline {
    * are connected to, with no block either way (channel-ms keeps both).
    */
   async connectedTo(poster, users) {
-    const { users: reach } = await this.service.channelClient.post(
-      '/_internal/connections/reach', { user_id: poster, users }
+    const { connected } = await this.service.channelClient.post(
+      '/_internal/connections/pairs', { user_id: poster, users }
     );
-    return reach;
+    return connected;
   }
 
   async createPost(req, res) {

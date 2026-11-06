@@ -213,19 +213,14 @@ test('closing a socket ends its watch', async () => {
   });
 });
 
-test('a DM message tells profile-ms who wrote to whom, once; receipts do not', async () => {
-  await withPresence(async ({ uri, calls }) => {
+test('someone who blocked the asker is not asked about (decision 219)', async () => {
+  await withPresence(async ({ uri, calls, setVerdict }) => {
+    setVerdict(ALICE, BOB, 'blocked');
     const alice = connect(uri, ALICE);
     await alice.opened;
-    const op = (n, flags) => ({
-      opId: mintOpId(ALICE, { counter: 900 + n, rand: n }), peer: BOB, payload: Buffer.from([8, 1]), flags
-    });
-    alice.send(opFrame([op(1), op(2), op(3, classFlags(FRAME_CLASS.RECEIPT) + 1)]));
-    const { acks } = (await alice.next()).acks;
-    assert.deepStrictEqual(acks.map((a) => a.outcome), Array(3).fill(ACK_OUTCOME.SUCCESS));
-    assert.deepStrictEqual(calls, [
-      { path: '/_internal/presence/contact', body: { user_id: ALICE, peer: BOB } }
-    ]);
+    alice.send(opFrame([presenceOp(ALICE, BOB, true), presenceOp(ALICE, ALICE, true)]));
+    await new Promise((resolve) => { setTimeout(resolve, 100); });
+    assert.deepStrictEqual(calls.filter((c) => c.body.user_id === BOB), []);
     alice.close();
   });
 });

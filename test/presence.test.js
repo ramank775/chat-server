@@ -14,6 +14,7 @@ test('canSee: each must share with the other (WhatsApp reciprocity)', () => {
   assert.equal(canSee(contacts, everyone, true), true);
   assert.equal(canSee(everyone, contacts, false), false, 'you hide yours from them');
   assert.equal(canSee(contacts, contacts, true), true);
+  assert.equal(canSee(everyone, everyone, true, true), false, 'a block hides it, either way');
 });
 
 describe('presence: setting, last seen and who may see it (SYNC_PROTOCOL 22)', () => {
@@ -48,10 +49,6 @@ describe('presence: setting, last seen and who may see it (SYNC_PROTOCOL 22)', (
     return JSON.parse(res.payload);
   };
   const visible = async (target, viewer) => (await ask(target, [viewer])).viewers.length === 1;
-  const wrote = (from, to) =>
-    app.inject({
-      method: 'POST', url: '/_internal/presence/contact', payload: { user_id: from.user_id, peer: to.user_id }
-    });
 
   test('users/me carries the setting, everyone by default, and PATCH takes the three values only', async () => {
     const alice = await user();
@@ -90,21 +87,28 @@ describe('presence: setting, last seen and who may see it (SYNC_PROTOCOL 22)', (
     assert.equal(await visible(bob, alice), false, 'reciprocity');
   });
 
-  test('contacts: both must have written to each other in a DM', async () => {
+  test('contacts: people connected by an accepted invite (decision 219)', async () => {
     const alice = await user();
     const bob = await user();
     const carl = await user();
     await setPresence(alice, 'contacts');
     assert.equal(await visible(alice, bob), false);
-    await wrote(bob, alice);
-    assert.equal(await visible(alice, bob), false, 'a message to her makes no contact');
-    await wrote(alice, bob);
-    await wrote(alice, bob); // idempotent
+    app.connect(alice, bob);
     assert.equal(await visible(alice, bob), true);
     assert.equal(await visible(bob, alice), true, 'everyone, and alice shares with her contact bob');
     assert.equal(await visible(alice, carl), false);
     assert.equal(await visible(carl, alice), false, 'alice hides hers from carl, so cannot see his');
     assert.deepEqual((await ask(alice, [bob, carl])).viewers, [bob.user_id]);
+  });
+
+  test('a block hides presence both ways, whatever the setting (decision 219)', async () => {
+    const alice = await user();
+    const bob = await user();
+    assert.equal(await visible(alice, bob), true, 'everyone, by default');
+    app.connect(alice, bob);
+    app.block(bob, alice);
+    assert.equal(await visible(alice, bob), false);
+    assert.equal(await visible(bob, alice), false);
   });
 
   test('an unknown viewer or target sees and is seen by nobody', async () => {
@@ -114,21 +118,16 @@ describe('presence: setting, last seen and who may see it (SYNC_PROTOCOL 22)', (
     assert.deepEqual(await ask(ghost, [alice], true), { last_seen_ms: 0, viewers: [] });
   });
 
-  test('deleting an account forgets its DM contacts and its last seen', async () => {
+  test('deleting an account forgets its last seen', async () => {
     const alice = await user();
-    const bob = await user();
-    await wrote(alice, bob);
-    await wrote(bob, alice);
     await ask(alice, [], true);
-    assert.deepEqual(await app.server.profileDB.mutualDmContacts(bob.user_id, [alice.user_id]), [alice.user_id]);
     const res = await app.inject({
       method: 'POST',
       url: '/users/me/delete',
       headers: bearer(alice.accesskey),
-      payload: { confirmation: `DELETE presence_${String(phone - 1).padStart(2, '0')}` }
+      payload: { confirmation: `DELETE presence_${String(phone).padStart(2, '0')}` }
     });
     assert.equal(res.statusCode, 200);
-    assert.deepEqual(await app.server.profileDB.mutualDmContacts(bob.user_id, [alice.user_id]), []);
     const row = await app.db.collection('users').findOne({ user_id: alice.user_id });
     assert.equal(row.lastSeenAt, null);
   });

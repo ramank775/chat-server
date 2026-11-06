@@ -312,8 +312,8 @@ class ChannelMs extends HttpServiceBase {
       validate: { headers: schemas.authHeaders }
     });
 
-    // profile-ms' timeline: who a post may go to
-    this.addInternalRoute('/connections/reach', 'POST', this.reach.bind(this), {
+    // profile-ms: who a timeline post may go to, who sees one's presence
+    this.addInternalRoute('/connections/pairs', 'POST', this.pairs.bind(this), {
       validate: {
         payload: Joi.object({
           user_id: USER_ID.required(),
@@ -877,15 +877,18 @@ class ChannelMs extends HttpServiceBase {
   }
 
   /**
-   * `POST /_internal/connections/reach {user_id, users}` — of `users`, those
-   * `user_id` is connected to with no block either way: who a timeline post
-   * may go to (decision 223).
+   * `POST /_internal/connections/pairs {user_id, users}` — of `users`, who
+   * `user_id` is connected to with no block either way (`connected`: whom a
+   * timeline post may reach, who are "contacts" for presence), and who has a
+   * block with them either way (`blocked`: never shown their presence).
    */
-  async reach(req) {
+  async pairs(req) {
     const { user_id: user, users } = req.payload;
     const pairs = await Promise.all(users.map((other) => this.db.pair(user, other)));
+    const blocked = (p) => p.aBlockedB || p.bBlockedA;
     return {
-      users: users.filter((_, i) => pairs[i].connected && !pairs[i].aBlockedB && !pairs[i].bBlockedA)
+      connected: users.filter((_, i) => pairs[i].connected && !blocked(pairs[i])),
+      blocked: users.filter((_, i) => blocked(pairs[i]))
     };
   }
 
