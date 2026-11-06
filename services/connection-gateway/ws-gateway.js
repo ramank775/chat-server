@@ -647,6 +647,13 @@ class Gateway extends HttpServiceBase {
       return this.rejectPermanent(dedupKey, opId, wire.opId, REASON.VALIDATION_FAILED);
     }
 
+    // §10.2 / §19 decision 15 — a 0x53 payload is a server-authored event.
+    // Clients may not mint one. This is the ONLY byte of `payload` we look
+    // at; §6a.2 forbids parsing the rest. Malformed, so before any lookup.
+    if (wire.payload.length && wire.payload[0] === SERVER_EVENT_MARKER) {
+      return this.rejectPermanent(dedupKey, opId, wire.opId, REASON.VALIDATION_FAILED);
+    }
+
     // §6a.3 step 3 — membership. A DM id is derived from the pair
     // (TRIM_4_12_CONTRACT §3), so it has no row to look up: the channel is
     // whatever (sender, peer) derives to, and a third party cannot reach
@@ -704,19 +711,13 @@ class Gateway extends HttpServiceBase {
 
     // §22 — a presence op is for the server itself: never acked, never
     // fanned out. Only ephemeral, so no client waits on an ack for one.
+    // Decision 219: someone who blocked the sender is not asked about.
     if (frameClass(wire.flags) === FRAME_CLASS.PRESENCE) {
       if (!wire.ephemeral) {
         return this.rejectPermanent(dedupKey, opId, wire.opId, REASON.VALIDATION_FAILED);
       }
-      if (isDm) await this.presenceOp(session, peer, wire.payload);
+      if (isDm && !blocked) await this.presenceOp(session, peer, wire.payload);
       return null;
-    }
-
-    // §10.2 / §19 decision 15 — a 0x53 payload is a server-authored event.
-    // Clients may not mint one. This is the ONLY byte of `payload` we look
-    // at; §6a.2 forbids parsing the rest.
-    if (wire.payload.length && wire.payload[0] === SERVER_EVENT_MARKER) {
-      return this.rejectPermanent(dedupKey, opId, wire.opId, REASON.VALIDATION_FAILED);
     }
 
     // The server keeps no per-channel order: it stamps server_timestamp_ms
