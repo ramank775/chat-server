@@ -37,27 +37,53 @@ services:
     networks:
       - vartalap
 
+  # EVENT_STORE=kafka only: `--profile kafka`. The Apache project's own image
+  # (Bitnami's was withdrawn), one KRaft node.
   kafka:
-    image: bitnami/kafka:3.9
+    image: apache/kafka:4.4.0
     profiles:
       - kafka
     environment:
-      - KAFKA_CFG_NODE_ID=0
-      - KAFKA_CFG_PROCESS_ROLES=controller,broker
-      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093
-      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
-      - KAFKA_CFG_CONTROLLER_QUORUM_VOTERS=0@kafka:9093
-      - KAFKA_CFG_CONTROLLER_LISTENER_NAMES=CONTROLLER
-      - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=true
+      - KAFKA_NODE_ID=1
+      - KAFKA_PROCESS_ROLES=broker,controller
+      - KAFKA_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      - KAFKA_CONTROLLER_QUORUM_VOTERS=1@kafka:9093
+      - KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
+      - KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1
+      - KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1
+      - KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS=0
+      - KAFKA_LOG_DIRS=/var/lib/kafka/data
     volumes:
-      - kafka-data:/bitnami/kafka/data
+      - kafka-data:/var/lib/kafka/data
+    networks:
+      - vartalap
+
+  # the services never create topics (allowAutoTopicCreation is off)
+  kafka-init:
+    image: apache/kafka:4.4.0
+    profiles:
+      - kafka
+    depends_on:
+      - kafka
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        until /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --list >/dev/null 2>&1; do sleep 1; done
+        for topic in ${TOPIC_NEW_MESSAGE} ${TOPIC_OFFLINE_MESSAGE}; do
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists \
+            --topic "$$topic" --partitions 1 --replication-factor 1
+        done
     networks:
       - vartalap
 
   mongo:
     image: mongo:7.0
     ports:
-      - "27017:27017"
+      - "${MONGO_PORT:-27017}:27017"
     volumes:
       - mongo-data:/data/db
     environment:
@@ -90,8 +116,10 @@ services:
     networks:
       - vartalap
 
+  # MinIO stopped publishing images in late 2025; pgsty/minio is a maintained
+  # build of the same server (and mc). MINIO_IMAGE picks another.
   minio:
-    image: minio/minio:latest
+    image: ${MINIO_IMAGE:-pgsty/minio:RELEASE.2026-08-04T00-00-00Z}
     command: server /data --console-address ":9001"
     ports:
       - "${MINIO_PORT:-9000}:9000"
@@ -105,7 +133,7 @@ services:
       - vartalap
 
   minio-init:
-    image: minio/minio:latest
+    image: ${MINIO_IMAGE:-pgsty/minio:RELEASE.2026-08-04T00-00-00Z}
     depends_on:
       - minio
     environment:
@@ -144,7 +172,7 @@ services:
   redis:
     image: redis:7.2
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     logging:
       options:
         max-size: "50m"
@@ -154,9 +182,16 @@ services:
   ws-gateway:
     image: ramank775/chatserver:${CHAT_SERVER_TAG}
     restart: unless-stopped
-    depends_on:
+    depends_on: &app-depends
       nats-init:
         condition: service_completed_successfully
+      # only there under `--profile kafka` / `--profile pg`
+      kafka-init:
+        condition: service_completed_successfully
+        required: false
+      postgres:
+        condition: service_healthy
+        required: false
     networks:
       - vartalap
     logging:
@@ -170,9 +205,7 @@ services:
   message-delivery:
     image: ramank775/chatserver:${CHAT_SERVER_TAG}
     restart: unless-stopped
-    depends_on:
-      nats-init:
-        condition: service_completed_successfully
+    depends_on: *app-depends
     networks:
       - vartalap
     logging:
@@ -186,9 +219,7 @@ services:
   message:
     image: ramank775/chatserver:${CHAT_SERVER_TAG}
     restart: unless-stopped
-    depends_on:
-      nats-init:
-        condition: service_completed_successfully
+    depends_on: *app-depends
     networks:
       - vartalap
     logging:
@@ -202,9 +233,7 @@ services:
   channel:
     image: ramank775/chatserver:${CHAT_SERVER_TAG}
     restart: unless-stopped
-    depends_on:
-      nats-init:
-        condition: service_completed_successfully
+    depends_on: *app-depends
     networks:
       - vartalap
     logging:
@@ -218,9 +247,7 @@ services:
   profile:
     image: ramank775/chatserver:${CHAT_SERVER_TAG}
     restart: unless-stopped
-    depends_on:
-      nats-init:
-        condition: service_completed_successfully
+    depends_on: *app-depends
     networks:
       - vartalap
     logging:
@@ -234,9 +261,7 @@ services:
   notification:
     image: ramank775/chatserver:${CHAT_SERVER_TAG}
     restart: unless-stopped
-    depends_on:
-      nats-init:
-        condition: service_completed_successfully
+    depends_on: *app-depends
     networks:
       - vartalap
     logging:
@@ -250,9 +275,7 @@ services:
   media-metadata-ms:
     image: ramank775/chatserver:${CHAT_SERVER_TAG}
     restart: unless-stopped
-    depends_on:
-      nats-init:
-        condition: service_completed_successfully
+    depends_on: *app-depends
     networks:
       - vartalap
     logging:
