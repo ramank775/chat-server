@@ -328,8 +328,9 @@ tags:
       poster deletes. A new post wakes nobody: the app refreshes the feed
       when it opens. Posts and their photos are deleted
       `--timeline-retention-days` (30) after they were posted, at once when
-      the poster deletes one, and with the poster's account. Served by
-      profile-ms.
+      the poster deletes one, and with the poster's account; media-ms
+      deletes any `timeline` upload a day after that retention, so a photo
+      whose post failed goes too. Served by profile-ms.
   - name: v3.0 > Connecting
     description: >-
       Invite-only (decisions 219-221, SYNC_PROTOCOL 23): nothing flows 1:1
