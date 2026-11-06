@@ -33,7 +33,45 @@ const SCHEMA = `
   );
   CREATE INDEX IF NOT EXISTS channel_members_live_user
     ON channel_members (user_id) WHERE removed_at IS NULL;
+  CREATE TABLE IF NOT EXISTS invites (
+    channel_id text NOT NULL,
+    to_user text NOT NULL,
+    from_user text NOT NULL,
+    created_at bigint NOT NULL,
+    PRIMARY KEY (channel_id, to_user)
+  );
+  CREATE INDEX IF NOT EXISTS invites_to ON invites (to_user);
+  CREATE INDEX IF NOT EXISTS invites_from ON invites (from_user);
+  CREATE TABLE IF NOT EXISTS connections (
+    a text NOT NULL,
+    b text NOT NULL,
+    created_at bigint NOT NULL,
+    PRIMARY KEY (a, b)
+  );
+  CREATE INDEX IF NOT EXISTS connections_b ON connections (b);
+  CREATE TABLE IF NOT EXISTS blocks (
+    blocker text NOT NULL,
+    blocked text NOT NULL,
+    created_at bigint NOT NULL,
+    PRIMARY KEY (blocker, blocked)
+  );
+  CREATE INDEX IF NOT EXISTS blocks_blocked ON blocks (blocked);
+  CREATE TABLE IF NOT EXISTS reports (
+    id bigserial PRIMARY KEY,
+    reporter text NOT NULL,
+    reported text NOT NULL,
+    messages jsonb NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  );
+  CREATE INDEX IF NOT EXISTS reports_created ON reports (created_at);
 `;
+
+/** An invite row under the mongo field names. */
+const INVITE = `SELECT channel_id AS "channelId", to_user AS "to", from_user AS "from",
+  created_at AS "createdAt" FROM invites`;
+
+/** The pair's key, low id first. */
+const pairOf = (a, b) => (a < b ? [a, b] : [b, a]);
 
 /** The fields `updateChannel` may set. */
 const EDITABLE = ['name', 'avatarUrl', 'updatedAt'];
@@ -164,8 +202,116 @@ class PgChannelDB extends IChannelDB {
   }
 
   async deleteChannel(channelId) {
-    // the member rows go with it (ON DELETE CASCADE)
-    await this.#pool.query('DELETE FROM channels WHERE channel_id = $1', [channelId]);
+    // the member rows go with it (ON DELETE CASCADE), its invites by hand
+    await this.#pool.query(
+      `WITH i AS (DELETE FROM invites WHERE channel_id = $1)
+       DELETE FROM channels WHERE channel_id = $1`,
+      [channelId]
+    );
+  }
+
+  async addInvite(invite) {
+    const { rowCount } = await this.#pool.query(
+      `INSERT INTO invites (channel_id, to_user, from_user, created_at) VALUES ($1, $2, $3, $4)
+       ON CONFLICT DO NOTHING`,
+      [invite.channelId, invite.to, invite.from, invite.createdAt]
+    );
+    return rowCount === 1;
+  }
+
+  async getInvite(channelId, to) {
+    const { rows } = await this.#pool.query(
+      `${INVITE} WHERE channel_id = $1 AND to_user = $2`, [channelId, to]
+    );
+    return rows[0] || null;
+  }
+
+  async deleteInvite(channelId, to) {
+    const { rowCount } = await this.#pool.query(
+      'DELETE FROM invites WHERE channel_id = $1 AND to_user = $2', [channelId, to]
+    );
+    return rowCount === 1;
+  }
+
+  async findInvites(userId, channelIds = []) {
+    const { rows } = await this.#pool.query(
+      `${INVITE} WHERE from_user = $1 OR to_user = $1 OR channel_id = ANY($2)
+       ORDER BY created_at, channel_id, to_user`,
+      [userId, channelIds]
+    );
+    return rows;
+  }
+
+  async connect(a, b, at) {
+    await this.#pool.query(
+      'INSERT INTO connections (a, b, created_at) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING',
+      [...pairOf(a, b), at]
+    );
+  }
+
+  async connectionsOf(userId) {
+    const { rows } = await this.#pool.query(
+      `SELECT b AS id FROM connections WHERE a = $1
+       UNION ALL SELECT a FROM connections WHERE b = $1`,
+      [userId]
+    );
+    return rows.map((row) => row.id);
+  }
+
+  async anyConnection() {
+    const { rows } = await this.#pool.query('SELECT 1 FROM connections LIMIT 1');
+    return rows.length > 0;
+  }
+
+  async setBlocked(blocker, blocked, on) {
+    await this.#pool.query(
+      on
+        ? `INSERT INTO blocks (blocker, blocked, created_at) VALUES ($1, $2, $3)
+           ON CONFLICT DO NOTHING`
+        : 'DELETE FROM blocks WHERE blocker = $1 AND blocked = $2',
+      on ? [blocker, blocked, Date.now()] : [blocker, blocked]
+    );
+  }
+
+  async blockedBy(blocker) {
+    const { rows } = await this.#pool.query(
+      'SELECT blocked FROM blocks WHERE blocker = $1 ORDER BY created_at', [blocker]
+    );
+    return rows.map((row) => row.blocked);
+  }
+
+  async pair(a, b) {
+    const [low, high] = pairOf(a, b);
+    const { rows } = await this.#pool.query(
+      `SELECT
+         EXISTS (SELECT 1 FROM connections WHERE a = $3 AND b = $4) AS connected,
+         EXISTS (SELECT 1 FROM blocks WHERE blocker = $1 AND blocked = $2) AS "aBlockedB",
+         EXISTS (SELECT 1 FROM blocks WHERE blocker = $2 AND blocked = $1) AS "bBlockedA",
+         EXISTS (SELECT 1 FROM channels c WHERE c.kind = 'group'
+           AND ${LIVE_MEMBER(1)} AND ${LIVE_MEMBER(2)}) AS "shareGroup"`,
+      [a, b, low, high]
+    );
+    return rows[0];
+  }
+
+  async forget(userId) {
+    await this.#pool.query(
+      `WITH i AS (DELETE FROM invites WHERE from_user = $1 OR to_user = $1),
+       c AS (DELETE FROM connections WHERE a = $1 OR b = $1)
+       DELETE FROM blocks WHERE blocker = $1 OR blocked = $1`,
+      [userId]
+    );
+  }
+
+  async addReport(report) {
+    await this.#pool.query(
+      'INSERT INTO reports (reporter, reported, messages) VALUES ($1, $2, $3)',
+      [report.reporter, report.reported, JSON.stringify(report.messages)]
+    );
+  }
+
+  async purgeReports(before) {
+    await this.#pool.query('DELETE FROM reports WHERE created_at < $1', [before]);
   }
 
   async init() {

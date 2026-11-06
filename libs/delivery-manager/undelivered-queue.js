@@ -1,7 +1,9 @@
 const { UUID } = require('mongodb');
 const { addMongodbOptions, initMongoClient } = require('../mongo-utils');
 const { addPgOptions, initPgPool } = require('../pg-utils');
-const { FRAME_CLASS, frameClass, isUuid } = require('../v3-envelope');
+const {
+  FRAME_CLASS, frameClass, isUuid, decodeEnvelope, userIdText
+} = require('../v3-envelope');
 
 /**
  * SYNC_PROTOCOL.md §19 decision 1: the longest an envelope is kept, read or
@@ -20,6 +22,28 @@ const COLLECTION = 'timeline';
 /** A 9-hex user_id as the number the timeline keeps. */
 function userNumber(userId) {
   return parseInt(userId, 16);
+}
+
+/**
+ * Decision 219's migration: the pairs a message, edit, delete or reaction
+ * went between 1:1, from timeline rows `{sender, envelope}`. Group keys,
+ * receipts and resend requests also travel 1:1 between people who need not
+ * be connected (decision 220), so their classes do not count.
+ * @param {{sender: number, envelope: Buffer}[]} rows
+ * @returns {[string, string][]} each pair once, low id first
+ */
+function dmPairsOf(rows) {
+  const pairs = new Map();
+  rows.forEach(({ sender, envelope }) => {
+    const wire = decodeEnvelope(envelope);
+    const peer = userIdText(wire.peer);
+    if (!peer || frameClass(wire.flags) > FRAME_CLASS.MUTATION) return;
+    const from = sender.toString(16).padStart(9, '0');
+    if (from === peer) return;
+    const pair = from < peer ? [from, peer] : [peer, from];
+    pairs.set(pair.join(), pair);
+  });
+  return [...pairs.values()];
 }
 
 /**
@@ -125,6 +149,17 @@ class UndeliveredQueue {
     };
   }
 
+  /** Decision 219's migration: see `dmPairsOf`. A 1:1 row names two users. */
+  async dmPairs() {
+    const rows = await this.#envelopes
+      .find(
+        { sender: { $ne: null }, recipients: { $size: 2 } },
+        { promoteBuffers: true, projection: { sender: 1, envelope: 1 } }
+      )
+      .toArray();
+    return dmPairsOf(rows);
+  }
+
   async dispose() {
     await this.#client.close();
   }
@@ -177,6 +212,7 @@ module.exports = {
   COLLECTION,
   userNumber,
   expiryOf,
+  dmPairsOf,
   addOptions,
   init
 };

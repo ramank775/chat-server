@@ -8,8 +8,11 @@ const { addHttpOptions, initHttpResource, HttpServiceBase } = require('../../lib
 const { extractInfoFromRequest, schemas, errorEnvelope } = require('../../helper');
 const eventStore = require('../../libs/event-store');
 const MemCache = require('../../libs/cache');
-const { opIdUserBits } = require('../../libs/v3-envelope');
+const {
+  ENVELOPE_FLAG, FRAME_CLASS, classFlags, dmChannelId, opIdUserBits
+} = require('../../libs/v3-envelope');
 const { addDatabaseOptions, initializeDatabase } = require('./database');
+const { REPORT_RETENTION_SEC } = require('./database/channel-db');
 const { channelServerEvent } = require('./server-event');
 
 const asMain = require.main === module;
@@ -26,6 +29,30 @@ const DEDUP_TTL_SEC = 7 * 24 * 60 * 60;
 const MAX_MEMBERS = 100;
 
 const USER_ID = Joi.string().pattern(/^[0-9a-f]{9}$/);
+
+/** A derived DM id (TRIM_4_12_CONTRACT §1); a group's is a dashed UUID. */
+const DM_ID = /^d[0-9a-f]{31}$/;
+
+/**
+ * Decision 220: group keys, resend requests and group receipts travel 1:1
+ * between co-members of a group, who need not be connected.
+ */
+const GROUP_PAIR_CLASSES = [FRAME_CLASS.KEY, FRAME_CLASS.RECEIPT, FRAME_CLASS.RESEND];
+
+/** Decision 219: the invite event that brings an invite wakes the phone; the rest do not. */
+const INVITE_WAKES = classFlags(FRAME_CLASS.INVITE);
+const INVITE_QUIET = INVITE_WAKES + ENVELOPE_FLAG.SILENT;
+
+/** How often the 90-day report retention runs on a store with no TTL of its own. */
+const REPORT_PURGE_MS = 24 * 60 * 60 * 1000;
+
+/** What a reporter's phone may attach: the chat's last 5 messages, as it shows them. */
+const REPORTED_MESSAGE = Joi.object({
+  author: USER_ID.required(),
+  body: Joi.string().allow('').max(4096).required(),
+  content_type: Joi.string().max(100),
+  sent_at: Joi.number().integer()
+});
 
 /** SYNC_PROTOCOL.md §11.2 — every REST write carries these. */
 const OP_FIELDS = {
@@ -44,6 +71,11 @@ function parseOptions(argv) {
   cmd = cmd.option(
     '--new-message-topic <new-message-topic>',
     'Used by producer to publish the §10.2 server events for REST channel writes'
+  ).option(
+    '--invite-pending-max <count>',
+    'Pending 1:1 invites one user may have out at a time (decision 219)',
+    (value) => Number(value),
+    30
   );
   return cmd.parse(argv).opts();
 }
@@ -81,8 +113,8 @@ function successor(members) {
     .sort((a, b) => a.joinedAt - b.joinedAt || a.user_id.localeCompare(b.user_id))[0];
 }
 
-/** The shape a channel takes in a REST response. */
-function channelView(channel) {
+/** The shape a channel takes in a REST response; `invited` are its pending invitees. */
+function channelView(channel, invited = []) {
   return {
     channel_id: channel.channelId,
     kind: channel.kind,
@@ -92,8 +124,15 @@ function channelView(channel) {
     // additive (DECISIONS row 150): lets a member added later, or a
     // reinstalled client, rebuild the roster with its owner and admins
     roles: Object.fromEntries(channel.members.map((m) => [m.user_id, m.role])),
+    // decision 221: invited, not yet members
+    invited,
     created_at: channel.createdAt
   };
+}
+
+/** One pending invite as `GET /connections` lists it. */
+function inviteView({ channelId, from, to, createdAt }, name = null) {
+  return { channel_id: channelId, from, to, name, created_at: createdAt };
 }
 
 /**
@@ -138,6 +177,68 @@ class ChannelMs extends HttpServiceBase {
           avatar_url: Joi.string().allow(null, ''),
           members: Joi.array().items(USER_ID).min(1).max(MAX_MEMBERS).required()
         })
+      }
+    });
+
+    // ---- connecting (decisions 219-221) ----------------------------------
+    const userParam = Joi.object({ userId: USER_ID.required() });
+
+    this.addRoute('/connections', 'GET', this.getConnections.bind(this), {
+      validate: { headers: schemas.authHeaders }
+    });
+
+    this.addRoute('/invites', 'POST', this.invite.bind(this), {
+      validate: {
+        headers: schemas.authHeaders,
+        payload: Joi.object({ user_id: USER_ID.required() })
+      }
+    });
+
+    this.addRoute('/{channelId}/invite/accept', 'POST', this.acceptInvite.bind(this), {
+      validate: { headers: schemas.authHeaders, params: channelParam }
+    });
+
+    this.addRoute('/{channelId}/invite/decline', 'POST', this.declineInvite.bind(this), {
+      validate: {
+        headers: schemas.authHeaders,
+        params: channelParam,
+        payload: Joi.object({ block: Joi.boolean() }).allow(null)
+      }
+    });
+
+    this.addRoute('/{channelId}/invites/{userId}', 'DELETE', this.cancelInvite.bind(this), {
+      validate: {
+        headers: schemas.authHeaders,
+        params: Joi.object({ channelId: Joi.string().required(), userId: USER_ID.required() })
+      }
+    });
+
+    this.addRoute('/blocks', 'POST', this.block.bind(this), {
+      validate: {
+        headers: schemas.authHeaders,
+        payload: Joi.object({ user_id: USER_ID.required() })
+      }
+    });
+
+    this.addRoute('/blocks/{userId}', 'DELETE', this.unblock.bind(this), {
+      validate: { headers: schemas.authHeaders, params: userParam }
+    });
+
+    this.addRoute('/reports', 'POST', this.report.bind(this), {
+      validate: {
+        headers: schemas.authHeaders,
+        payload: Joi.object({
+          user_id: USER_ID.required(),
+          messages: Joi.array().items(REPORTED_MESSAGE).max(5).default([])
+        })
+      }
+    });
+
+    // the gateway asks before it relays a 1:1 frame
+    this.addInternalRoute('/gate/{from}/{to}', 'GET', this.gate.bind(this), {
+      validate: {
+        params: Joi.object({ from: USER_ID.required(), to: USER_ID.required() }),
+        query: Joi.object({ class: Joi.number().integer().min(0).max(15).default(0) })
       }
     });
 
@@ -214,6 +315,37 @@ class ChannelMs extends HttpServiceBase {
     this.addInternalRoute('/members/remove', 'POST', this.removeEverywhere.bind(this), {
       validate: { payload: Joi.object({ user_id: USER_ID.required() }) }
     });
+
+    await this.seedConnections();
+    // the 90-day report retention; mongo's TTL index does it too
+    this.reportTimer = setInterval(() => this.purgeReports(), REPORT_PURGE_MS);
+    this.reportTimer.unref();
+    await this.purgeReports();
+  }
+
+  async purgeReports() {
+    try {
+      await this.db.purgeReports(new Date(Date.now() - REPORT_RETENTION_SEC * 1000));
+    } catch (error) {
+      this.log.error(`Report purge failed: ${error.message}`);
+    }
+  }
+
+  /**
+   * Decision 219, migration: before the gate, a 1:1 chat needed no invite.
+   * Every pair that still has a 1:1 message or edit on the timeline counts as
+   * connected, once, while no pair is connected at all. Only where the
+   * timeline is at hand (the monolith shares it).
+   * ponytail: the timeline keeps 30 days, so a pair silent for longer
+   * invites again; their phones hold the rest, which the server never sees.
+   */
+  async seedConnections() {
+    const queue = this.context.undeliveredQueue;
+    if (!queue || await this.db.anyConnection()) return;
+    const pairs = await queue.dmPairs();
+    const now = Date.now();
+    await Promise.all(pairs.map(([a, b]) => this.db.connect(a, b, now)));
+    if (pairs.length) this.log.info(`Connected ${pairs.length} pair(s) from existing 1:1 chats`);
   }
 
   /**
@@ -224,6 +356,8 @@ class ChannelMs extends HttpServiceBase {
     const { user_id: userId } = req.payload;
     const channels = await this.db.getMemberChannels(userId);
     await Promise.all(channels.map((channel) => this.leave(channel, userId, userId)));
+    // decision 219: their invites, connections and blocks go with them
+    await this.db.forget(userId);
     return { removed: channels.length };
   }
 
@@ -287,9 +421,15 @@ class ChannelMs extends HttpServiceBase {
     const replay = await this.replayed(res, user, opId);
     if (replay) return replay;
 
-    const roster = [...new Set([user, ...members])];
     if (!members.includes(user)) {
       return this.reject(res, user, opId, 403, 'forbidden', 'creator must be in members');
+    }
+    // decision 221: everyone but the creator is invited, and only people the
+    // creator is connected with may be
+    const invitees = [...new Set(members)].filter((id) => id !== user);
+    const strangers = await this.strangers(user, invitees);
+    if (strangers.length) {
+      return this.reject(res, user, opId, 403, 'not_connected', `not connected: ${strangers}`);
     }
 
     const channel = {
@@ -298,7 +438,7 @@ class ChannelMs extends HttpServiceBase {
       name: name || null,
       avatarUrl: avatarUrl || null,
       owner: user,
-      members: roster.map((id) => memberRow(id, id === user ? 'owner' : 'member')),
+      members: [memberRow(user, 'owner')],
       createdAt: Date.now()
     };
 
@@ -321,8 +461,9 @@ class ChannelMs extends HttpServiceBase {
       creator: user,
       createdAtMs: created.createdAt
     });
+    await this.inviteToGroup(created, user, invitees);
 
-    return this.accept(res, user, opId, 201, channelView(created));
+    return this.accept(res, user, opId, 201, channelView(created, invitees));
   }
 
   async addMembers(req, res) {
@@ -337,22 +478,23 @@ class ChannelMs extends HttpServiceBase {
     const denied = this.requireRole(channel, user, ['owner', 'admin']);
     if (denied) return this.reject(res, user, opId, denied.status, denied.code, denied.message);
 
+    // decision 221: an add is an invite; the invitee is a member once they accept
     const existing = memberIds(channel);
-    const added = members.filter((id) => !existing.includes(id));
-    if (existing.length + added.length > MAX_MEMBERS) {
+    const pending = await this.invitedTo(channelId);
+    const added = [...new Set(members)]
+      .filter((id) => !existing.includes(id) && !pending.includes(id));
+    if (existing.length + pending.length + added.length > MAX_MEMBERS) {
       return this.reject(res, user, opId, 412, 'precondition_failed', 'group member cap exceeded');
     }
-
-    if (added.length) {
-      await this.db.addMembers(channelId, added.map((id) => memberRow(id, 'member')));
-      await this.fanout('CHANNEL_MEMBER_ADDED', channel, user, [...existing, ...added], {
-        channelId,
-        members: added,
-        role: 'member',
-        addedAtMs: Date.now()
-      });
+    const strangers = await this.strangers(user, added);
+    if (strangers.length) {
+      return this.reject(res, user, opId, 403, 'not_connected', `not connected: ${strangers}`);
     }
-    return this.accept(res, user, opId, 200, { member_count: existing.length + added.length });
+
+    await this.inviteToGroup(channel, user, added);
+    return this.accept(res, user, opId, 200, {
+      member_count: existing.length, invited: [...pending, ...added]
+    });
   }
 
   async removeMember(req, res) {
@@ -457,8 +599,10 @@ class ChannelMs extends HttpServiceBase {
       return this.accept(res, user, opId, 200, { member_count: channel.members.length - 1 });
     }
 
+    const invited = await this.invitedTo(channelId);
     await this.db.deleteChannel(channelId);
-    await this.fanout('CHANNEL_DELETED', channel, user, memberIds(channel), {
+    // its invitees too, so their pending invite goes (decision 221)
+    await this.fanout('CHANNEL_DELETED', channel, user, [...memberIds(channel), ...invited], {
       channelId,
       deletedAtMs: Date.now()
     });
@@ -471,7 +615,10 @@ class ChannelMs extends HttpServiceBase {
   async getChannels(req) {
     const user = extractInfoFromRequest(req);
     const channels = await this.db.getMemberChannels(user);
-    return channels.map(channelView);
+    const invites = await this.db.findInvites(null, channels.map((c) => c.channelId));
+    return channels.map((channel) => channelView(
+      channel, invites.filter((i) => i.channelId === channel.channelId).map((i) => i.to)
+    ));
   }
 
   async getChannelInfo(req, res) {
@@ -483,7 +630,254 @@ class ChannelMs extends HttpServiceBase {
     if (!channel) {
       return res.response(errorEnvelope('not_found', 'unknown channel')).code(404);
     }
-    return req.internal ? channel : channelView(channel);
+    return req.internal ? channel : channelView(channel, await this.invitedTo(channelId));
+  }
+
+  // ---- connecting (decisions 219-221, SYNC_PROTOCOL §21) ------------------
+
+  /** Who has a pending invite to `channelId`. */
+  async invitedTo(channelId) {
+    return (await this.db.findInvites(null, [channelId])).map((invite) => invite.to);
+  }
+
+  /** Of `users`, those `user` is not connected with: an admin invites only connections. */
+  async strangers(user, users) {
+    if (!users.length) return [];
+    const connections = await this.db.connectionsOf(user);
+    return users.filter((id) => !connections.includes(id));
+  }
+
+  /**
+   * `GET /connections` — what the caller's phone mirrors: who they are
+   * connected with, who they blocked, and every pending invite they can
+   * see: to them (less those from someone they blocked), from them, and in
+   * the groups they are in. A group invite carries the group's name.
+   */
+  async getConnections(req) {
+    const user = extractInfoFromRequest(req);
+    const [connections, blocked, groups] = await Promise.all([
+      this.db.connectionsOf(user),
+      this.db.blockedBy(user),
+      this.db.getMemberChannels(user)
+    ]);
+    const names = new Map(groups.map((group) => [group.channelId, group.name]));
+    const invites = (await this.db.findInvites(user, [...names.keys()]))
+      .filter((invite) => !(invite.to === user && blocked.includes(invite.from)));
+    const views = await Promise.all(invites.map(async (invite) => {
+      if (DM_ID.test(invite.channelId)) return inviteView(invite);
+      // an invitee is not in the group yet
+      if (!names.has(invite.channelId)) {
+        names.set(invite.channelId, (await this.db.getChannelInfo(invite.channelId))?.name);
+      }
+      return inviteView(invite, names.get(invite.channelId) || null);
+    }));
+    return { connections, blocked, invites: views };
+  }
+
+  /**
+   * `POST /invites {user_id}` — invite someone to a 1:1 chat. Inviting
+   * someone who invited you accepts theirs. Answers the pair's state:
+   * `sent` or `connected`.
+   */
+  async invite(req, res) {
+    const user = extractInfoFromRequest(req);
+    const { user_id: to } = req.payload;
+    if (to === user) {
+      return res.response(errorEnvelope('validation_failed', 'cannot invite yourself')).code(400);
+    }
+    const channelId = dmChannelId(user, to);
+    const pair = await this.db.pair(user, to);
+    if (pair.connected) return { state: 'connected' };
+    const theirs = await this.db.getInvite(channelId, user);
+    if (theirs) return this.acceptDm(theirs, user);
+    if (await this.db.getInvite(channelId, to)) return { state: 'sent' };
+
+    const pending = (await this.db.findInvites(user))
+      .filter((invite) => invite.from === user && DM_ID.test(invite.channelId));
+    if (pending.length >= this.options.invitePendingMax) {
+      return res.response(errorEnvelope(
+        'invite_limit',
+        `at most ${this.options.invitePendingMax} invites may wait for an answer`
+      )).code(429);
+    }
+    const now = Date.now();
+    await this.db.addInvite({ channelId, to, from: user, createdAt: now });
+    // decision 219: from someone they blocked, it is kept but never reaches them
+    if (!pair.bBlockedA) {
+      await this.fanout('INVITE_SENT', { channelId }, user, [to], {
+        users: [to], atMs: now
+      }, { peer: to, flags: INVITE_WAKES });
+    }
+    return { state: 'sent' };
+  }
+
+  /** Connect the pair of a 1:1 invite and tell the inviter. */
+  async acceptDm(invite, user) {
+    const now = Date.now();
+    await this.db.connect(invite.from, user, now);
+    await this.db.deleteInvite(invite.channelId, user);
+    await this.fanout('INVITE_ANSWERED', { channelId: invite.channelId }, user, [invite.from], {
+      user, answer: 'INVITE_ACCEPTED', atMs: now
+    }, { peer: invite.from, flags: INVITE_QUIET });
+    return { state: 'connected' };
+  }
+
+  /**
+   * `POST /{channelId}/invite/accept` — the caller accepts their invite:
+   * a 1:1 one (`channelId` the pair's DM id) connects the two; a group's
+   * makes them a member, announced as ChannelMemberAdded with the newcomer
+   * as actor, and answers the group as `GET /{channelId}` does. Accepting
+   * again after it went through answers the same.
+   */
+  async acceptInvite(req, res) {
+    const user = extractInfoFromRequest(req);
+    const { channelId } = req.params;
+    const invite = await this.db.getInvite(channelId, user);
+    const dm = DM_ID.test(channelId);
+    if (dm && invite) return this.acceptDm(invite, user);
+    const channel = dm ? null : await this.db.getChannelInfo(channelId);
+    if (!invite) {
+      if (channel && roleOf(channel, user)) return channelView(channel, await this.invitedTo(channelId));
+      return res.response(errorEnvelope('not_found', 'no pending invite')).code(404);
+    }
+    if (!channel) {
+      await this.db.deleteInvite(channelId, user);
+      return res.response(errorEnvelope('not_found', 'unknown channel')).code(404);
+    }
+    if (channel.members.length >= MAX_MEMBERS) {
+      return res.response(errorEnvelope('precondition_failed', 'group member cap exceeded'))
+        .code(412);
+    }
+    const now = Date.now();
+    await this.db.addMembers(channelId, [memberRow(user, 'member')]);
+    await this.db.deleteInvite(channelId, user);
+    await this.fanout('CHANNEL_MEMBER_ADDED', channel, user, [...memberIds(channel), user], {
+      channelId, members: [user], role: 'member', addedAtMs: now
+    });
+    return channelView(await this.db.getChannelInfo(channelId), await this.invitedTo(channelId));
+  }
+
+  /**
+   * `POST /{channelId}/invite/decline {block?}` — the caller declines their
+   * invite; `block` also blocks whoever sent it (Decline & Block). The
+   * inviter (and a group's members) hear of it, SILENT. Idempotent.
+   */
+  async declineInvite(req) {
+    const user = extractInfoFromRequest(req);
+    const { channelId } = req.params;
+    const invite = await this.db.getInvite(channelId, user);
+    if (!invite) return { state: 'none' };
+    await this.db.deleteInvite(channelId, user);
+    if (req.payload?.block) await this.db.setBlocked(user, invite.from, true);
+    await this.answered(invite, user, 'INVITE_DECLINED', [invite.from]);
+    return { state: 'none' };
+  }
+
+  /**
+   * `DELETE /{channelId}/invites/{userId}` — take back an invite: its
+   * sender may, and for a group so may its owner and admins. The invitee
+   * (and a group's members) hear of it, SILENT. Idempotent.
+   */
+  async cancelInvite(req, res) {
+    const user = extractInfoFromRequest(req);
+    const { channelId, userId } = req.params;
+    const invite = await this.db.getInvite(channelId, userId);
+    if (!invite) return { state: 'none' };
+    if (invite.from !== user) {
+      const channel = DM_ID.test(channelId) ? null : await this.db.getChannelInfo(channelId);
+      if (!channel || !['owner', 'admin'].includes(roleOf(channel, user))) {
+        return res.response(errorEnvelope('forbidden', 'not your invite')).code(403);
+      }
+    }
+    await this.db.deleteInvite(channelId, userId);
+    await this.answered(invite, user, 'INVITE_CANCELED', [userId]);
+    return { state: 'none' };
+  }
+
+  /**
+   * An invite that ended without a member: to `recipients`, and for a group
+   * to its members as well. A 1:1 one goes to the one recipient as its peer.
+   */
+  async answered(invite, actor, answer, recipients) {
+    const dm = DM_ID.test(invite.channelId);
+    const body = { user: invite.to, answer, atMs: Date.now() };
+    if (dm) {
+      await this.fanout('INVITE_ANSWERED', invite, actor, recipients, body, {
+        peer: recipients[0], flags: INVITE_QUIET
+      });
+      return;
+    }
+    const channel = await this.db.getChannelInfo(invite.channelId);
+    const members = channel ? memberIds(channel) : [];
+    await this.fanout('INVITE_ANSWERED', invite, actor, [...new Set([...members, ...recipients])], {
+      ...body, channelId: invite.channelId
+    }, { flags: INVITE_QUIET });
+  }
+
+  /**
+   * Invite `users` to a group: the invitee hears of it (it wakes their
+   * phone), the members too, SILENT, for their member list. Someone who
+   * blocked `actor` is invited but never told (decision 219).
+   */
+  async inviteToGroup(channel, actor, users) {
+    const now = Date.now();
+    const { channelId } = channel;
+    const added = await Promise.all(users.map((to) => this.db.addInvite({
+      channelId, to, from: actor, createdAt: now
+    })));
+    const fresh = users.filter((_, i) => added[i]);
+    if (!fresh.length) return;
+    const pairs = await Promise.all(fresh.map((to) => this.db.pair(actor, to)));
+    const reach = fresh.filter((_, i) => !pairs[i].bBlockedA);
+    const body = { channelId, users: fresh, name: channel.name || '', atMs: now };
+    if (reach.length) {
+      await this.fanout('INVITE_SENT', channel, actor, reach, body, { flags: INVITE_WAKES });
+    }
+    await this.fanout('INVITE_SENT', channel, actor, memberIds(channel), body, {
+      flags: INVITE_QUIET
+    });
+  }
+
+  /** `POST /blocks {user_id}`: the server refuses their 1:1 frames and invites to the caller. */
+  async block(req) {
+    const user = extractInfoFromRequest(req);
+    const { user_id: blocked } = req.payload;
+    await this.db.setBlocked(user, blocked, true);
+    return { user_id: blocked, blocked: true };
+  }
+
+  /** `DELETE /blocks/{userId}`. */
+  async unblock(req) {
+    const user = extractInfoFromRequest(req);
+    const { userId } = req.params;
+    await this.db.setBlocked(user, userId, false);
+    return { user_id: userId, blocked: false };
+  }
+
+  /**
+   * `POST /reports {user_id, messages}` — kept 90 days for the operator
+   * (deployment README "Reports"). `messages` is what the reporter's phone
+   * chose to send: up to the chat's last 5, decrypted there.
+   */
+  async report(req, res) {
+    const user = extractInfoFromRequest(req);
+    const { user_id: reported, messages } = req.payload;
+    await this.db.addReport({ reporter: user, reported, messages });
+    return res.response({ reported }).code(201);
+  }
+
+  /**
+   * `GET /_internal/gate/{from}/{to}?class=` — may `from`'s 1:1 frame of
+   * that class reach `to` (decisions 219, 220)? `ok`; `blocked`, which the
+   * gateway acks and drops so the sender cannot tell; or `not_connected`.
+   */
+  async gate(req) {
+    const { from, to } = req.params;
+    if (from === to) return { verdict: 'ok' };
+    const pair = await this.db.pair(from, to);
+    if (pair.shareGroup && GROUP_PAIR_CLASSES.includes(req.query.class)) return { verdict: 'ok' };
+    if (pair.bBlockedA) return { verdict: 'blocked' };
+    return { verdict: pair.connected ? 'ok' : 'not_connected' };
   }
 
   // ---- shared ------------------------------------------------------------
@@ -553,14 +947,15 @@ class ChannelMs extends HttpServiceBase {
    * including the actor; the delivery path is what keeps the actor's own
    * device from seeing it (§10.3 step 4).
    */
-  async fanout(type, channel, actor, recipients, body) {
+  async fanout(type, channel, actor, recipients, body, extra = {}) {
     const { newMessageTopic } = this.options;
     const channelId = channel.channelId || body.channelId;
-    const event = channelServerEvent(type, body, { channelId, actor, recipients });
+    const event = channelServerEvent(type, body, { channelId, actor, recipients, ...extra });
     await this.eventStore.emit(newMessageTopic, event, channelId);
   }
 
   async shutdown() {
+    clearInterval(this.reportTimer);
     await super.shutdown();
     await this.db.dispose();
     await this.memCache.dispose();

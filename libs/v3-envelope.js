@@ -70,6 +70,8 @@ const ACK_OUTCOME = {
 const REASON = {
   PREFIX_MISMATCH: 'prefix_mismatch',
   FORBIDDEN: 'forbidden',
+  // decision 219: a 1:1 frame between two people who have not connected
+  NOT_CONNECTED: 'not_connected',
   VALIDATION_FAILED: 'validation_failed',
   RATE_LIMITED: 'rate_limited',
   STORAGE_UNAVAILABLE: 'storage_unavailable',
@@ -108,7 +110,9 @@ const ENVELOPE_FLAG = Object.freeze({ SILENT: 1 });
 const FRAME_CLASS = Object.freeze({
   MESSAGE: 0, MUTATION: 1, RECEIPT: 2, KEY: 3, RESEND: 4, EVENT: 5, LOCATION: 7,
   // ephemeral, between a client and the server only (SYNC_PROTOCOL §22)
-  PRESENCE: 8
+  PRESENCE: 8,
+  // decision 219: the server's invite events; the one bringing an invite wakes
+  INVITE: 9
 });
 
 /* eslint-disable no-bitwise -- flags is a bit set */

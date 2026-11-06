@@ -1,4 +1,6 @@
-const { TTL_SEC, PAGE, userNumber } = require('./undelivered-queue');
+const {
+  TTL_SEC, PAGE, userNumber, dmPairsOf
+} = require('./undelivered-queue');
 const { ensureSchema } = require('../pg-utils');
 const { isUuid } = require('../v3-envelope');
 
@@ -193,6 +195,15 @@ class PgUndeliveredQueue {
       envelopes: rows.slice(0, limit).map((row) => row.envelope),
       more: rows.length > limit
     };
+  }
+
+  /** Decision 219's migration (see the mongo `dmPairs`). */
+  async dmPairs() {
+    const { rows } = await this.#pool.query(
+      `SELECT sender, envelope FROM undelivered
+       WHERE sender IS NOT NULL AND cardinality(recipients) = 2`
+    );
+    return dmPairsOf(rows);
   }
 
   async dispose() {

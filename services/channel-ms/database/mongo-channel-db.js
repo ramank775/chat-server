@@ -1,5 +1,6 @@
 const { IChannelDB } = require('./channel-db');
 const { addMongodbOptions, initMongoClient } = require('../../../libs/mongo-utils');
+const { REPORT_RETENTION_SEC } = require('./channel-db');
 
 const PROJECTION = {
   projection: {
@@ -14,6 +15,14 @@ const PROJECTION = {
   }
 };
 
+const INVITE = { projection: { _id: 0, channelId: 1, to: 1, from: 1, createdAt: 1 } };
+
+/** The pair's key, low id first. */
+const pairOf = (a, b) => (a < b ? { a, b } : { a: b, b: a });
+
+/** A live member `userId`, inside `members`. */
+const liveMember = (userId) => ({ $elemMatch: { user_id: userId, removedAt: null } });
+
 /** Reads only ever expose the live roster; tombstoned rows stay for `removedAt`. */
 function active(channel) {
   if (channel) channel.members = channel.members.filter((member) => !member.removedAt);
@@ -26,6 +35,9 @@ class MongoChannelDB extends IChannelDB {
 
   /** @type { import('mongodb').Collection } */
   #collection;
+
+  /** @type {{[name: string]: import('mongodb').Collection}} */
+  #c = {};
 
   /**
    * @param {*} context
@@ -98,6 +110,93 @@ class MongoChannelDB extends IChannelDB {
 
   async deleteChannel(channelId) {
     await this.#collection.deleteOne({ channelId });
+    await this.#c.invites.deleteMany({ channelId });
+  }
+
+  async addInvite(invite) {
+    const { upsertedCount } = await this.#c.invites.updateOne(
+      { channelId: invite.channelId, to: invite.to },
+      { $setOnInsert: { ...invite } },
+      { upsert: true }
+    );
+    return upsertedCount === 1;
+  }
+
+  async getInvite(channelId, to) {
+    return this.#c.invites.findOne({ channelId, to }, INVITE);
+  }
+
+  async deleteInvite(channelId, to) {
+    const { deletedCount } = await this.#c.invites.deleteOne({ channelId, to });
+    return deletedCount === 1;
+  }
+
+  async findInvites(userId, channelIds = []) {
+    const or = [{ channelId: { $in: channelIds } }];
+    if (userId) or.push({ from: userId }, { to: userId });
+    return this.#c.invites.find({ $or: or }, INVITE).sort({ createdAt: 1 }).toArray();
+  }
+
+  async connect(a, b, at) {
+    await this.#c.connections.updateOne(
+      pairOf(a, b), { $setOnInsert: { createdAt: at } }, { upsert: true }
+    );
+  }
+
+  async connectionsOf(userId) {
+    const rows = await this.#c.connections.find({ $or: [{ a: userId }, { b: userId }] }).toArray();
+    return rows.map((row) => (row.a === userId ? row.b : row.a));
+  }
+
+  async anyConnection() {
+    return !!(await this.#c.connections.findOne({}));
+  }
+
+  async setBlocked(blocker, blocked, on) {
+    if (!on) {
+      await this.#c.blocks.deleteOne({ blocker, blocked });
+      return;
+    }
+    await this.#c.blocks.updateOne(
+      { blocker, blocked }, { $setOnInsert: { createdAt: Date.now() } }, { upsert: true }
+    );
+  }
+
+  async blockedBy(blocker) {
+    return (await this.#c.blocks.find({ blocker }).toArray()).map((row) => row.blocked);
+  }
+
+  async pair(a, b) {
+    const { blocks } = this.#c;
+    const [connected, aBlockedB, bBlockedA, shareGroup] = await Promise.all([
+      this.#c.connections.findOne(pairOf(a, b)),
+      blocks.findOne({ blocker: a, blocked: b }),
+      blocks.findOne({ blocker: b, blocked: a }),
+      this.#collection.findOne(
+        { kind: 'group', members: { $all: [liveMember(a), liveMember(b)] } },
+        { projection: { _id: 1 } }
+      )
+    ]);
+    return {
+      connected: !!connected, aBlockedB: !!aBlockedB, bBlockedA: !!bBlockedA, shareGroup: !!shareGroup
+    };
+  }
+
+  async forget(userId) {
+    await Promise.all([
+      this.#c.invites.deleteMany({ $or: [{ from: userId }, { to: userId }] }),
+      this.#c.connections.deleteMany({ $or: [{ a: userId }, { b: userId }] }),
+      this.#c.blocks.deleteMany({ $or: [{ blocker: userId }, { blocked: userId }] })
+    ]);
+  }
+
+  async addReport(report) {
+    await this.#c.reports.insertOne({ ...report, createdAt: new Date() });
+  }
+
+  async purgeReports(before) {
+    // the TTL index does this on its own; kept for the store's contract
+    await this.#c.reports.deleteMany({ createdAt: { $lt: before } });
   }
 
   async init() {
@@ -107,6 +206,20 @@ class MongoChannelDB extends IChannelDB {
     // client-supplied ids: the unique index is what turns a collision into 409.
     await this.#collection.createIndex({ channelId: 1 }, { unique: true });
     await this.#collection.createIndex({ 'members.user_id': 1 });
+    ['invites', 'connections', 'blocks', 'reports'].forEach((name) => {
+      this.#c[name] = db.collection(name);
+    });
+    await this.#c.invites.createIndex({ channelId: 1, to: 1 }, { unique: true });
+    await this.#c.invites.createIndex({ to: 1 });
+    await this.#c.invites.createIndex({ from: 1 });
+    await this.#c.connections.createIndex({ a: 1, b: 1 }, { unique: true });
+    await this.#c.connections.createIndex({ b: 1 });
+    await this.#c.blocks.createIndex({ blocker: 1, blocked: 1 }, { unique: true });
+    await this.#c.blocks.createIndex({ blocked: 1 });
+    // 90-day retention, by mongo's TTL monitor
+    await this.#c.reports.createIndex(
+      { createdAt: 1 }, { expireAfterSeconds: REPORT_RETENTION_SEC }
+    );
   }
 
   async dispose() {

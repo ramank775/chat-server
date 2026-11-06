@@ -87,6 +87,9 @@ message ServerEventPayload {
     UsernameChanged username_changed = 16;
     MessageStateChanged message_state_changed = 17;
     Typing typing = 18;
+    // Decisions 219-221, invites: oneof fields 80-89.
+    InviteSent invite_sent = 80;
+    InviteAnswered invite_answered = 81;
     // 140-149: presence (decision 223, track F; SYNC_PROTOCOL §22).
     Presence presence = 140;
   }
@@ -103,6 +106,9 @@ enum ServerEventType {
   USERNAME_CHANGED = 7;
   MESSAGE_STATE_CHANGED = 8;
   TYPING = 9;
+  // Decisions 219-221, invites: values 20-29.
+  INVITE_SENT = 20;
+  INVITE_ANSWERED = 21;
   // 50-59: presence (decision 223, track F).
   PRESENCE = 50;
 }
@@ -340,4 +346,53 @@ message Presence {
   // When `user_id` last left the app, ms since epoch; 0 when unknown or
   // not to be shown.
   uint64 last_seen_ms = 3;
+}
+
+// -----------------------------------------------------------------------------
+// Invites (decisions 219-221, SYNC_PROTOCOL.md §21).
+// -----------------------------------------------------------------------------
+//
+// No message flows between two people until one has invited and the other
+// accepted, and a group's newcomer is a member only once they accept. The
+// acting user rides in the envelope's op_id user bits, as on every server
+// event. A 1:1 invite event is addressed like a DM: `peer` is its
+// recipient, so the channel both derive is the pair's DM id, and
+// `channel_id` below is empty. A group's names the group.
+//
+// Envelope class INVITE (9). The event that brings someone an invite has
+// no SILENT bit, so it wakes their phone; every other invite event is
+// SILENT.
+
+// Someone was invited. To the invitee (wakes), and for a group also to its
+// members, SILENT, so their member list can show "Invited".
+message InviteSent {
+  // The group's id; empty for a 1:1 invite.
+  string channel_id = 1;
+  // Who is invited (user_ids). A 1:1 invite names the recipient.
+  repeated string users = 2;
+  // The group's name, for an invitee who has no copy of the group yet.
+  string name = 3;
+  // When the server stored the invite, ms since epoch.
+  uint64 at_ms = 4;
+}
+
+// An invite is no longer pending. Accepted 1:1: to the inviter (now
+// connected). Declined: to the inviter, and for a group its members.
+// Canceled: to the invitee, and for a group its members. A group accept
+// is announced as ChannelMemberAdded with the newcomer as actor and member.
+message InviteAnswered {
+  // The group's id; empty for a 1:1 invite.
+  string channel_id = 1;
+  // Who was invited.
+  string user = 2;
+  InviteAnswer answer = 3;
+  // When, ms since epoch.
+  uint64 at_ms = 4;
+}
+
+enum InviteAnswer {
+  INVITE_ANSWER_UNSPECIFIED = 0;
+  INVITE_ACCEPTED = 1;
+  INVITE_DECLINED = 2;
+  INVITE_CANCELED = 3;
 }

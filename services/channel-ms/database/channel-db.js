@@ -1,5 +1,8 @@
 /* eslint-disable class-methods-use-this, no-unused-vars */
 
+/** How long a report is kept: 90 days. */
+const REPORT_RETENTION_SEC = 90 * 24 * 60 * 60;
+
 /**
  * @typedef {object} Member
  * @property {string} user_id 9 lowercase hex chars
@@ -16,6 +19,14 @@
  * @property {string|null} avatarUrl
  * @property {string} owner creator's user_id
  * @property {Member[]} members active members only on every read
+ * @property {number} createdAt
+ */
+
+/**
+ * @typedef {object} Invite
+ * @property {string} channelId a group's id, or the derived DM id of a 1:1 invite
+ * @property {string} to who is invited
+ * @property {string} from who invited
  * @property {number} createdAt
  */
 
@@ -109,9 +120,144 @@ class IChannelDB {
   /**
    * @abstract
    * Hard delete: the owner's DELETE, or the last member leaving (row 9).
+   * Its pending invites go too.
    * @param {string} channelId
    */
   async deleteChannel(channelId) {
+    throw new Error('Method not implemented');
+  }
+
+  // ---- connecting (decisions 219-221) ----------------------------------
+  // An invite is keyed (channelId, to): a group's id, or for a 1:1 invite
+  // the pair's derived DM id. A connection is the pair (a < b); a block is
+  // (blocker, blocked); both are user_ids.
+
+  /**
+   * @abstract
+   * Store a pending invite. False when (channelId, to) is already pending.
+   * @param {Invite} invite
+   * @returns {Promise<boolean>}
+   */
+  async addInvite(invite) {
+    throw new Error('Method not implemented');
+  }
+
+  /**
+   * @abstract
+   * @param {string} channelId
+   * @param {string} to
+   * @returns {Promise<Invite|null>}
+   */
+  async getInvite(channelId, to) {
+    throw new Error('Method not implemented');
+  }
+
+  /**
+   * @abstract
+   * @param {string} channelId
+   * @param {string} to
+   * @returns {Promise<boolean>} whether one was pending
+   */
+  async deleteInvite(channelId, to) {
+    throw new Error('Method not implemented');
+  }
+
+  /**
+   * @abstract
+   * Every pending invite from or to `userId` (null: none), or in one of
+   * `channelIds`, oldest first.
+   * @param {string|null} userId
+   * @param {string[]} [channelIds]
+   * @returns {Promise<Invite[]>}
+   */
+  async findInvites(userId, channelIds = []) {
+    throw new Error('Method not implemented');
+  }
+
+  /**
+   * @abstract
+   * Connect the pair; a no-op when they are.
+   * @param {string} a
+   * @param {string} b
+   * @param {number} at
+   */
+  async connect(a, b, at) {
+    throw new Error('Method not implemented');
+  }
+
+  /**
+   * @abstract
+   * @param {string} userId
+   * @returns {Promise<string[]>} who `userId` is connected with
+   */
+  async connectionsOf(userId) {
+    throw new Error('Method not implemented');
+  }
+
+  /**
+   * @abstract
+   * @returns {Promise<boolean>} whether any pair is connected at all
+   */
+  async anyConnection() {
+    throw new Error('Method not implemented');
+  }
+
+  /**
+   * @abstract
+   * Block (`on`) or unblock.
+   * @param {string} blocker
+   * @param {string} blocked
+   * @param {boolean} on
+   */
+  async setBlocked(blocker, blocked, on) {
+    throw new Error('Method not implemented');
+  }
+
+  /**
+   * @abstract
+   * @param {string} blocker
+   * @returns {Promise<string[]>} everyone `blocker` blocked
+   */
+  async blockedBy(blocker) {
+    throw new Error('Method not implemented');
+  }
+
+  /**
+   * @abstract
+   * Everything the invite gate asks about a pair, in one call.
+   * @param {string} a
+   * @param {string} b
+   * @returns {Promise<{connected: boolean, aBlockedB: boolean, bBlockedA: boolean,
+   *   shareGroup: boolean}>}
+   */
+  async pair(a, b) {
+    throw new Error('Method not implemented');
+  }
+
+  /**
+   * @abstract
+   * Account deletion: every invite from or to `userId`, their connections
+   * and blocks either way.
+   * @param {string} userId
+   */
+  async forget(userId) {
+    throw new Error('Method not implemented');
+  }
+
+  /**
+   * @abstract
+   * @param {{reporter: string, reported: string, messages: object[]}} report
+   */
+  async addReport(report) {
+    throw new Error('Method not implemented');
+  }
+
+  /**
+   * @abstract
+   * Drop the reports filed before `before` (90-day retention).
+   * @param {Date} before
+   */
+  async purgeReports(before) {
     throw new Error('Method not implemented');
   }
 
@@ -133,5 +279,6 @@ class IChannelDB {
 }
 
 module.exports = {
-  IChannelDB
+  IChannelDB,
+  REPORT_RETENTION_SEC
 };

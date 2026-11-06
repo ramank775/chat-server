@@ -16,7 +16,13 @@ const LEGACY = '01efabcd-7000-8000-8abc-000000000002';
 /** @type {Awaited<ReturnType<typeof startChannelMs>>} */
 let harness;
 
-test.before(async () => { harness = await startChannelMs('channel-ms-test'); });
+test.before(async () => {
+  harness = await startChannelMs('channel-ms-test');
+  // decision 221: only connections may be invited to a group
+  const people = [ALICE, BOB, CARL, DAVE];
+  await Promise.all(people.flatMap((a, i) => people.slice(i + 1)
+    .map((b) => harness.server.db.connect(a, b, Date.now()))));
+});
 test.after(async () => { await harness.stop(); });
 
 const body = (response) => JSON.parse(response.payload);
@@ -30,13 +36,41 @@ function createGroup(channelId, creator, members) {
   });
 }
 
-test('creates a group and fans ChannelCreated to every member', async () => {
+/** Each of `users` accepts their invite to `channelId` (decision 221). */
+async function accept(channelId, ...users) {
+  const responses = [];
+  // one at a time, so the roster grows in a known order
+  // eslint-disable-next-line no-restricted-syntax
+  for (const user of users) {
+    // eslint-disable-next-line no-await-in-loop
+    responses.push(await harness.inject({
+      method: 'POST', url: `/${channelId}/invite/accept`, headers: headers(user), payload: {}
+    }));
+  }
+  return responses;
+}
+
+test('creates a group: the creator is its member, the rest are invited', async () => {
+  const before = harness.published().length;
   const response = await createGroup(CHANNEL, ALICE, [ALICE, BOB, CARL]);
   assert.strictEqual(response.statusCode, 201);
-  assert.deepStrictEqual(body(response).members.sort(), [ALICE, BOB, CARL].sort());
+  assert.deepStrictEqual(body(response).members, [ALICE]);
+  assert.deepStrictEqual(body(response).invited.sort(), [BOB, CARL].sort());
 
-  const { recipients, envelope, body: event } = harness.lastEvent();
-  assert.deepStrictEqual(recipients.sort(), [ALICE, BOB, CARL].sort());
+  const [created, invited, told] = harness.published().slice(before);
+  // the invitees hear of it, class INVITE (9) and no SILENT: it wakes them
+  assert.deepStrictEqual(invited.recipients.sort(), [BOB, CARL].sort());
+  assert.strictEqual(invited.envelope.flags, 18);
+  assert.strictEqual(decodeServerEvent(invited).type, 'INVITE_SENT');
+  assert.strictEqual(decodeServerEvent(invited).inviteSent.name, 'Trip');
+  assert.deepStrictEqual(decodeServerEvent(invited).inviteSent.users.sort(), [BOB, CARL].sort());
+  // and the members, SILENT
+  assert.deepStrictEqual(told.recipients, [ALICE]);
+  assert.strictEqual(told.envelope.flags, 19);
+
+  const { recipients, envelope } = created;
+  const event = decodeServerEvent(created);
+  assert.deepStrictEqual(recipients, [ALICE]);
   assert.strictEqual(envelope.senderUserId, ALICE);
   // decision 218: the actor rides in the op_id's user bits, as on any op
   assert.strictEqual(opIdUserBits(envelope.opId), parseInt(ALICE, 16));
@@ -53,7 +87,43 @@ test('creates a group and fans ChannelCreated to every member', async () => {
   assert.strictEqual(push.peer.length, 0);
   assert.strictEqual(event.type, 'CHANNEL_CREATED');
   assert.strictEqual(event.channelCreated.creator, ALICE);
-  assert.deepStrictEqual(event.channelCreated.members.sort(), [ALICE, BOB, CARL].sort());
+  assert.deepStrictEqual(event.channelCreated.members, [ALICE]);
+});
+
+test('an invitee who accepts is a member, announced with them as actor', async () => {
+  const [bob] = await accept(CHANNEL, BOB);
+  assert.strictEqual(bob.statusCode, 200);
+  assert.deepStrictEqual(body(bob).members, [ALICE, BOB]);
+  assert.deepStrictEqual(body(bob).invited, [CARL]);
+  const { recipients, envelope, body: event } = harness.lastEvent();
+  assert.deepStrictEqual(recipients.sort(), [ALICE, BOB].sort());
+  assert.strictEqual(envelope.senderUserId, BOB);
+  assert.strictEqual(event.type, 'CHANNEL_MEMBER_ADDED');
+  assert.deepStrictEqual(event.memberAdded.members, [BOB]);
+
+  // accepting again answers the same, and adds nobody twice
+  const before = harness.published().length;
+  const [again] = await accept(CHANNEL, BOB);
+  assert.strictEqual(again.statusCode, 200);
+  assert.strictEqual(harness.published().length, before);
+  await accept(CHANNEL, CARL);
+});
+
+test('an invitee gets no group frames, and is not a member, before accepting', async () => {
+  const group = '01efabcd-7000-8000-8abc-0000000000c1';
+  await createGroup(group, ALICE, [ALICE, BOB]);
+  const info = await harness.inject({ method: 'GET', url: `/_internal/${group}` });
+  assert.deepStrictEqual(body(info).members.map((m) => m.user_id), [ALICE]);
+  const asBob = await harness.inject({ method: 'GET', url: `/${group}`, headers: headers(BOB) });
+  assert.strictEqual(asBob.statusCode, 404, 'no roster for an invitee');
+  const listed = await harness.inject({ method: 'GET', url: '/', headers: headers(ALICE) });
+  assert.deepStrictEqual(body(listed).find((c) => c.channel_id === group).invited, [BOB]);
+});
+
+test('only connections may be invited to a group', async () => {
+  const response = await createGroup('01efabcd-7000-8000-8abc-0000000000c2', ALICE, [ALICE, 'e5f6a7b8c']);
+  assert.strictEqual(response.statusCode, 403);
+  assert.strictEqual(body(response).error.code, 'not_connected');
 });
 
 test('a replayed op_id returns the stored outcome without re-applying', async () => {
@@ -127,7 +197,7 @@ test('a plain member cannot add members', async () => {
   assert.strictEqual(body(response).error.code, 'forbidden');
 });
 
-test('the owner adds a member and both old and new members are told', async () => {
+test('the owner adds a member: invited, then both old and new members are told', async () => {
   const response = await harness.inject({
     method: 'POST',
     url: `/${CHANNEL}/members`,
@@ -135,8 +205,12 @@ test('the owner adds a member and both old and new members are told', async () =
     payload: op(ALICE, 2, { members: [DAVE] })
   });
   assert.strictEqual(response.statusCode, 200);
-  assert.strictEqual(body(response).member_count, 4);
+  assert.deepStrictEqual(body(response), { member_count: 3, invited: [DAVE] });
+  const told = harness.lastEvent();
+  assert.strictEqual(told.body.type, 'INVITE_SENT');
+  assert.deepStrictEqual(told.recipients.sort(), [ALICE, BOB, CARL].sort());
 
+  await accept(CHANNEL, DAVE);
   const { recipients, body: event } = harness.lastEvent();
   assert.deepStrictEqual(recipients.sort(), [ALICE, BOB, CARL, DAVE].sort());
   assert.strictEqual(event.type, 'CHANNEL_MEMBER_ADDED');
@@ -266,12 +340,16 @@ function uop(userId, n, extra = {}) {
   return { ...op(userId, n, extra), op_id: mintOpId(userId, { counter: n, rand: nonce }) };
 }
 
-const newGroup = (channelId, creator, members) => harness.inject({
-  method: 'POST',
-  url: '/',
-  headers: headers(creator),
-  payload: uop(creator, 1, { channel_id: channelId, kind: 'group', name: 'Roles', members })
-});
+async function newGroup(channelId, creator, members) {
+  const response = await harness.inject({
+    method: 'POST',
+    url: '/',
+    headers: headers(creator),
+    payload: uop(creator, 1, { channel_id: channelId, kind: 'group', name: 'Roles', members })
+  });
+  await accept(channelId, ...members.filter((id) => id !== creator));
+  return response;
+}
 
 const setRole = (channelId, actor, target, role, n) => harness.inject({
   method: 'PATCH',
@@ -372,6 +450,7 @@ test('with no admin the longest-standing member inherits', async () => {
     headers: headers(ALICE),
     payload: uop(ALICE, 2, { members: [BOB] })
   });
+  await accept(SENIORITY, BOB);
 
   const response = await leaveChannel(SENIORITY, ALICE, 3);
   assert.strictEqual(response.statusCode, 200);

@@ -32,17 +32,24 @@ const VARIANT = {
   CHANNEL_MEMBER_ADDED: 'memberAdded',
   CHANNEL_MEMBER_REMOVED: 'memberRemoved',
   CHANNEL_EDITED: 'channelEdited',
-  CHANNEL_DELETED: 'channelDeleted'
+  CHANNEL_DELETED: 'channelDeleted',
+  INVITE_SENT: 'inviteSent',
+  INVITE_ANSWERED: 'inviteAnswered'
 };
 
 /**
  * Build the fanout event for one channel write.
  * @param {keyof VARIANT} type
  * @param {object} body the variant message (camelCase fields)
- * @param {{channelId: string, actor: string, recipients: string[]}} ctx
+ * @param {{channelId: string, actor: string, recipients: string[], peer?: string,
+ *   flags?: number}} ctx `peer` makes it a 1:1 event (decision 219): the
+ *   envelope names the recipient as its peer and `channelId` is the pair's
+ *   derived DM id; `flags` replaces EVENT_FLAGS (an invite's class INVITE).
  * @returns {EnvelopeEvent}
  */
-function channelServerEvent(type, body, { channelId, actor, recipients }) {
+function channelServerEvent(type, body, {
+  channelId, actor, recipients, peer = '', flags = EVENT_FLAGS
+}) {
   const definition = serverEventPayload();
   const bytes = definition
     .encode(definition.fromObject({ version: 1, type, [VARIANT[type]]: body }))
@@ -55,12 +62,13 @@ function channelServerEvent(type, body, { channelId, actor, recipients }) {
       // (§10.5) and read from it who added, removed or left.
       opId: opIdFor(actor),
       channelId,
+      peer,
       payload: Buffer.concat([Buffer.from([SERVER_EVENT_MARKER]), bytes]),
       // not on the wire (decision 218): message-delivery leaves the actor out
       senderUserId: actor,
       serverTimestampMs: now,
-      // Decision 218: class EVENT, which wakes nobody; no SILENT bit needed.
-      flags: EVENT_FLAGS
+      // Decision 220: class EVENT and SILENT, unless an invite says otherwise.
+      flags
     },
     recipients
   );

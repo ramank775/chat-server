@@ -108,7 +108,9 @@ message Envelope {
   //                 stops and permissions SILENT, a remote on/off wakes
   //     8 PRESENCE  ephemeral, between a client and the server only:
   //                 never fanned out (SYNC_PROTOCOL §22, SILENT)
-  //     6, 9-15     free, for kinds to come (timeline)
+  //     9 INVITE    server-authored invite events (decision 219); the one
+  //                 that brings an invite wakes, the rest are SILENT
+  //     6, 10-15    free, for kinds to come (timeline)
   //   A frame with no flags is a MESSAGE that wakes.
   uint32 flags = 9;
 
@@ -145,7 +147,7 @@ message Ack {
 
   // Server-defined code string. Populated for non-success outcomes.
   // See SYNC_PROTOCOL.md §8 for the enumerated set:
-  //   forbidden, prefix_mismatch, rate_limited,
+  //   forbidden, not_connected, prefix_mismatch, rate_limited,
   //   validation_failed, server_busy, storage_unavailable,
   //   downstream_timeout, fanout_queue_full.
   string reason = 3;
