@@ -26,6 +26,8 @@ jobs:
           cache: "npm"
       - run: npm ci
       - run: npm run lint
+      # the chart once stopped rendering unnoticed (decision 191)
+      - run: helm lint deployment/helm && helm template deployment/helm > /dev/null
 
   # the DB-backed suites once per backend (TEST_DB); everything else runs in both
   unit:
