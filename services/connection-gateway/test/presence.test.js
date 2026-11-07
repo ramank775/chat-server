@@ -213,6 +213,22 @@ test('closing a socket ends its watch', async () => {
   });
 });
 
+test('a presence op to someone not yet connected still counts: the invite gate does not drop it', async () => {
+  await withPresence(async ({ uri, calls, setVerdict }) => {
+    setVerdict(ALICE, BOB, 'not_connected');
+    const alice = connect(uri, ALICE);
+    await alice.opened;
+    alice.send(opFrame([presenceOp(ALICE, BOB, true)]));
+
+    assert.strictEqual(presenceOf(await alice.next(2000)).userId, BOB);
+    assert.deepStrictEqual(calls.map((c) => c.body), [
+      { user_id: ALICE, viewers: [], seen: true },
+      { user_id: BOB, viewers: [ALICE], seen: false }
+    ]);
+    alice.close();
+  });
+});
+
 test('someone who blocked the asker is not asked about (decision 219)', async () => {
   await withPresence(async ({ uri, calls, setVerdict }) => {
     setVerdict(ALICE, BOB, 'blocked');

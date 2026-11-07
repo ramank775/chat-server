@@ -666,7 +666,9 @@ class Gateway extends HttpServiceBase {
           retryAfterMs: 1000
         };
       }
-      if (verdict === 'not_connected') {
+      // A presence op still records the sender's own on-screen state; who may
+      // see whom is profile-ms's call (§22 canSee), not the invite gate's.
+      if (verdict === 'not_connected' && frameClass(wire.flags) !== FRAME_CLASS.PRESENCE) {
         return this.rejectPermanent(dedupKey, opId, wire.opId, REASON.NOT_CONNECTED);
       }
       blocked = verdict === 'blocked';
