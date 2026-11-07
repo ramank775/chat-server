@@ -82,7 +82,7 @@ describe('conformance: sync wire', { skip: BASE ? false : 'CONFORMANCE_BASE_URL 
     const phone = uniquePhone();
     const send = await api('POST', '/v3.0/auth/otp/send', { body: { phone, deviceId: 'd' } });
     assert.equal(send.status, 200);
-    assert.equal(send.body.isExistingAccount, false);
+    assert.equal(send.body.isExistingAccount, undefined);
     const real = await devOtp(phone);
     const wrong = real === '000000' ? '111111' : '000000';
     const verify = await api('POST', '/v3.0/auth/otp/verify', {

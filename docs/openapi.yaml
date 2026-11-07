@@ -419,7 +419,10 @@ paths:
         was started for (else 404 `SESSION_NOT_FOUND`, and no SMS). Without
         `phone` (an app from before) the answer is 410 `RESEND_UNAVAILABLE`
         and the app starts over with `/auth/otp/send`. Verify, rebind verify
-        and `GET /users/me` no longer echo `phone`.
+        and `GET /users/me` no longer echo `phone`. Decision 234: `/auth/otp/send` and this route answer
+        alike (status, body shape, rate limits) whether the number has an
+        account; only verify says (`isNew`, `username`), and rebind start
+        answers `PHONE_TAKEN` only at rebind verify.
       requestBody:
         required: true
         content:
@@ -435,7 +438,7 @@ paths:
                   description: E.164
       responses:
         '200':
-          description: '{sessionId, resendAfterSec, expiresInSec, isExistingAccount}'
+          description: '{sessionId, resendAfterSec, expiresInSec}, the same for an existing and a new number (decision 234)'
         '404':
           description: SESSION_NOT_FOUND
         '410':

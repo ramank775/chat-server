@@ -603,12 +603,11 @@ class ProfileMs extends HttpServiceBase {
       res
     );
     if (!challenge.sessionId) return challenge;
-    const existing = await this.profileDB.getByPhoneKey(key);
+    // Decision 234: nothing here depends on whether the number has an account
     return {
       sessionId: challenge.sessionId,
       resendAfterSec: challenge.resendAfterSec,
-      expiresInSec: challenge.expiresInSec,
-      isExistingAccount: !!existing
+      expiresInSec: challenge.expiresInSec
     };
   }
 
@@ -627,12 +626,11 @@ class ProfileMs extends HttpServiceBase {
       res
     );
     if (!challenge.sessionId) return challenge;
-    const existing = await this.profileDB.getByPhoneKey(key);
+    // Decision 234: nothing here depends on whether the number has an account
     return {
       sessionId: challenge.sessionId,
       resendAfterSec: challenge.resendAfterSec,
-      expiresInSec: challenge.expiresInSec,
-      isExistingAccount: !!existing
+      expiresInSec: challenge.expiresInSec
     };
   }
 
@@ -1240,13 +1238,9 @@ class ProfileMs extends HttpServiceBase {
         .response(errorEnvelope('SAME_PHONE', 'newPhone is already bound to this account'))
         .code(409);
     }
-    // before the PHONE_TAKEN answer, which says whether a number has an account
+    // Decision 234: PHONE_TAKEN says whether a number has an account, so it is
+    // answered only by rebindVerify, once the code proves the number is theirs.
     await this.otpRateLimits(key, clientIp(req));
-    if (await this.profileDB.getByPhoneKey(key)) {
-      return res
-        .response(errorEnvelope('PHONE_TAKEN', 'newPhone is bound to another account'))
-        .code(409);
-    }
     const challenge = await this.sendOtp(
       () =>
         this.authProvider.startOtp({

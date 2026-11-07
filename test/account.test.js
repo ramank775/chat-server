@@ -247,9 +247,20 @@ describe('account delete and phone rebind (AUTH_CONTRACT 8 and 9)', () => {
     assert.equal(same.statusCode, 409);
     assert.equal(JSON.parse(same.payload).error.code, 'SAME_PHONE');
 
+    // 234: a taken number is texted like a free one; PHONE_TAKEN comes after the code
     const taken = await rebindStart(session.accesskey, '+919400000009');
-    assert.equal(taken.statusCode, 409);
-    assert.equal(JSON.parse(taken.payload).error.code, 'PHONE_TAKEN');
+    const free = await rebindStart(session.accesskey, '+919400000019');
+    assert.equal(taken.statusCode, 200);
+    assert.deepEqual(
+      Object.keys(JSON.parse(taken.payload)).sort(),
+      Object.keys(JSON.parse(free.payload)).sort()
+    );
+    const refused = await rebindVerify(session.accesskey, {
+      rebindSessionId: JSON.parse(taken.payload).rebindSessionId,
+      code: app.sms.lastCode('+919400000009')
+    });
+    assert.equal(refused.statusCode, 409);
+    assert.equal(JSON.parse(refused.payload).error.code, 'PHONE_TAKEN');
   });
 
   test('a rebind challenge is bound to its user and its code', async () => {

@@ -29,7 +29,7 @@ describe('auth/otp', () => {
     const res = await send({ phone, deviceId: 'd1' });
     assert.equal(res.statusCode, 200);
     const challenge = JSON.parse(res.payload);
-    assert.equal(challenge.isExistingAccount, false);
+    assert.equal(challenge.isExistingAccount, undefined);
     assert.equal(challenge.resendAfterSec, 30);
     assert.equal(challenge.expiresInSec, 600);
 
@@ -49,11 +49,28 @@ describe('auth/otp', () => {
     assert.ok(body.refreshTokenExpiresAt > body.accesskeyExpiresAt);
   });
 
-  test('a returning user keeps the same user_id and is flagged existing', async () => {
-    const phone = '+919000000002';
+  test('send and resend answer alike for an existing and a new number (234)', async () => {
+    const known = '+919000000002';
+    const first = await signup(app, { phone: known });
+    const shape = (res) => ({ status: res.statusCode, keys: Object.keys(JSON.parse(res.payload)).sort() });
+    const resendOf = (phone, sessionId) =>
+      app.inject({ method: 'POST', url: '/auth/otp/resend', payload: { sessionId, phone } });
+    const a = await send({ phone: known, deviceId: 'd2' });
+    const b = await send({ phone: '+919000000003', deviceId: 'd2' });
+    assert.deepEqual(shape(a), shape(b));
+    assert.deepEqual(JSON.parse(a.payload).resendAfterSec, JSON.parse(b.payload).resendAfterSec);
+    assert.equal(JSON.parse(a.payload).isExistingAccount, undefined);
+    assert.deepEqual(
+      shape(await resendOf(known, JSON.parse(a.payload).sessionId)),
+      shape(await resendOf('+919000000003', JSON.parse(b.payload).sessionId))
+    );
+    assert.ok(first.user_id);
+  });
+
+  test('a returning user keeps the same user_id and verify says it is not new', async () => {
+    const phone = '+919000000005';
     const first = await signup(app, { phone });
-    const res = await send({ phone, deviceId: 'd2' });
-    assert.equal(JSON.parse(res.payload).isExistingAccount, true);
+    assert.equal(first.isNew, true);
     const second = await signup(app, { phone, deviceId: 'd2' });
     assert.equal(second.isNew, false);
     assert.equal(second.user_id, first.user_id);
