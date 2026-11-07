@@ -185,7 +185,8 @@ class Albums {
     const user = extractInfoFromRequest(req);
     const { channelId, albumId } = req.params;
     const album = await this.db.getAlbum(albumId);
-    if (!album || album.channelId !== channelId || (album.keptUntil && album.keptUntil <= new Date())) {
+    const expired = album?.keptUntil && album.keptUntil <= new Date();
+    if (!album || album.channelId !== channelId || expired) {
       return { refused: notFound(res) };
     }
     const peer = album.members?.find((m) => m !== user);
