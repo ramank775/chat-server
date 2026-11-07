@@ -19,7 +19,9 @@ const {
   EVENT_FLAGS, EnvelopeEvent, SERVER_EVENT_MARKER, dmChannelId, opIdFor, serverNow
 } = require('../../libs/v3-envelope');
 const { validateUsername } = require('./username');
-const { PRESENCE, canSee } = require('./presence');
+const {
+  PRESENCE, PRESENCE_LISTED, PRESENCE_USERS_MAX, canSee
+} = require('./presence');
 const { bundleSchema, publicBundle, publishKeys, claimKeys } = require('./device-keys');
 const {
   DISCOVERABILITY,
@@ -48,6 +50,7 @@ const ERASED = {
   avatarUrl: null,
   statusText: null,
   presence: null,
+  presenceUsers: null,
   lastSeenAt: null,
   createdAt: null
 };
@@ -384,6 +387,17 @@ class ProfileMs extends HttpServiceBase {
           avatarUrl: Joi.string().allow(null, ''),
           statusText: Joi.string().allow(null, ''),
           presence: Joi.string().valid(...PRESENCE),
+          // SYNC_PROTOCOL §22: whom `only` / `except` names, the user ids the
+          // phone's labels resolve to (decision 226: never a label)
+          presenceUsers: Joi.when('presence', {
+            is: Joi.valid(...PRESENCE_LISTED).required(),
+            then: Joi.array()
+              .items(Joi.string().pattern(/^[0-9a-f]{9}$/))
+              .max(PRESENCE_USERS_MAX)
+              .unique()
+              .required(),
+            otherwise: Joi.forbidden()
+          }),
           // SYNC_PROTOCOL 11.4: the client's outbound queue adds these; a
           // profile edit is a plain overwrite, so a replay needs no dedup
           op_id: Joi.string().uuid(),
@@ -742,7 +756,10 @@ class ProfileMs extends HttpServiceBase {
     ['displayName', 'avatarUrl', 'statusText'].forEach((field) => {
       if (has(field)) updates[field] = payload[field] || null;
     });
-    if (has('presence')) updates.presence = payload.presence;
+    if (has('presence')) {
+      updates.presence = payload.presence;
+      updates.presenceUsers = payload.presenceUsers || null;
+    }
 
     if (has('username') && (payload.username || null) !== (user.username || null)) {
       const next = payload.username;
@@ -838,7 +855,8 @@ class ProfileMs extends HttpServiceBase {
       await this.deleteProfilePhoto(user.user_id, user.avatarUrl);
     }
     await this.fanoutProfileChange(updated, updates, now);
-    if (has('presence') && user.presence !== updated.presence) {
+    if (has('presence') && (user.presence !== updated.presence
+      || String(user.presenceUsers || []) !== String(updated.presenceUsers || []))) {
       // §22: whoever watches this user sees the new setting now
       try {
         await this.gatewayClient.post('/_internal/presence/refresh', { user_id: user.user_id });

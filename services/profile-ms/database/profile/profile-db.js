@@ -16,7 +16,9 @@
  *   phone; null = never chosen = `everyone`
  * @property {string[]?} discoveryTokens the `chosen` list as scrypt tokens. Written through
  *   `updateUser`, never read back by the other methods: `hasDiscoveryToken` checks one
- * @property {string?} presence who sees last seen and online: everyone (null), contacts, nobody
+ * @property {string?} presence who sees last seen and online: everyone (null), contacts, nobody,
+ *   only (the contacts in `presenceUsers`), except (contacts but those)
+ * @property {string[]?} presenceUsers the user ids `only` / `except` names (SYNC_PROTOCOL §22)
  * @property {Date?} lastSeenAt when the user last came online or left (SYNC_PROTOCOL §22)
  * @property {Date} createdAt
  * @property {Date?} deletedAt tombstone; every lookup filters it out

@@ -257,13 +257,17 @@ components:
           description: The newest photo
     PresenceSetting:
       type: string
-      enum: [everyone, contacts, nobody]
+      enum: [everyone, contacts, nobody, only, except]
       default: everyone
       description: >-
         Who sees the user's last seen and online (SYNC_PROTOCOL 22).
         `contacts`: users connected by an accepted invite (decision 219).
-        Reciprocal: one sees another's only while each shares with the
-        other. A block, either way, hides it whatever the setting.
+        `only`: the contacts in `presenceUsers`; `except`: every contact
+        but them (WhatsApp's "Only share with…" and "My contacts
+        except…"; the phone resolves its labels to the list, the server
+        never sees a label). Reciprocal: one sees another's only while
+        each shares with the other. A block, either way, hides it
+        whatever the setting.
     KeyRegistration:
       type: object
       additionalProperties: false
@@ -465,11 +469,26 @@ paths:
               properties:
                 presence:
                   $ref: '#/components/schemas/PresenceSetting'
+                presenceUsers:
+                  type: array
+                  maxItems: 1000
+                  uniqueItems: true
+                  items:
+                    type: string
+                    pattern: '^[0-9a-f]{9}$'
+                  description: >-
+                    The user ids `only` / `except` names, the whole list;
+                    required with those two and refused with the others,
+                    which drop it. The phone sends it again whenever its
+                    labels change.
       responses:
         '200':
           description: The updated own profile, as GET
         '400':
-          description: '`validation_failed`: not one of the three values'
+          description: >-
+            `validation_failed`: not one of the five values, or
+            `presenceUsers` missing, malformed, over 1000 or with a
+            setting that takes none
         '401':
           $ref: '#/components/responses/AuthError'
         '429':

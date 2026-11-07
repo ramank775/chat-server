@@ -22,6 +22,7 @@ const FIELDS = [
   'statusText',
   'discoverability',
   'presence',
+  'presenceUsers',
   'lastSeenAt',
   'createdAt',
   'updatedAt',
@@ -64,6 +65,7 @@ const SCHEMA = `
   CREATE TABLE IF NOT EXISTS profile_meta (key text PRIMARY KEY, value text);
   ALTER TABLE users ADD COLUMN IF NOT EXISTS presence text;
   ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at timestamptz;
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS presence_users text[];
 `;
 
 class PgProfileDB extends IProfileDB {

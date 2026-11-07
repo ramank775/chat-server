@@ -17,6 +17,22 @@ test('canSee: each must share with the other (WhatsApp reciprocity)', () => {
   assert.equal(canSee(everyone, everyone, true, true), false, 'a block hides it, either way');
 });
 
+test('canSee: only and except name contacts by user id (labels stay on the phone)', () => {
+  const bob = { user_id: 'b0b000000', presence: null };
+  const carl = { user_id: 'ca7100000', presence: null };
+  const only = { user_id: 'a11ce0000', presence: 'only', presenceUsers: [bob.user_id] };
+  const except = { user_id: 'a11ce0000', presence: 'except', presenceUsers: [bob.user_id] };
+  assert.equal(canSee(only, bob, true), true);
+  assert.equal(canSee(only, carl, true), false, 'not listed');
+  assert.equal(canSee(only, bob, false), false, 'listed, but no longer a contact');
+  assert.equal(canSee(bob, only, true), true, 'only shares with bob, so sees him');
+  assert.equal(canSee(carl, only, true), false, 'reciprocity: hidden from carl, sees not his');
+  assert.equal(canSee(except, bob, true), false, 'the exception');
+  assert.equal(canSee(except, carl, true), true);
+  assert.equal(canSee(except, carl, false), false, 'contacts only');
+  assert.equal(canSee({ presence: 'only' }, bob, true), false, 'an empty list is nobody');
+});
+
 describe('presence: setting, last seen and who may see it (SYNC_PROTOCOL 22)', () => {
   /** @type {Awaited<ReturnType<typeof startProfileMs>>} */
   let app;
@@ -59,6 +75,61 @@ describe('presence: setting, last seen and who may see it (SYNC_PROTOCOL 22)', (
     assert.equal(res.statusCode, 200);
     assert.equal(JSON.parse(res.payload).presence, 'contacts');
     assert.equal((await setPresence(alice, 'friends')).statusCode, 400);
+  });
+
+  const setListed = (session, presence, presenceUsers) =>
+    app.inject({
+      method: 'PATCH',
+      url: '/users/me',
+      headers: bearer(session.accesskey),
+      payload: { presence, presenceUsers }
+    });
+
+  test('only / except take a list of user ids, capped, and nothing else does', async () => {
+    const alice = await user();
+    const bob = await user();
+    const ok = await setListed(alice, 'only', [bob.user_id]);
+    assert.equal(ok.statusCode, 200);
+    assert.equal(JSON.parse(ok.payload).presence, 'only');
+    assert.equal((await setListed(alice, 'except', [])).statusCode, 200, 'empty is fine');
+    assert.equal((await setPresence(alice, 'only')).statusCode, 400, 'only needs its list');
+    assert.equal((await setListed(alice, 'contacts', [bob.user_id])).statusCode, 400);
+    assert.equal((await setListed(alice, 'only', ['Not an id'])).statusCode, 400);
+    assert.equal((await setListed(alice, 'only', [bob.user_id, bob.user_id])).statusCode, 400);
+    const many = Array.from({ length: 1001 }, (_, i) => i.toString(16).padStart(9, '0'));
+    assert.equal((await setListed(alice, 'only', many)).statusCode, 400, 'at most 1000');
+    assert.equal((await setListed(alice, 'only', many.slice(0, 1000))).statusCode, 200);
+    const row = await app.db.collection('users').findOne({ user_id: alice.user_id });
+    assert.equal(row.presenceUsers.length, 1000, 'stored');
+    await setPresence(alice, 'nobody');
+    const cleared = await app.db.collection('users').findOne({ user_id: alice.user_id });
+    assert.equal(cleared.presenceUsers, null, 'a plain setting drops the list');
+  });
+
+  test('only: the listed contacts; except: every contact but them', async () => {
+    const alice = await user();
+    const bob = await user();
+    const carl = await user();
+    app.connect(alice, bob);
+    app.connect(alice, carl);
+    await setListed(alice, 'only', [bob.user_id]);
+    assert.deepEqual((await ask(alice, [bob, carl])).viewers, [bob.user_id]);
+    assert.equal(await visible(carl, alice), false, 'reciprocity');
+    await setListed(alice, 'except', [bob.user_id]);
+    assert.deepEqual((await ask(alice, [bob, carl])).viewers, [carl.user_id]);
+    const dave = await user();
+    assert.equal(await visible(alice, dave), false, 'except is still contacts only');
+  });
+
+  test('a new list under the same setting tells the gateway too', async () => {
+    const alice = await user();
+    const bob = await user();
+    await setListed(alice, 'only', []);
+    const sent = app.revokes.length;
+    await setListed(alice, 'only', []);
+    assert.equal(app.revokes.length, sent, 'nothing changed');
+    await setListed(alice, 'only', [bob.user_id]);
+    assert.deepEqual(app.revokes.slice(sent), [{ user_id: alice.user_id }]);
   });
 
   test('a change of setting tells the gateway, so watchers see it at once', async () => {
@@ -118,9 +189,10 @@ describe('presence: setting, last seen and who may see it (SYNC_PROTOCOL 22)', (
     assert.deepEqual(await ask(ghost, [alice], true), { last_seen_ms: 0, viewers: [] });
   });
 
-  test('deleting an account forgets its last seen', async () => {
+  test('deleting an account forgets its last seen and its list', async () => {
     const alice = await user();
     await ask(alice, [], true);
+    await setListed(alice, 'only', ['b0b000000']);
     const res = await app.inject({
       method: 'POST',
       url: '/users/me/delete',
@@ -130,5 +202,6 @@ describe('presence: setting, last seen and who may see it (SYNC_PROTOCOL 22)', (
     assert.equal(res.statusCode, 200);
     const row = await app.db.collection('users').findOne({ user_id: alice.user_id });
     assert.equal(row.lastSeenAt, null);
+    assert.equal(row.presenceUsers, null);
   });
 });
