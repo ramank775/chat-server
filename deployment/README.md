@@ -119,8 +119,10 @@ Take a dump first (Backups): an older image cannot run on the rewritten
 database, so going back means restoring that dump.
 
 - Generate it once on the server (`openssl rand -hex 32`) into `.env`.
-  Never commit it, never paste it anywhere else. Back it up with the
-  database: a restored dump is useless without the pepper it was keyed with.
+  Never commit it, never paste it anywhere else. Keep a copy in a password
+  manager, never in the same place as the database backups: a restored dump
+  is useless without it, but a leaked backup that also holds the pepper lets
+  anyone recover every number by trying them all.
 - **Rotation is not supported.** With the numbers gone, the server cannot
   re-key them: a new pepper would make every existing account unfindable
   and sign each returning user up as a new account. The database records a
@@ -128,8 +130,9 @@ database, so going back means restoring that dump.
   ("PHONE_PEPPER differs from the one this database was keyed with").
   If the pepper leaks, it alone reveals nothing; with a copy of the
   database it lets someone test numbers against the stored keys. A real
-  rotation would need every user to log in again with an OTP, which hands
-  the server the number to re-key; it is not built.
+  rotation would recover each number with the old pepper (trying every
+  number, minutes on the server) and re-key it with a new one; it is not
+  built.
 
 ## Forcing an app update
 
