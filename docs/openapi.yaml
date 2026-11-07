@@ -1289,58 +1289,6 @@ paths:
           $ref: '#/components/responses/AuthError'
         '403':
           $ref: '#/components/responses/AuthError'
-  /v3.0/crash-reports:
-    post:
-      tags:
-        - v3.0 > Users
-      summary: Send a crash report
-      description: >-
-        Decision 214's replacement for Sentry, sent only when the user
-        agrees. No message content, phone numbers, contacts or keys: only
-        the error's type and stack frames. Stored without the sender, kept
-        `--crash-report-days` (30), 20 per account per day. Allowed before
-        a username is picked.
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: false
-              required: [at, kind, build, android, model, trace]
-              properties:
-                at:
-                  type: integer
-                  description: When it happened, ms since epoch (phone clock)
-                kind:
-                  type: string
-                  enum: [dart, android]
-                build:
-                  type: string
-                  maxLength: 40
-                  example: 3.0.0+90
-                android:
-                  type: string
-                  maxLength: 40
-                  example: 7.0 (API 24)
-                model:
-                  type: string
-                  maxLength: 80
-                trace:
-                  type: string
-                  maxLength: 16000
-                  description: The error's type, then its stack frames
-      responses:
-        '204':
-          description: Stored
-        '400':
-          description: validation_failed
-        '401':
-          $ref: '#/components/responses/AuthError'
-        '429':
-          description: RATE_LIMITED
   /v3.0/timeline/posts:
     post:
       tags:

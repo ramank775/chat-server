@@ -32,7 +32,6 @@ const {
 } = require('./phone-key');
 const { Timeline, addTimelineOptions } = require('./timeline');
 const timelineDB = require('./database/timeline');
-const crashReports = require('./crash-reports');
 const { uuidv4, hashSecret, verifySecret, sha256, errorEnvelope } = require('../../helper');
 
 /**
@@ -99,7 +98,6 @@ function parseOptions(argv) {
   cmd = eventStore.addEventStoreOptions(cmd);
   cmd = addPhoneKeyOptions(cmd);
   cmd = addTimelineOptions(cmd);
-  cmd = crashReports.addCrashReportOptions(cmd);
   cmd.option(
     '--new-message-topic <new-message-topic>',
     'Topic the REST-write fanout envelopes are published to (SYNC_PROTOCOL 10.2)'
@@ -155,7 +153,6 @@ async function initResource(options) {
     .then(initHttpResource)
     .then(profileDB.initializeDatabase)
     .then(timelineDB.initialize)
-    .then(crashReports.initialize)
     .then(initializeAuthProvider)
     .then(initMemCache)
     .then(eventStore.initializeEventStore({ producer: true }));
@@ -266,7 +263,6 @@ class ProfileMs extends HttpServiceBase {
     this.mediaClient = new HttpClient(this.options.mediaMsEndpoint);
     this.pepper = phonePepper(this.options);
     this.timeline = new Timeline(this);
-    this.crashReports = new crashReports.CrashReports(this);
   }
 
   /** The stored form of a lookup hash (decision 223). */
@@ -499,7 +495,6 @@ class ProfileMs extends HttpServiceBase {
     );
 
     this.timeline.addRoutes();
-    this.crashReports.addRoutes();
   }
 
   /**
@@ -1386,7 +1381,6 @@ class ProfileMs extends HttpServiceBase {
   async shutdown() {
     await super.shutdown();
     this.timeline.stop();
-    this.crashReports.stop();
     await this.profileDB.dispose();
     await this.authProvider.dispose();
   }

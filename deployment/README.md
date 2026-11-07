@@ -225,29 +225,18 @@ Each container keeps at most 5 × 50 MB.
 
 ## Crash reports
 
-Phones send them only when their user agrees: a prompt after the app
-closed unexpectedly or hit an error, or Settings › Privacy › Send crash
-reports automatically. A report has the app build, Android version,
-device model, the error's type and stack frames (no message text) and
-when; not who sent it. They are kept 30 days (`--crash-report-days`), at
-most 20 a day per account. The newest:
+Crash reports come by email to vartalap@one9x.org: after the app closed
+unexpectedly or hit an error, it asks, then opens the phone's email app
+with the report filled in for the user to read and send. A report has the
+app build, Android version, device model, the time, and the error's type
+and stack frames (no message text). The server receives none.
 
-```bash
-docker compose -f docker-compose.prod.yml exec postgres sh -c \
-  'psql -U "$POSTGRES_USER" -d chat -c "SELECT at, kind, build, android, model,
-     split_part(trace, chr(10), 1) AS error FROM crash_reports
-     ORDER BY at DESC LIMIT 20"'
-```
-
-One in full: `... -x -c "SELECT * FROM crash_reports ORDER BY at DESC LIMIT 1"`.
-How often each error comes, newest build first: `SELECT build,
-split_part(trace, chr(10), 1), count(*) FROM crash_reports GROUP BY 1, 2
-ORDER BY 1 DESC, 3 DESC`. On a Mongo stack:
-`db.crash_reports.find().sort({ at: -1 }).limit(20)` in `mongosh`.
-
-An `android` trace from a release build has R8's short class names: read
-it with that build's `mapping.txt` (kept in the app's release artifact)
-and `retrace mapping.txt trace.txt` from the Android SDK's cmdline-tools.
+An `android` trace from a release build has R8's short class names. Read
+it with that build's `mapping.txt`, kept in the app's release artifact
+(`build/app/outputs/mapping/<variant>Release/mapping.txt`; prodGms for
+Play installs, prodFoss otherwise): save the trace from the email to
+`trace.txt` and run `retrace mapping.txt trace.txt` from the Android SDK's
+cmdline-tools.
 
 ## Never in production
 
