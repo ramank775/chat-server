@@ -226,7 +226,8 @@ message ChannelDeleted {
 }
 
 // Emitted on REST `PATCH /v3.0/users/me` with profile fields, to every
-// user sharing at least one channel with the editor (v3.0 scope).
+// user sharing at least one channel with the editor, and to their
+// connections with no block either way, addressed 1:1 (SYNC_PROTOCOL 24.2).
 //
 // Each field is `optional` so a partial patch (e.g. only display_name)
 // can be transmitted without forcing recipients to guess at unset vs
