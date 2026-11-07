@@ -56,7 +56,7 @@ class ServiceBase {
   async run() {
     this.log.info(
       `Starting service with options ${JSON.stringify(this.options, (key, value) => {
-        if (/(Password|Secret|Key|KeyId|Cert|Token)$/i.test(key)) return '*****';
+        if (/(Password|Pass|Secret|Key|KeyId|Cert|Token|Jwt|Pepper)$/i.test(key)) return '*****';
         // the password inside a connection string (`--pg-url`)
         return typeof value === 'string' ? value.replace(/(\/\/[^:/@\s]+:)[^@\s]*@/, '$1*****@') : value;
       })}`
