@@ -208,6 +208,53 @@ components:
         next:
           type: [string, 'null']
           description: Pass as `before` for the next page; null on the last
+    AlbumPhoto:
+      type: object
+      properties:
+        fileId:
+          type: string
+          description: >-
+            A media-ms upload (category `album`, not encrypted), fetched with
+            `GET /v3.0/assets/download/{fileId}/presigned_url`; its id in the album
+        width:
+          type: integer
+        height:
+          type: integer
+        uploader:
+          $ref: '#/components/schemas/UserId'
+        addedAt:
+          type: integer
+          description: ms since epoch, server time
+    Album:
+      type: object
+      properties:
+        albumId:
+          type: string
+          format: uuid
+        channelId:
+          type: string
+        title:
+          type: string
+        date:
+          type: [string, 'null']
+          description: The occasion's day, `YYYY-MM-DD`
+        creator:
+          $ref: '#/components/schemas/UserId'
+        createdAt:
+          type: integer
+          description: ms since epoch
+        keptUntil:
+          type: [integer, 'null']
+          description: >-
+            ms since epoch: the album and its photos are deleted then
+            (null = kept for good)
+        photoCount:
+          type: integer
+        cover:
+          oneOf:
+            - $ref: '#/components/schemas/AlbumPhoto'
+            - type: 'null'
+          description: The newest photo
     PresenceSetting:
       type: string
       enum: [everyone, contacts, nobody]
@@ -331,6 +378,25 @@ tags:
       the poster deletes one, and with the poster's account; media-ms
       deletes any `timeline` upload a day after that retention, so a photo
       whose post failed goes too. Served by profile-ms.
+  - name: v3.0 > Albums
+    description: >-
+      Occasion albums in a chat (decision 233): an event's photos, kept on the
+      server and not end-to-end encrypted, like the timeline; only the chat
+      sees them: a group's current members, or the two people of a 1:1 while
+      they are connected with no block either way (a 1:1's routes name the
+      other person as `peer` until an album exists). Anyone in the chat adds
+      photos; a photo's uploader, the album's creator or a group's owner or
+      admin removes one; the creator or a group's owner or admin renames or
+      deletes the album. Any other caller gets 403 `forbidden`, an unknown
+      album 404 `not_found`. An album and its photos are deleted
+      `--album-retention-days` (90) after it was made (`keptUntil`), with its
+      group, when deleted, and a 1:1's with either account; a deleted account's
+      photos leave every album. media-ms deletes any `album` upload a day after
+      that retention, so a photo that was never added goes too. Nothing is
+      pushed: the app reads albums when it shows them. At most 100 albums per
+      chat and 500 photos per album; 10 albums per user per hour and 30 per
+      day; 300 photos per user per hour and 1000 per day (429
+      `rate_limited`). Served by channel-ms.
   - name: v3.0 > Connecting
     description: >-
       Invite-only (decisions 219-221, SYNC_PROTOCOL 23): nothing flows 1:1
@@ -1514,6 +1580,298 @@ paths:
           $ref: '#/components/responses/AuthError'
         '404':
           description: POST_NOT_FOUND (none, or not the caller's)
+  /v3.0/channels/{channelId}/albums:
+    get:
+      tags:
+        - v3.0 > Albums
+      summary: A chat's albums, newest first
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: channelId
+          required: true
+          schema:
+            type: string
+          description: A group's id, or a 1:1's derived id
+        - in: query
+          name: peer
+          schema:
+            $ref: '#/components/schemas/UserId'
+          description: A 1:1's other person (required for a 1:1)
+      responses:
+        '200':
+          description: '`{albums: Album[]}`, the photos left out'
+        '401':
+          $ref: '#/components/responses/AuthError'
+        '403':
+          description: forbidden (not in this chat, or not allowed this change)
+    post:
+      tags:
+        - v3.0 > Albums
+      summary: Make an album in a chat
+      description: >-
+        A retry with the same `albumId` by its creator returns the album (200).
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: channelId
+          required: true
+          schema:
+            type: string
+          description: A group's id, or a 1:1's derived id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [albumId, title]
+              properties:
+                albumId:
+                  type: string
+                  format: uuid
+                  description: Minted by the phone, so a retry is idempotent
+                title:
+                  type: string
+                  maxLength: 100
+                date:
+                  type: [string, 'null']
+                  pattern: '^\d{4}-\d{2}-\d{2}$'
+                peer:
+                  $ref: '#/components/schemas/UserId'
+                  description: A 1:1's other person (required for a 1:1)
+      responses:
+        '201':
+          description: Made
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Album'
+        '200':
+          description: A retry of an album already made
+        '401':
+          $ref: '#/components/responses/AuthError'
+        '403':
+          description: forbidden (not in this chat, or not allowed this change)
+        '409':
+          description: album_exists (someone else's id), album_limit (100 in this chat)
+        '429':
+          description: rate_limited
+  /v3.0/channels/{channelId}/albums/{albumId}:
+    get:
+      tags:
+        - v3.0 > Albums
+      summary: An album and a page of its photos
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: channelId
+          required: true
+          schema:
+            type: string
+          description: A group's id, or a 1:1's derived id
+        - in: path
+          name: albumId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: order
+          schema:
+            type: string
+            enum: [newest, oldest]
+            default: newest
+        - in: query
+          name: cursor
+          schema:
+            type: string
+          description: The `next` of the page before
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 60
+      responses:
+        '200':
+          description: >-
+            `{album: Album, photos: AlbumPhoto[], next}`; `next` is null on
+            the last page
+        '401':
+          $ref: '#/components/responses/AuthError'
+        '403':
+          description: forbidden (not in this chat, or not allowed this change)
+        '404':
+          description: not_found (no such album in this chat, or past its keep date)
+    patch:
+      tags:
+        - v3.0 > Albums
+      summary: Rename an album or change its date (its creator, or a group admin)
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: channelId
+          required: true
+          schema:
+            type: string
+          description: A group's id, or a 1:1's derived id
+        - in: path
+          name: albumId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                title:
+                  type: string
+                  maxLength: 100
+                date:
+                  type: [string, 'null']
+      responses:
+        '200':
+          description: The album
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Album'
+        '401':
+          $ref: '#/components/responses/AuthError'
+        '403':
+          description: forbidden (not in this chat, or not allowed this change)
+        '404':
+          description: not_found (no such album in this chat, or past its keep date)
+    delete:
+      tags:
+        - v3.0 > Albums
+      summary: Delete an album and its photos (its creator, or a group admin)
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: channelId
+          required: true
+          schema:
+            type: string
+          description: A group's id, or a 1:1's derived id
+        - in: path
+          name: albumId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Deleted, for everyone
+        '401':
+          $ref: '#/components/responses/AuthError'
+        '403':
+          description: forbidden (not in this chat, or not allowed this change)
+        '404':
+          description: not_found (no such album in this chat, or past its keep date)
+  /v3.0/channels/{channelId}/albums/{albumId}/photos:
+    post:
+      tags:
+        - v3.0 > Albums
+      summary: Add photos uploaded through /v3.0/assets with category `album`
+      description: A photo already in the album is skipped, so a retry adds nothing twice.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: channelId
+          required: true
+          schema:
+            type: string
+          description: A group's id, or a 1:1's derived id
+        - in: path
+          name: albumId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [photos]
+              properties:
+                photos:
+                  type: array
+                  minItems: 1
+                  maxItems: 50
+                  items:
+                    type: object
+                    required: [fileId]
+                    properties:
+                      fileId:
+                        type: string
+                      width:
+                        type: integer
+                      height:
+                        type: integer
+      responses:
+        '200':
+          description: '`{album: Album, photos: AlbumPhoto[]}`, `photos` the ones added'
+        '401':
+          $ref: '#/components/responses/AuthError'
+        '403':
+          description: forbidden (not in this chat, or not allowed this change)
+        '404':
+          description: not_found (no such album in this chat, or past its keep date)
+        '409':
+          description: album_full (500 photos)
+        '429':
+          description: rate_limited
+  /v3.0/channels/{channelId}/albums/{albumId}/photos/{fileId}:
+    delete:
+      tags:
+        - v3.0 > Albums
+      summary: Remove a photo (its uploader, the album's creator, or a group admin)
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: channelId
+          required: true
+          schema:
+            type: string
+          description: A group's id, or a 1:1's derived id
+        - in: path
+          name: albumId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: path
+          name: fileId
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Removed, and the file deleted
+        '401':
+          $ref: '#/components/responses/AuthError'
+        '403':
+          description: forbidden (not in this chat, or not allowed this change)
+        '404':
+          description: not_found (no such album, or no such photo in it)
   /v1.0/assets/upload/presigned_url:
     get:
       tags:

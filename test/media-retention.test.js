@@ -32,7 +32,14 @@ before(async () => {
   service = new MediaMetadataMS({
     ...context,
     // no timer: the test runs the sweep itself
-    options: { ...options, port: 0, host: '127.0.0.1', mediaTtlDays: 0, timelineRetentionDays: 0 },
+    options: {
+      ...options,
+      port: 0,
+      host: '127.0.0.1',
+      mediaTtlDays: 0,
+      timelineRetentionDays: 0,
+      albumRetentionDays: 0
+    },
     log: { info: noop, error: noop, debug: noop },
     statsClient: { increment: noop, timing: noop },
     storage: {
@@ -48,6 +55,7 @@ before(async () => {
   await service.init();
   service.options.mediaTtlDays = 30;
   service.options.timelineRetentionDays = 30;
+  service.options.albumRetentionDays = 90;
 });
 
 after(async () => {
@@ -115,4 +123,14 @@ test('a timeline photo goes a day after the timeline retention, posted or not', 
   await service.sweepExpired(at + 31 * DAY_MS + 1000);
   assert.equal(await service.db.getRecord(photo), null);
   assert.ok(deleted.some((f) => f.fileId === photo && f.category === 'timeline'));
+});
+
+test('an album photo goes a day after the album retention, added or not', async () => {
+  const photo = await stored(undefined, 'album');
+  const at = Date.now();
+  await service.sweepExpired(at + 90 * DAY_MS);
+  assert.ok(await service.db.getRecord(photo), 'kept while an album may still hold it');
+  await service.sweepExpired(at + 91 * DAY_MS + 1000);
+  assert.equal(await service.db.getRecord(photo), null);
+  assert.ok(deleted.some((f) => f.fileId === photo && f.category === 'album'));
 });

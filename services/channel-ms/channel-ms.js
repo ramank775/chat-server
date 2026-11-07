@@ -15,6 +15,7 @@ const {
 const { addDatabaseOptions, initializeDatabase } = require('./database');
 const { REPORT_RETENTION_SEC } = require('./database/channel-db');
 const { channelServerEvent } = require('./server-event');
+const { Albums, addAlbumOptions } = require('./albums');
 
 const asMain = require.main === module;
 
@@ -75,6 +76,7 @@ function parseOptions(argv) {
   cmd = addDatabaseOptions(cmd);
   cmd = MemCache.addMemCacheOptions(cmd);
   cmd = eventStore.addEventStoreOptions(cmd);
+  cmd = addAlbumOptions(cmd);
   cmd = cmd
     .option(
       '--new-message-topic <new-message-topic>',
@@ -162,6 +164,7 @@ class ChannelMs extends HttpServiceBase {
     this.eventStore = this.context.eventStore;
     this.memCache = context.memCache;
     this.mediaClient = new HttpClient(this.options.mediaMsEndpoint);
+    this.albums = new Albums(this);
   }
 
   async init() {
@@ -244,6 +247,8 @@ class ChannelMs extends HttpServiceBase {
         })
       }
     });
+
+    this.albums.addRoutes();
 
     // the gateway asks before it relays a 1:1 frame
     this.addInternalRoute('/gate/{from}/{to}', 'GET', this.gate.bind(this), {
@@ -380,6 +385,7 @@ class ChannelMs extends HttpServiceBase {
     await Promise.all(channels.map((channel) => this.leave(channel, userId, userId)));
     // decision 219: their invites, connections and blocks go with them
     await this.db.forget(userId);
+    await this.albums.eraseUser(userId);
     return { removed: channels.length };
   }
 
@@ -627,6 +633,7 @@ class ChannelMs extends HttpServiceBase {
     const invited = await this.invitedTo(channelId);
     await this.db.deleteChannel(channelId);
     await this.deleteGroupPhoto(channel);
+    await this.albums.dropChat(channelId);
     // its invitees too, so their pending invite goes (decision 221)
     await this.fanout('CHANNEL_DELETED', channel, user, [...memberIds(channel), ...invited], {
       channelId,
@@ -960,6 +967,7 @@ class ChannelMs extends HttpServiceBase {
     if (!remaining.length) {
       await this.db.deleteChannel(channel.channelId);
       await this.deleteGroupPhoto(channel);
+      await this.albums.dropChat(channel.channelId);
       await this.fanout('CHANNEL_DELETED', channel, actor, [userId], {
         channelId: channel.channelId,
         deletedAtMs: removedAtMs
@@ -1027,8 +1035,10 @@ class ChannelMs extends HttpServiceBase {
 
   async shutdown() {
     clearInterval(this.reportTimer);
+    this.albums.stop();
     await super.shutdown();
     await this.db.dispose();
+    await this.context.albumDb.dispose();
     await this.memCache.dispose();
     await this.eventStore.dispose();
   }

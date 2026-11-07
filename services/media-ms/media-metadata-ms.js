@@ -40,6 +40,13 @@ function parseOptions(argv) {
     (c) => Number(c),
     30
   );
+  // channel-ms' flag too, which deletes the albums
+  cmd.option(
+    '--album-retention-days <days>',
+    'Delete an album photo a day after this many days (0 = keep forever)',
+    (c) => Number(c),
+    90
+  );
   return cmd.parse(argv).opts();
 }
 
@@ -120,7 +127,8 @@ class MediaMetadataMS extends HttpServiceBase {
       }
     });
 
-    if (this.options.mediaTtlDays > 0 || this.options.timelineRetentionDays > 0) {
+    const { mediaTtlDays, timelineRetentionDays, albumRetentionDays } = this.options;
+    if (mediaTtlDays > 0 || timelineRetentionDays > 0 || albumRetentionDays > 0) {
       this.sweepTimer = setInterval(() => {
         this.sweepExpired().catch((error) => this.log.error(`Media sweep failed: ${error.message}`));
       }, SWEEP_EVERY_MS).unref();
@@ -146,18 +154,22 @@ class MediaMetadataMS extends HttpServiceBase {
    * A message file is deleted --media-ttl-days after anyone last sent it
    * (reuse restarts the clock). A timeline photo goes a day after the
    * timeline's retention, when any post naming it is gone: this takes the
-   * photo of a post that failed, and one whose delete failed. Profile and
-   * group photos never expire. A failed delete stays marked and is retried
-   * by the next sweep.
+   * photo of a post that failed, and one whose delete failed. An album
+   * photo likewise goes a day after the album retention, the longest any
+   * album keeps it. Profile and group photos never expire. A failed delete
+   * stays marked and is retried by the next sweep.
    * ponytail: an orphaned timeline photo waits out the whole retention; if
    * that ever matters, have createPost claim its photos and sweep unclaimed
    * ones after an hour.
    */
   async sweepExpired(now = Date.now()) {
-    const { mediaTtlDays, timelineRetentionDays } = this.options;
+    const { mediaTtlDays, timelineRetentionDays, albumRetentionDays } = this.options;
     if (mediaTtlDays > 0) await this.sweep('message', new Date(now - mediaTtlDays * DAY_MS));
     if (timelineRetentionDays > 0) {
       await this.sweep('timeline', new Date(now - (timelineRetentionDays + 1) * DAY_MS));
+    }
+    if (albumRetentionDays > 0) {
+      await this.sweep('album', new Date(now - (albumRetentionDays + 1) * DAY_MS));
     }
   }
 
