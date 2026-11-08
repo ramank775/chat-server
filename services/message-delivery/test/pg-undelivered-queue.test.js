@@ -75,6 +75,17 @@ describe('pg undelivered queue (DECISIONS row 129)', { skip: TEST_DB !== 'pg' },
     assert.deepStrictEqual((await queue.pending(ALICE, DEVICE_2)).envelopes.map(String), ['fresh']);
   });
 
+  test('the job deletes recent rows past their expiry (decision 258)', async () => {
+    const queue = await emptyQueue(DB);
+    const now = Date.now();
+    await queue.append({ ...entry('position', 1, [ALICE]), expiresAt: new Date(now - 1000) });
+    await queue.append(entry('message', 2, [ALICE]));
+    await queue.maintain();
+
+    const { rows } = await pool.query('SELECT envelope FROM undelivered');
+    assert.deepStrictEqual(rows.map((row) => String(row.envelope)), ['message']);
+  });
+
   test('a store never fails for want of a partition', async () => {
     const queue = await emptyQueue(DB);
     const name = partitionName(dayOf(Date.now()));

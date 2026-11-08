@@ -5,18 +5,20 @@ const { ensureSchema } = require('../pg-utils');
 const { isUuid } = require('../v3-envelope');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
 const RETENTION_MS = TTL_SEC * 1000;
 
-/** Partitions exist this many days past today, so no insert waits on the daily job. */
+/** Partitions exist this many days past today, so no insert waits on the job. */
 const AHEAD_DAYS = 3;
 
 /** The maintenance job's lock. */
 const MAINTAIN_LOCK = "hashtext('vartalap.undelivered'), 0";
 
 /**
- * `undelivered` is the timeline, append-only, one partition per UTC day of
- * `at`: nothing ever deletes a row, whole days are dropped past the 30-day
- * maximum instead, and reads leave out rows past their own `expires_at`. One
+ * `undelivered` is the timeline, one partition per UTC day of `at`: whole
+ * days are dropped past the 30-day maximum, reads leave out rows past their
+ * own `expires_at`, and the hourly job deletes the short-lived ones (live
+ * location, timed messages) once expired (`SWEEP`). One
  * row per fanout, its readers in `recipients`, the wire Envelope in
  * `envelope`. Ids in their binary types (decision 218): user ids as the
  * 36-bit number, the others as uuid. `sender`/`sender_device` are null when
@@ -71,6 +73,16 @@ const PENDING = `
     AND (sender IS DISTINCT FROM $1 OR sender_device IS DISTINCT FROM $3::uuid)
   ORDER BY ts, op_id LIMIT $4`;
 
+/**
+ * The expired rows of the last two days, so a live-location position (kept 15
+ * minutes) or a timed message is gone from disk within the hour, as the
+ * privacy policy says, not when its day is dropped (decision 258). `at` keeps
+ * it to two partitions.
+ * ponytail: a ttl_sec over a day expires in an older partition and waits for
+ * the day drop; widen the window if a longer short-lived kind appears.
+ */
+const SWEEP = 'DELETE FROM undelivered WHERE at >= $1 AND expires_at <= $2';
+
 /** Every day partition, attached or left behind by a run that died mid-drop. */
 const PARTITIONS = `
   SELECT c.relname AS name, i.inhrelid IS NOT NULL AS attached, i.inhdetachpending AS pending
@@ -109,21 +121,22 @@ class PgUndeliveredQueue {
     this.#log = log;
   }
 
-  /** Tables, today's partitions, and the daily job. `init` runs it at boot. */
+  /** Tables, today's partitions, and the hourly job. `init` runs it at boot. */
   async init() {
     await ensureSchema(this.#pool, DROP_OLD_SHAPE + SCHEMA);
     await this.maintain();
     this.#timer = setInterval(() => {
       this.maintain().catch((error) =>
         this.#log?.error(`undelivered partition job failed: ${error.message}`));
-    }, DAY_MS);
+    }, HOUR_MS);
     this.#timer.unref();
   }
 
   /**
-   * Create the partitions for `now`'s day and the next `AHEAD_DAYS`, and drop
-   * every day that ended more than the retention ago (detach concurrently,
-   * then drop, so enqueues and pulls never wait on it). Every process runs
+   * Create the partitions for `now`'s day and the next `AHEAD_DAYS`, delete
+   * the recent rows past their `expires_at` (`SWEEP`), and drop every day
+   * that ended more than the retention ago (detach concurrently, then drop,
+   * so enqueues and pulls never wait on it). Every process runs
    * it; the session lock queues them, and whoever comes second finds it done.
    * @param {Date} [now]
    */
@@ -136,6 +149,7 @@ class PgUndeliveredQueue {
       await client.query(days.map((day) => `
         CREATE TABLE IF NOT EXISTS ${partitionName(day)} PARTITION OF undelivered
         FOR VALUES FROM (${bound(day)}) TO (${bound(day + DAY_MS)})`).join(';'));
+      await client.query(SWEEP, [new Date(now.getTime() - 2 * DAY_MS), now]);
 
       const { rows } = await client.query(PARTITIONS);
       const expired = rows.filter(({ name }) =>
