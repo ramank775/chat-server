@@ -20,6 +20,8 @@ imagePullSecrets: []
 #   DB_PASSWORD                       with mongo.user or pg.host set
 #   SMS_GATE_USER, SMS_GATE_PASSWORD  with sms.sender sms-gate-app
 #   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID  with sms.sender telegram
+#   VERIFYNOW_CUSTOMER_ID, VERIFYNOW_PASSWORD, VERIFYNOW_EMAIL,
+#   VERIFYNOW_COUNTRIES (default 91)  with sms.sender verifynow
 #   FCM_SERVICE_ACCOUNT_KEY           optional: push for Play builds
 secretName: vartalap
 
@@ -54,9 +56,9 @@ s3:
   bucket: vartalap
   baseDir: media
 
-# mock, sms-gate-app or telegram (README, Testing without a SIM)
+# verifynow (launch), telegram (README, Testing without a SIM), sms-gate-app or mock
 sms:
-  sender: sms-gate-app
+  sender: verifynow
   gateUrl: https://api.sms-gate.app
 
 vapid:

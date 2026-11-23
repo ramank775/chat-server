@@ -8,6 +8,7 @@
  * @property {string} deviceId
  * @property {string} codeHash
  * @property {string} encryptedCode base64 AES-256-GCM nonce + ciphertext + tag, bound to sessionId
+ * @property {string} [gatewayRef] the gateway's reference when it makes and checks the code (decision 268)
  * @property {number} attempts wrong code counter, locked at 5 (AUTH_CONTRACT 10.3)
  * @property {boolean} consumed
  * @property {Date} resendAfter

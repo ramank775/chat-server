@@ -29,13 +29,17 @@ class SelfHostedOtpAuthProvider extends IAuthProvider {
 
   #otpKey;
 
+  #resendAfterSec;
+
   constructor(context) {
     super(context);
     this.#db = context.authDB;
     this.#sms = context.smsSender;
+    this.#resendAfterSec = this.#sms.resendAfterSec || OTP_RESEND_AFTER_SEC;
     const { otpEncryptionKey, smsSender } = context.options;
-    if (!otpEncryptionKey && smsSender === 'mock') {
-      // shortcut: mock SMS uses a process-local key; set a stable key to test restarts.
+    if (!otpEncryptionKey && (smsSender === 'mock' || this.#sms.ownsCode)) {
+      // shortcut: mock SMS uses a process-local key; set a stable key to test
+      // restarts. A sender that owns the code (decision 268) never uses it.
       this.#otpKey = crypto.randomBytes(32);
     } else {
       if (!/^[0-9a-f]{64}$/i.test(otpEncryptionKey || '')) {
@@ -59,31 +63,37 @@ class SelfHostedOtpAuthProvider extends IAuthProvider {
       };
     }
     const sessionId = uuidv4();
-    const code = sixDigitCode();
-    const nonce = crypto.randomBytes(12);
-    const cipher = crypto.createCipheriv('aes-256-gcm', this.#otpKey, nonce);
-    cipher.setAAD(Buffer.from(sessionId));
-    const encryptedCode = Buffer.concat([
-      nonce, cipher.update(code, 'utf8'), cipher.final(), cipher.getAuthTag()
-    ]).toString('base64');
     // send before the insert so a gateway failure leaves no phantom session (12)
-    await this.#sms.send({ phone, code });
+    let secret;
+    if (this.#sms.ownsCode) {
+      // the gateway makes and checks the code; we keep its reference
+      secret = { gatewayRef: await this.#sms.start({ phone }) };
+    } else {
+      const code = sixDigitCode();
+      const nonce = crypto.randomBytes(12);
+      const cipher = crypto.createCipheriv('aes-256-gcm', this.#otpKey, nonce);
+      cipher.setAAD(Buffer.from(sessionId));
+      const encryptedCode = Buffer.concat([
+        nonce, cipher.update(code, 'utf8'), cipher.final(), cipher.getAuthTag()
+      ]).toString('base64');
+      await this.#sms.send({ phone, code });
+      secret = { codeHash: await hashSecret(code), encryptedCode };
+    }
     await this.#db.createOtpSession({
       sessionId,
       phoneKey,
       deviceId,
       userId,
-      codeHash: await hashSecret(code),
-      encryptedCode,
+      ...secret,
       attempts: 0,
       consumed: false,
-      resendAfter: new Date(now.getTime() + OTP_RESEND_AFTER_SEC * 1000),
+      resendAfter: new Date(now.getTime() + this.#resendAfterSec * 1000),
       expiresAt: new Date(now.getTime() + OTP_EXPIRES_IN_SEC * 1000),
       createdAt: now
     });
     return {
       sessionId,
-      resendAfterSec: OTP_RESEND_AFTER_SEC,
+      resendAfterSec: this.#resendAfterSec,
       expiresInSec: OTP_EXPIRES_IN_SEC
     };
   }
@@ -106,6 +116,18 @@ class SelfHostedOtpAuthProvider extends IAuthProvider {
         expiresInSec: secondsUntil(session.expiresAt, now)
       };
     }
+    const update = { resendAfter: new Date(now.getTime() + this.#resendAfterSec * 1000) };
+    if (this.#sms.ownsCode) {
+      await beforeSend();
+      // the gateway texts a new code; the old one stops working
+      update.gatewayRef = await this.#sms.start({ phone });
+      await this.#db.updateOtpSession(sessionId, update);
+      return {
+        sessionId,
+        resendAfterSec: this.#resendAfterSec,
+        expiresInSec: secondsUntil(session.expiresAt, now)
+      };
+    }
     let code;
     try {
       const sealed = Buffer.from(session.encryptedCode, 'base64');
@@ -123,12 +145,10 @@ class SelfHostedOtpAuthProvider extends IAuthProvider {
     }
     await beforeSend();
     await this.#sms.send({ phone, code });
-    await this.#db.updateOtpSession(sessionId, {
-      resendAfter: new Date(now.getTime() + OTP_RESEND_AFTER_SEC * 1000)
-    });
+    await this.#db.updateOtpSession(sessionId, update);
     return {
       sessionId,
-      resendAfterSec: OTP_RESEND_AFTER_SEC,
+      resendAfterSec: this.#resendAfterSec,
       expiresInSec: secondsUntil(session.expiresAt, now)
     };
   }
@@ -139,7 +159,10 @@ class SelfHostedOtpAuthProvider extends IAuthProvider {
     if (session.attempts >= OTP_MAX_ATTEMPTS) {
       throw this.#lockedError(session, now);
     }
-    if (!(await verifySecret(code, session.codeHash))) {
+    const right = session.gatewayRef
+      ? await this.#sms.check(session.gatewayRef, code)
+      : await verifySecret(code, session.codeHash);
+    if (!right) {
       const updated = await this.#db.incrementOtpAttempts(sessionId);
       if (updated && updated.attempts >= OTP_MAX_ATTEMPTS) {
         throw this.#lockedError(session, now);

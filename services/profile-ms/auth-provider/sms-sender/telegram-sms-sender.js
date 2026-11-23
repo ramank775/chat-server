@@ -8,7 +8,7 @@ const {
 /**
  * Testing only (decision 203): each code goes to the operator's Telegram chat
  * through a bot instead of an SMS, and the operator passes it on. No SIM
- * needed. Launch runs sms-gate-app. Never logs the code.
+ * needed. Launch runs verifynow. Never logs the code.
  * https://core.telegram.org/bots/api#sendmessage
  */
 class TelegramSmsSender extends ISmsSender {

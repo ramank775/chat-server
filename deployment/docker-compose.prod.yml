@@ -49,6 +49,11 @@ services:
       PHONE_PEPPER: ${PHONE_PEPPER:?set PHONE_PEPPER in .env}
       # decision 209: Play builds' push; empty = no push for them
       FCM_SERVICE_ACCOUNT_KEY: ${FCM_SERVICE_ACCOUNT_KEY:-}
+      # decision 268: the launch OTP sender, SMS_SENDER=verifynow
+      VERIFYNOW_CUSTOMER_ID: ${VERIFYNOW_CUSTOMER_ID:-}
+      VERIFYNOW_PASSWORD: ${VERIFYNOW_PASSWORD:-}
+      VERIFYNOW_EMAIL: ${VERIFYNOW_EMAIL:-}
+      VERIFYNOW_COUNTRIES: ${VERIFYNOW_COUNTRIES:-91}
     image: ramank775/chatserver:${CHAT_SERVER_TAG:?set CHAT_SERVER_TAG in .env}
     restart: unless-stopped
     depends_on:
@@ -61,7 +66,7 @@ services:
       --pg-url=postgres://${PG_USER:?set PG_USER in .env}:${PG_PASSWORD:?set PG_PASSWORD in .env}@postgres:5432/chat
       --profile-db=pg --auth-db=pg --channel-db=pg --notification-db=pg
       --media-metadata-db=pg --undelivered-queue=pg
-      --sms-sender=${SMS_SENDER:-sms-gate-app} --sms-gate-url=${SMS_GATE_URL:-https://api.sms-gate.app}
+      --sms-sender=${SMS_SENDER:-verifynow} --sms-gate-url=${SMS_GATE_URL:-https://api.sms-gate.app}
       --sms-gate-user=${SMS_GATE_USER:-} --sms-gate-password=${SMS_GATE_PASSWORD:-}
       --telegram-bot-token=${TELEGRAM_BOT_TOKEN:-} --telegram-chat-id=${TELEGRAM_CHAT_ID:-}
       --pn-service=webpush

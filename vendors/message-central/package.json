@@ -1,0 +1,11 @@
+{
+  "name": "@vendor/message-central",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Message Central VerifyNow OTP API client",
+  "main": "index.js",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

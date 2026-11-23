@@ -23,6 +23,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.592.0",
     "@aws-sdk/s3-request-presigner": "^3.592.0",
+    "@vendor/message-central": "file:vendors/message-central",
     "axios": "^1.7.2",
     "commander": "^11.1.0",
     "fastify": "^5.12.5",

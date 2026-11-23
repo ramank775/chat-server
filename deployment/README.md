@@ -23,9 +23,9 @@ Deploy 3.0 as the monolith.
   certificate on the server. The nginx site file takes the client's
   address from `CF-Connecting-IP`, for the per-IP OTP limits.
 - A Cloudflare R2 bucket and an API token for it.
-- An [sms-gate.app](https://sms-gate.app) account: an Android phone with a SIM
-  running the SMS Gateway app in cloud mode. It sends the OTP texts. For
-  testing without a SIM, see "Testing without a SIM".
+- A [Message Central](https://www.messagecentral.com) VerifyNow account. It
+  sends the OTP texts (see "OTP by VerifyNow"). For testing without it, see
+  "Testing without a SIM".
 - The release image on Docker Hub (see Releasing).
 
 ## First deploy
@@ -94,8 +94,26 @@ texted, and the server never logs codes.
 4. `docker compose -f docker-compose.prod.yml up -d`. Each sign-in now posts
    `+91…: 123456` to that chat.
 
-Before launch set `SMS_SENDER=sms-gate-app` with the `SMS_GATE_*` values
+Before launch set `SMS_SENDER=verifynow` with the `VERIFYNOW_*` values
 and run `up -d` again.
+
+## OTP by VerifyNow
+
+`SMS_SENDER=verifynow` (decision 268) has Message Central's VerifyNow text
+the codes from its own approved sender (UTOMOB in India), so we need no DLT
+registration. VerifyNow makes and checks each code; the server keeps its
+reference, and our SMS budgets, 5-try lockout and 10-minute session still
+apply. Resend texts a new code after 60 seconds.
+
+1. Sign up at console.messagecentral.com; note the customer id (`C-…`).
+2. In `.env`: `SMS_SENDER=verifynow`, `VERIFYNOW_CUSTOMER_ID`,
+   `VERIFYNOW_PASSWORD` (the account password) and `VERIFYNOW_EMAIL`.
+3. `VERIFYNOW_COUNTRIES` lists the calling codes it texts (default `91`).
+   Others get `SMS_GATEWAY_ERROR`. Add a country only after checking its
+   rate on VerifyNow's pricing page: some cost ₹20–40 a code, and those
+   routes are where SMS-pumping fraud runs.
+4. `docker compose -f docker-compose.prod.yml up -d`, then sign in with
+   your own number and check the text arrives.
 
 ## Upgrading
 
@@ -159,7 +177,7 @@ it within 30 days of the email:
 1. The email must give the @username and the phone number with its
    country code.
 2. Text a 6-digit code (`shuf -i 100000-999999 -n 1`) to that number from
-   the sms-gate phone's messaging app.
+   your own phone's messaging app.
 3. Go on only when the reply carries that code. Someone who no longer has
    the number must get it back from their carrier first.
 4. Run this with the number and username from the email (`null`, unquoted,

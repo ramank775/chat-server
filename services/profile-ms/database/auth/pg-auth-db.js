@@ -20,6 +20,7 @@ const OTP_FIELDS = [
   'userId',
   'codeHash',
   'encryptedCode',
+  'gatewayRef',
   'attempts',
   'consumed',
   'resendAfter',
@@ -65,6 +66,8 @@ const SCHEMA = `
   ALTER TABLE otp_sessions DROP COLUMN IF EXISTS phone;
   DELETE FROM otp_sessions WHERE phone_key IS NULL;
   CREATE INDEX IF NOT EXISTS otp_sessions_phone_key_device ON otp_sessions (phone_key, device_id);
+  -- decision 268: the sending gateway's reference when it owns the code
+  ALTER TABLE otp_sessions ADD COLUMN IF NOT EXISTS gateway_ref text;
   CREATE TABLE IF NOT EXISTS sessions (
     user_id text,
     device_id text,

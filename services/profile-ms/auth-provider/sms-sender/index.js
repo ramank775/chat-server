@@ -2,8 +2,9 @@ const { ISmsSender, SmsGatewayError, SmsGatewayUnavailableError } = require('./s
 const mock = require('./mock-sms-sender');
 const smsGateApp = require('./sms-gate-app-sms-sender');
 const telegram = require('./telegram-sms-sender');
+const verifynow = require('./verifynow-sms-sender');
 
-const SMS_SENDER_IMPL = [mock, smsGateApp, telegram];
+const SMS_SENDER_IMPL = [mock, smsGateApp, telegram, verifynow];
 
 /**
  * Add command line options for sms sender
@@ -11,7 +12,7 @@ const SMS_SENDER_IMPL = [mock, smsGateApp, telegram];
  * @returns {import('commander').Command}
  */
 function addOptions(cmd) {
-  cmd = cmd.option('--sms-sender <sms-sender>', 'Which sms sender to use (mock, sms-gate-app, telegram)', 'mock');
+  cmd = cmd.option('--sms-sender <sms-sender>', 'Which sms sender to use (mock, sms-gate-app, telegram, verifynow)', 'mock');
   SMS_SENDER_IMPL.forEach((impl) => {
     cmd = impl.addOptions(cmd);
   });
